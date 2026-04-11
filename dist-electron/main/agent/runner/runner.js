@@ -223,7 +223,7 @@ class AgentRunner {
                     pendingToolCalls: [],
                     finalResponse: '',
                     toolCallHistory: [],
-                }, { recursionLimit: 100 });
+                }, { configurable: { thread_id: convId }, recursionLimit: 100 });
             }
             catch (err) {
                 console.error('[AgentRunner] Graph Error:', err);

@@ -42,15 +42,13 @@ const call_model_1 = require("./nodes/call_model");
 const execute_tools_1 = require("./nodes/execute_tools");
 const utils_1 = require("./utils");
 const crypto = __importStar(require("crypto"));
+// Use a shared memory saver for proper state persistence across interrupts and iterations
+const memorySaver = new langgraph_1.MemorySaver();
 const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, detectedSkills, needsVision = false) => {
     const config = runner.config;
     const should_continue = (state) => {
         if (state.pauseGeneration) {
             runner.telemetry.warn('Session paused by internal request.');
-            return langgraph_1.END;
-        }
-        if (state.needsHumanApproval) {
-            runner.telemetry.warn('Human interaction required for state transition.');
             return langgraph_1.END;
         }
         if (state.iterations >= config.maxIterations) {
@@ -128,6 +126,6 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, detecte
         [langgraph_1.END]: langgraph_1.END,
     })
         .addEdge('execute_tools', 'call_model')
-        .compile();
+        .compile({ checkpointer: memorySaver });
 };
 exports.buildGraph = buildGraph;
