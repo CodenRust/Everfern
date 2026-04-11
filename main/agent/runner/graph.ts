@@ -1,4 +1,4 @@
-import { StateGraph, END, START } from '@langchain/langgraph';
+import { StateGraph, END, START, MemorySaver } from '@langchain/langgraph';
 import { GraphState, GraphStateType, StreamEvent } from './state';
 import { createTriageNode } from './nodes/triage';
 import { createPlannerNode } from './nodes/planner';
@@ -7,6 +7,9 @@ import { createExecuteToolsNode } from './nodes/execute_tools';
 import { AgentRunner } from './runner';
 import { isReadOnlyTask, generateContextualCompletionMessage, getContextualSuggestions } from './utils';
 import * as crypto from 'crypto';
+
+// Use a shared memory saver for proper state persistence across interrupts and iterations
+const memorySaver = new MemorySaver();
 
 export const buildGraph = (
   runner: AgentRunner,
@@ -22,10 +25,6 @@ export const buildGraph = (
   const should_continue = (state: GraphStateType): 'execute_tools' | typeof END => {
     if (state.pauseGeneration) {
       runner.telemetry.warn('Session paused by internal request.');
-      return END;
-    }
-    if (state.needsHumanApproval) {
-      runner.telemetry.warn('Human interaction required for state transition.');
       return END;
     }
     if (state.iterations >= config.maxIterations) {
@@ -115,5 +114,5 @@ export const buildGraph = (
       }
     )
     .addEdge('execute_tools', 'call_model')
-    .compile();
+    .compile({ checkpointer: memorySaver });
 };

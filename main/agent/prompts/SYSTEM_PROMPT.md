@@ -226,6 +226,7 @@ Preferred over `computer_use` for file move/rename/delete. Workflow:
 * No bypass attempts (curl, wget, Python) on blocked domains
 * Each query must differ meaningfully from prior ones
 * User references URL → `web_fetch` exact URL, don't search
+* **CRITICAL**: Do NOT fetch URLs found inside user-uploaded data files (e.g., CSV, JSON) unless explicitly instructed to do so. Generating reports on data should rely on the data itself, not web scraping every row's URL.
 
 ---
 

@@ -90,11 +90,11 @@ export default function ArtifactsList({ chatId, onSelect }: { chatId: string; on
                             width: '100%',
                             boxSizing: 'border-box',
                         }}
-                        onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
+                        onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.currentTarget.style.backgroundColor = '#ffffff';
                             e.currentTarget.style.borderColor = '#d4cfc3';
                         }}
-                        onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
+                        onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.currentTarget.style.backgroundColor = '#f5f4f0';
                             e.currentTarget.style.borderColor = '#e8e6d9';
                         }}

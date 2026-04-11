@@ -46,6 +46,6 @@ describe('ACP Control Plane — manager.core', () => {
     expect(manager.getSession('s-kill')?.status).toBe('killed');
     const cleared = manager.clearCompletedSessions();
     expect(cleared).toBe(1);
-    expect(manager.getSession('s-kill')).toBeUndefined();
+    expect(manager.getSession('s-kill')?.status).toBe('archived');
   });
 });

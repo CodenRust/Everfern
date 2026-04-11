@@ -113,10 +113,11 @@ export function analyzeTask(userInput: string): TaskAnalysis {
         canParallelize && uniqueActions > 3 ? 'hybrid' :
         canParallelize ? 'parallel' : 'sequential';
 
-    // Feature flags
-    const requiresExternalData  = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(text);
-    const requiresFileOps       = /\b(file|folder|directory|path|write|read|create|edit|save|csv|xlsx|pdf|docx)\b/i.test(text);
-    const requiresCommandExecution = /\b(run|execute|install|pip|npm|python|node|bash|shell|command|compile|build)\b/i.test(text);
+    // Feature flags (calculated on non-data lines to avoid false positives from pasted CSV/JSON data)
+    const nonDataText = text.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
+    const requiresExternalData  = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(nonDataText);
+    const requiresFileOps       = /\b(file|folder|directory|path|write|read|create|edit|save|csv|xlsx|pdf|docx)\b/i.test(nonDataText);
+    const requiresCommandExecution = /\b(run|execute|install|pip|npm|python|node|bash|shell|command|compile|build)\b/i.test(nonDataText);
 
     return {
         complexity,
@@ -164,10 +165,11 @@ export function decomposeTask(
         agentPrompt,
     });
 
-    // Extract concrete targets from user text
-    const urls      = (userInput.match(/https?:\/\/[^\s]+/g) || []);
-    const filePaths = (userInput.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
-    const topics    = (userInput.match(/"([^"]+)"|'([^']+)'/g) || []).map(s => s.replace(/['"]/g, ''));
+    // Extract concrete targets from user text, but ignore lines that look like CSV data (>= 2 commas)
+    const nonDataLines = userInput.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
+    const urls      = (nonDataLines.match(/https?:\/\/[^\s"',]+/g) || []);
+    const filePaths = (nonDataLines.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
+    const topics    = (nonDataLines.match(/"([^"]+)"|'([^']+)'/g) || []).map(s => s.replace(/['"]/g, ''));
 
     // ── Phase 0: Skill reading ────────────────────────────────────────────
     if (['analyze', 'coding', 'build'].includes(analysis.taskType)) {
@@ -216,11 +218,8 @@ export function decomposeTask(
 
     switch (analysis.taskType) {
         case 'analyze':
-            steps.push(mk('Write data analysis script',  'write',       execDeps,                               false, 'medium'));
-            steps.push(mk('Execute analysis script',      'run_command', [`step_${stepId - 1}`],                false, 'high'));
-            steps.push(mk('Spawn sub-agent for UI design', 'spawn_agent', [`step_${stepId - 1}`],               false, 'medium', 'normal', undefined,
-                'Design and implement a high-fidelity, interactive HTML dashboard using the frontend-design skill to visualize the analysis results computed in the previous step. Use Tailwind CSS and Chart.js.'));
-            steps.push(mk('Verify and finalize report',   'run_command', [`step_${stepId - 1}`],                false, 'low'));
+            steps.push(mk('Write data analysis/visualization HTML artifact', 'write', execDeps, false, 'high'));
+            steps.push(mk('Verify artifact rendering', 'run_command', [`step_${stepId - 1}`], false, 'low'));
             break;
 
         case 'build':

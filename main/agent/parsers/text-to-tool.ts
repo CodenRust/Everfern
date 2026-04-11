@@ -29,9 +29,10 @@ function normalizeToolName(toolName: string): string {
 export function parseTextToToolCalls(
   textContent: string,
   definedTools: AgentTool[]
-): { toolCalls: ToolCall[]; scrubbedContent: string } {
+): { toolCalls: ToolCall[]; scrubbedContent: string; parseError?: string } {
   const toolCalls: ToolCall[] = [];
   let scrubbedContent = textContent;
+  let parseErrorStr: string | undefined;
 
   console.log(`[TextToTool] 🔍 Starting parser with ${textContent.length} chars, ${definedTools.length} defined tools`);
   console.log(`[TextToTool] 📋 Defined tools: ${definedTools.map(t => t.name).join(', ')}`);
@@ -536,8 +537,8 @@ export function parseTextToToolCalls(
   if (toolCalls.length > 1) {
     console.log(`[TextToTool] 🔀 Limiting ${toolCalls.length} tool calls to first one only (ReAct pattern)`);
     const firstCall = toolCalls[0];
-    return { toolCalls: [firstCall], scrubbedContent };
+    return { toolCalls: [firstCall], scrubbedContent, parseError: parseErrorStr };
   }
 
-  return { toolCalls, scrubbedContent };
+  return { toolCalls, scrubbedContent, parseError: parseErrorStr };
 }

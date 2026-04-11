@@ -107,7 +107,7 @@ const pageVariants = {
     center: { opacity: 1, y: 0, scale: 1 },
     exit: { opacity: 0, y: -8, scale: 0.99 },
 };
-const pageTransition = { duration: 0.22, ease: [0.25, 0.1, 0.25, 1] };
+const pageTransition: any = { duration: 0.22, ease: [0.25, 0.1, 0.25, 1] };
 
 // Reusable back button
 const BackButton = ({ onClick }: { onClick: () => void }) => (
