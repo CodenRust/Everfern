@@ -5,11 +5,9 @@
 
 @import "tailwindcss";
 
-@import "../../node_modules/tw-animate-css/dist/tw-animate.css";
-
-@import "../../node_modules/shadcn/dist/tailwind.css";
-
-@import "../../node_modules/tw-shimmer/src/index.css";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "tw-shimmer";
 
 @custom-variant dark (&:is(.dark *));
 
