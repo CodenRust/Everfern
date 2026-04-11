@@ -726,8 +726,23 @@ ipcMain.handle('acp:chat', async (_event, request: {
   conversationId?: string;
 }) => {
   let client = acpManager.getClient();
-  if (request.providerType === 'ollama' || request.providerType === 'lmstudio') {
-    client = new AIClient({ provider: request.providerType as any });
+  const config = loadConfigSync();
+  // Dynamic provider resolution: if the frontend specifies a providerType that differs
+  // from the statically-configured provider, create a fresh AIClient with the correct
+  // API key loaded from ~/.everfern/keys/<provider>.key
+  if (request.providerType) {
+    const currentProvider = acpManager.getActiveConfig()?.provider;
+    if (request.providerType !== currentProvider || !client) {
+      const apiKey = config?.keys?.[request.providerType] || '';
+      client = new AIClient({
+        provider: request.providerType as any,
+        model: request.model,
+        apiKey,
+      });
+      console.log(`[acp:chat] Dynamic provider switch: ${currentProvider} → ${request.providerType}`);
+    } else if (request.model) {
+      client.setModel(request.model);
+    }
   }
 
   if (!client) {
@@ -737,10 +752,9 @@ ipcMain.handle('acp:chat', async (_event, request: {
   let sessionPermissionGranted = false;
   (globalThis as any).__everfernSystemFilesPermissionGranted = false;
 
-  const config = loadConfigSync();
   const runnerConfig = {
     showuiUrl: config?.showuiUrl || 'http://127.0.0.1:7860',
-    ollamaBaseUrl: config?.provider === 'ollama' ? config?.baseUrl || 'http://localhost:11434' : undefined,
+    ollamaBaseUrl: (request.providerType === 'ollama' || config?.provider === 'ollama') ? config?.baseUrl || 'http://localhost:11434' : undefined,
     requestPermission: (): Promise<boolean> => {
       return new Promise((resolve) => {
         agentPermissionResolver = (granted: boolean) => {
@@ -859,21 +873,33 @@ ipcMain.handle('acp:stream', async (event, request: {
   streamAborted = false; // RESET STOP STATE FOR NEW MISSION
 
   let client = acpManager.getClient();
-  if (request.providerType === 'ollama' || request.providerType === 'lmstudio') {
-    client = new AIClient({ provider: request.providerType as any });
+  const config = loadConfigSync();
+  // Dynamic provider resolution: same logic as acp:chat
+  if (request.providerType) {
+    const currentProvider = acpManager.getActiveConfig()?.provider;
+    if (request.providerType !== currentProvider || !client) {
+      const apiKey = config?.keys?.[request.providerType] || '';
+      client = new AIClient({
+        provider: request.providerType as any,
+        model: request.model,
+        apiKey,
+      });
+      console.log(`[acp:stream] Dynamic provider switch: ${currentProvider} → ${request.providerType}`);
+    } else if (request.model) {
+      client.setModel(request.model);
+    }
   }
 
   if (!client) {
     return { error: 'No AI provider configured.' };
   }
 
-  const config = loadConfigSync();
   let sessionPermissionGranted = false;
   (globalThis as any).__everfernSystemFilesPermissionGranted = false;
 
   const runnerConfig = {
     showuiUrl: config?.showuiUrl || 'http://127.0.0.1:7860',
-    ollamaBaseUrl: config?.provider === 'ollama' ? config?.baseUrl || 'http://localhost:11434' : undefined,
+    ollamaBaseUrl: (request.providerType === 'ollama' || config?.provider === 'ollama') ? config?.baseUrl || 'http://localhost:11434' : undefined,
     requestPermission: (): Promise<boolean> => {
       return new Promise((resolve) => {
         agentPermissionResolver = (granted: boolean) => {
@@ -1065,6 +1091,8 @@ ipcMain.handle('acp:stream', async (event, request: {
           completionTokens: streamEvent.completionTokens,
           totalTokens: streamEvent.totalTokens,
         });
+      } else if (streamEvent.type === 'surface_action') {
+        safeSend('acp:surface-action', streamEvent.data);
       }
     }
     (globalThis as any).__everfernSystemFilesPermissionGranted = false;

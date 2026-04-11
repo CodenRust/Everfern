@@ -233,4 +233,6 @@ export type StreamEvent =
   | { type: 'subagent_spawned'; agentId: string; task: string }
   | { type: 'subagent_completed'; agentId: string; success: boolean }
   | { type: 'loop_detected'; toolName: string; level: string; message: string }
-  | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number };
+  | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number }
+  // ── A2UI (Agent to User Interface) Events ────────────────────────────
+  | { type: 'surface_action'; action: 'create' | 'update' | 'delete'; surfaceId: string; catalogId?: string; components?: any[]; data?: any };

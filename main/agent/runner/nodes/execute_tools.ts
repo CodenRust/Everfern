@@ -43,6 +43,33 @@ export const createExecuteToolsNode = (
 
     const parallelGroups = groupParallelTools(analysis);
 
+    // [A2UI] Emit a progress surface if we have multiple operations
+    if (calls.length > 1) {
+      eventQueue?.push({
+        type: 'surface_action',
+        action: 'create',
+        surfaceId: 'mission-progress',
+        components: [
+          {
+            id: 'progress-bar',
+            type: 'progress',
+            props: {
+              label: 'Mission Execution',
+              value: 0
+            }
+          },
+          {
+            id: 'status-card',
+            type: 'card',
+            props: {
+              title: 'Executing Sequence',
+              description: `Running ${calls.length} operations across ${parallelGroups.length} stages.`
+            }
+          }
+        ]
+      });
+    }
+
     for (let g = 0; g < parallelGroups.length; g++) {
       const group = parallelGroups[g];
       runner.telemetry.info(`Executing group ${g + 1}/${parallelGroups.length} (${group.length} concurrent operations)`);
@@ -263,6 +290,14 @@ export const createExecuteToolsNode = (
                 });
             }
         }
+    }
+
+    if (calls.length > 1) {
+      eventQueue?.push({
+        type: 'surface_action',
+        action: 'delete',
+        surfaceId: 'mission-progress'
+      });
     }
 
     return {

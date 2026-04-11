@@ -43,15 +43,17 @@ import Sidebar from "../components/Sidebar";
 import PermissionDialog from "../components/PermissionDialog";
 import ArtifactsPanel, { SyntaxHighlighter } from './ArtifactsPanel';
 import ArtifactsList from './ArtifactsList';
+import PlanViewerPanel from './PlanViewerPanel';
+
 import SitePreview from './SitePreview';
 import SettingsPage from './SettingsPage';
 import DirectoryModal from '../components/DirectoryModal';
 import FileArtifact from './FileArtifact';
 import VoiceAssistantUI from './VoiceAssistantUI';
-import PlanViewerPanel from './PlanViewerPanel';
-import { ToolGroupRoot, ToolGroupTrigger, ToolGroupContent } from '@/components/tool-group';
-import { ReasoningRoot, ReasoningTrigger, ReasoningContent, ReasoningText } from '@/components/reasoning';
 import { DiffViewer } from '@/components/diff-viewer';
+import { SurfaceCanvas } from './SurfaceCanvas';
+import type { SurfaceData } from './SurfaceCanvas';
+
 
 // ── Provider Logos ──────────────────────────────────────────────────────────
 
@@ -2016,6 +2018,8 @@ export default function ChatPage() {
     const [lastEventJson, setLastEventJson] = useState<string>("");
     const [lastEventType, setLastEventType] = useState<string>("");
     const [contextTokens, setContextTokens] = useState<{ used: number; max: number }>({ used: 0, max: 128000 });
+    const [activeSurface, setActiveSurface] = useState<SurfaceData | null>(null);
+
 
     const liveToolCallsRef = useRef<ToolCallDisplay[]>([]);
     const streamingContentRef = useRef("");
@@ -2364,6 +2368,13 @@ export default function ChatPage() {
             });
             acpApi.onThought(({ content }: { content: string }) => { streamingThoughtRef.current += content; setStreamingThought(streamingThoughtRef.current); });
             acpApi.onUsage(({ totalTokens }: { promptTokens: number; completionTokens: number; totalTokens: number }) => { hasReceivedUsageData.current = true; setContextTokens({ used: totalTokens, max: 128000 }); });
+            acpApi.onSurfaceAction((data: any) => {
+                if (data.action === 'create' || data.action === 'update') {
+                    setActiveSurface({ surfaceId: data.surfaceId, catalogId: data.catalogId, components: data.components });
+                } else if (data.action === 'delete') {
+                    setActiveSurface(null);
+                }
+            });
 
             acpApi.onStreamChunk(({ delta, done }: { delta: string; done: boolean }) => {
                 if (isMessageCommittedRef.current) return;
@@ -2501,6 +2512,14 @@ export default function ChatPage() {
                     liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                     setLiveToolCalls(liveToolCallsRef.current);
                 });
+                api.onSurfaceAction((data: any) => {
+                    if (data.action === 'create' || data.action === 'update') {
+                        setActiveSurface({ surfaceId: data.surfaceId, catalogId: data.catalogId, components: data.components });
+                    } else if (data.action === 'delete') {
+                        setActiveSurface(null);
+                    }
+                });
+
 
                 let accumulated = "";
 
@@ -3372,6 +3391,10 @@ export default function ChatPage() {
                                                     thought={streamingThought}
                                                     isLive={true}
                                                 />
+                                                {activeSurface && (
+                                                    <SurfaceCanvas data={activeSurface} />
+                                                )}
+
                                                 {(() => {
                                                     const { cleanContent, artifacts } = extractFileArtifacts(streamingContent || '');
                                                     return (
