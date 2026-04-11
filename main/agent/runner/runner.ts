@@ -214,7 +214,13 @@ export class AgentRunner {
     
     this.telemetry.updateSpinner('Building execution graph...');
     const eventQueue: StreamEvent[] = [];
-    const graph = buildGraph(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, [], this.shouldCaptureScreenshot(userInput));
+    const graph = buildGraph(
+      this, 
+      this._buildToolDefinitions(), 
+      this.tools,
+      eventQueue,
+      convId
+    );
 
     this.telemetry.updateSpinner('Invoking agent node pipeline...');
 

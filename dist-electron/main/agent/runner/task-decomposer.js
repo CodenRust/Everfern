@@ -111,7 +111,7 @@ function decomposeTask(userInput, availableTools) {
     const mk = (desc, tool, dependsOn, canParallelize, complexity, priority = 'normal', parallelGroup, agentPrompt) => ({
         id: `step_${stepId++}`,
         description: desc,
-        tool,
+        tool: tool || 'internal',
         dependsOn,
         canParallelize,
         estimatedComplexity: complexity,
@@ -232,16 +232,16 @@ function decomposeTask(userInput, availableTools) {
  */
 function generatePlanText(decomposed) {
     const lines = [];
-    const duration = decomposed.estimatedDurationMs < 60_000
-        ? `~${Math.round(decomposed.estimatedDurationMs / 1000)}s`
-        : `~${Math.round(decomposed.estimatedDurationMs / 60_000)}m`;
+    const duration = (decomposed.estimatedDurationMs || 0) < 60_000
+        ? `~${Math.round((decomposed.estimatedDurationMs || 0) / 1000)}s`
+        : `~${Math.round((decomposed.estimatedDurationMs || 0) / 60_000)}m`;
     lines.push(`# Execution Plan: ${decomposed.title}`);
     lines.push('');
     lines.push(`| Property | Value |`);
     lines.push(`|----------|-------|`);
     lines.push(`| Strategy | ${decomposed.executionMode.charAt(0).toUpperCase() + decomposed.executionMode.slice(1)} Execution |`);
     lines.push(`| Steps | ${decomposed.totalSteps} |`);
-    if (decomposed.estimatedParallelGroups > 0) {
+    if ((decomposed.estimatedParallelGroups || 0) > 0) {
         lines.push(`| Parallel Groups | ${decomposed.estimatedParallelGroups} |`);
     }
     lines.push(`| Est. Duration | ${duration} |`);
@@ -269,11 +269,11 @@ function generatePlanText(decomposed) {
         else {
             for (const step of group) {
                 const badge = step.priority === 'critical' ? ' 🔴' : '';
-                const deps = step.dependsOn.length > 0
-                    ? ` → depends: ${step.dependsOn.join(', ')}`
+                const deps = (step.dependsOn || []).length > 0
+                    ? ` → depends: ${(step.dependsOn || []).join(', ')}`
                     : '';
                 lines.push(`### ${step.id}: ${step.description}${badge}`);
-                lines.push(`**Tool:** \`${step.tool || 'none'}\` | **Complexity:** ${step.estimatedComplexity}${deps}`);
+                lines.push(`**Tool:** \`${step.tool || 'none'}\` | **Complexity:** ${step.estimatedComplexity || 'moderate'}${deps}`);
                 lines.push('');
             }
         }

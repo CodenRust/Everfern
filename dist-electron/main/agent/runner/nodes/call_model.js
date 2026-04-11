@@ -35,8 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createCallModelNode = void 0;
 const crypto = __importStar(require("crypto"));
+const messages_1 = require("@langchain/core/messages");
 const ai_client_1 = require("../../../lib/ai-client");
 const text_to_tool_1 = require("../../parsers/text-to-tool");
+const message_utils_1 = require("../services/message-utils");
 const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, maxVerifyRetries = 3) => {
     let verifyIntentRetries = 0;
     return async (state) => {
@@ -47,10 +49,11 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
         let modelUsed = client.model;
         // ── Vision Grounding ───────────────────────────────────────────────────
         const vlm = runner.config.vlm;
+        const lastMsgContent = state.messages[state.messages.length - 1]?.content || '';
         const needsVisionGrounding = iterations === 0 &&
             vlm?.model &&
             vlm?.provider &&
-            runner.shouldCaptureScreenshot(state.messages[state.messages.length - 1]?.content || '');
+            runner.shouldCaptureScreenshot(lastMsgContent);
         if (needsVisionGrounding && vlm) {
             runner.telemetry.info(`🔭 Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
             client = new ai_client_1.AIClient({
@@ -65,21 +68,36 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
         runner.telemetry.metrics(iterations);
         let thoughtBuffer = '';
         let isThinking = false;
-        // Optima: Context Pruning
-        const prunedMessages = state.messages.map((m, idx) => {
-            if (m.role === "user")
-                return m;
-            if (typeof m.content === 'string')
-                return m;
-            const hasImage = m.content.some((c) => c.type === 'image_url');
-            if (!hasImage)
-                return m;
-            const futureImages = state.messages.slice(idx + 1).filter((fm) => Array.isArray(fm.content) && fm.content.some((fc) => fc.type === 'image_url')).length;
-            if (futureImages >= 2) {
-                return {
-                    ...m,
-                    content: m.content.map((c) => c.type === 'image_url' ? { type: 'text', text: '[Screenshot Omitted to Save Tokens]' } : c)
-                };
+        let streamedText = '';
+        // Optima: Context Pruning & Normalization
+        const normalizedMessages = (0, message_utils_1.normalizeMessages)(state.messages);
+        // Dynamic System Prompt Slimming for Conversations
+        const currentIntent = state.currentIntent || 'unknown';
+        const isReadOnly = ['conversation', 'question'].includes(currentIntent);
+        if (isReadOnly && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
+            const originalPrompt = normalizedMessages[0].content;
+            if (originalPrompt.includes('EverFern System Prompt')) {
+                normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant. 
+Keep your responses friendly and direct. 
+The user is engaging in a simple conversation or asking a direct question. 
+You do not need to use complex execution plans or tools for this interaction.`;
+                runner.telemetry.info('Optima: Using slimmed system prompt for read-only intent.');
+            }
+        }
+        const prunedMessages = normalizedMessages.map((m, idx) => {
+            if (m.role === "user") {
+                if (typeof m.content === 'string')
+                    return m;
+                const hasImage = Array.isArray(m.content) && m.content.some((c) => c.type === 'image_url');
+                if (!hasImage)
+                    return m;
+                const futureImages = normalizedMessages.slice(idx + 1).filter((fm) => Array.isArray(fm.content) && fm.content.some((fc) => fc.type === 'image_url')).length;
+                if (futureImages >= 2) {
+                    return {
+                        ...m,
+                        content: m.content.map((c) => c.type === 'image_url' ? { type: 'text', text: '[Screenshot Omitted to Save Tokens]' } : c)
+                    };
+                }
             }
             return m;
         });
@@ -93,17 +111,25 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
                 if (!isThinking && hasStart) {
                     isThinking = true;
                     const tag = thoughtBuffer.includes('<think>') ? '<think>' : '<thought>';
-                    const content = thoughtBuffer.split(tag)[1];
-                    if (content)
-                        eventQueue?.push({ type: 'thought', content });
+                    const parts = thoughtBuffer.split(tag);
+                    if (parts[0]) {
+                        eventQueue?.push({ type: 'chunk', content: parts[0] });
+                        streamedText += parts[0];
+                    }
+                    if (parts[1])
+                        eventQueue?.push({ type: 'thought', content: parts[1] });
                     thoughtBuffer = '';
                 }
                 else if (isThinking && hasEnd) {
                     isThinking = false;
                     const tag = thoughtBuffer.includes('</think>') ? '</think>' : '</thought>';
-                    const contentBeforeEnd = thoughtBuffer.split(tag)[0];
-                    if (contentBeforeEnd)
-                        eventQueue?.push({ type: 'thought', content: contentBeforeEnd });
+                    const parts = thoughtBuffer.split(tag);
+                    if (parts[0])
+                        eventQueue?.push({ type: 'thought', content: parts[0] });
+                    if (parts[1]) {
+                        eventQueue?.push({ type: 'chunk', content: parts[1] });
+                        streamedText += parts[1];
+                    }
                     thoughtBuffer = '';
                 }
                 else if (isThinking) {
@@ -111,8 +137,18 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
                     thoughtBuffer = '';
                 }
                 else {
-                    if (!thoughtBuffer.trim().startsWith('{') && !thoughtBuffer.trim().startsWith('```')) {
-                        eventQueue?.push({ type: 'thought', content: chunk });
+                    const trimmed = thoughtBuffer.trim();
+                    if (trimmed.startsWith('{') || trimmed.startsWith('<')) {
+                        if (thoughtBuffer.length > 20) {
+                            eventQueue?.push({ type: 'chunk', content: thoughtBuffer });
+                            streamedText += thoughtBuffer;
+                            thoughtBuffer = '';
+                        }
+                    }
+                    else {
+                        eventQueue?.push({ type: 'chunk', content: thoughtBuffer });
+                        streamedText += thoughtBuffer;
+                        thoughtBuffer = '';
                     }
                 }
             },
@@ -144,8 +180,7 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             }
             else {
                 const lowerScrubbed = textContent.toLowerCase();
-                const currentIntent = state.currentIntent || 'unknown';
-                const actionIntents = ['coding', 'task'];
+                const actionIntents = ['coding', 'task', 'build', 'fix', 'automate'];
                 const isActionIntent = actionIntents.includes(currentIntent);
                 const narratingAction = /i('ll| will| have| am)? (going to |about to |now )?(create|write|run|execute|build|make|generate|update|edit|fix|check|analyze|process)/i.test(textContent) ||
                     /proceeding (to|with)/i.test(textContent) ||
@@ -153,8 +188,6 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
                     /next,? (i|we)('ll| will)?/i.test(textContent) ||
                     /now (i|we)('ll| will)?/i.test(textContent) ||
                     textContent.includes('[ TASK:');
-                const hasMeaningfulContent = textContent.length > 50 && !lowerScrubbed.includes('i will now');
-                // IF parser encountered an explicit error OR model hallucinates action without tool call
                 const shouldNudge = parserResult.parseError || (isActionIntent && narratingAction && !textContent.includes('SYSTEM REMINDER:'));
                 if (shouldNudge && verifyIntentRetries < maxVerifyRetries) {
                     verifyIntentRetries++;
@@ -206,11 +239,9 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             }
             else {
                 return {
-                    messages: [{
-                            role: 'assistant',
+                    messages: [new messages_1.AIMessage({
                             content: 'I apologize, but I encountered an issue processing your request. The model did not respond properly. Please try again.',
-                            tool_calls: undefined
-                        }],
+                        })],
                     pendingToolCalls: [],
                     iterations,
                     finalResponse: 'Error: Model returned empty response multiple times.'
@@ -222,7 +253,8 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             content: scrubbed,
             tool_calls: response.toolCalls,
         };
-        if (response.finishReason !== 'tool_calls' && scrubbed) {
+        // ONLY push scrubbed content if nothing was streamed (prevents duplicates)
+        if (response.finishReason !== 'tool_calls' && scrubbed && !streamedText) {
             eventQueue?.push({ type: 'chunk', content: scrubbed });
         }
         return {

@@ -46,6 +46,8 @@ const INTENT_SIGNALS: Record<IntentType, string[]> = {
   ]
 };
 
+import { normalizeMessages } from './services/message-utils';
+
 /**
  * Classify user intent using AI (Primary AGI Method)
  */
@@ -54,7 +56,8 @@ export async function classifyIntentAI(
   userInput: string, 
   history: any[] = []
 ): Promise<IntentClassification> {
-  const lastMessages = history.slice(-3).map(m => `[${m.role.toUpperCase()}]: ${typeof m.content === 'string' ? m.content : 'Complex Content'}`).join('\n');
+  const normalizedHistory = normalizeMessages(history);
+  const lastMessages = normalizedHistory.slice(-3).map(m => `[${m.role.toUpperCase()}]: ${typeof m.content === 'string' ? m.content : 'Complex Content'}`).join('\n');
   
   const prompt = `You are the EverFern Triage Agent. Your job is to classify the user's input into the most appropriate category.
 

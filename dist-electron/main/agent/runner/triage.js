@@ -47,11 +47,13 @@ const INTENT_SIGNALS = {
         'watch', 'trigger', 'on change', 'background'
     ]
 };
+const message_utils_1 = require("./services/message-utils");
 /**
  * Classify user intent using AI (Primary AGI Method)
  */
 async function classifyIntentAI(client, userInput, history = []) {
-    const lastMessages = history.slice(-3).map(m => `[${m.role.toUpperCase()}]: ${typeof m.content === 'string' ? m.content : 'Complex Content'}`).join('\n');
+    const normalizedHistory = (0, message_utils_1.normalizeMessages)(history);
+    const lastMessages = normalizedHistory.slice(-3).map(m => `[${m.role.toUpperCase()}]: ${typeof m.content === 'string' ? m.content : 'Complex Content'}`).join('\n');
     const prompt = `You are the EverFern Triage Agent. Your job is to classify the user's input into the most appropriate category.
 
 CATEGORIES:

@@ -50,7 +50,7 @@ describe('Modern LangGraph HITL Architecture', () => {
   it('should pause execution at interrupt() and resume with user feedback using Command', async () => {
     const threadId = 'test-hitl-thread-' + Date.now();
     const graph = buildGraph(mockRunner, [], [], [], 'test-conv-id', [], false);
-    const threadConfig = { configurable: { thread_id: threadId }, recursionLimit: 50 };
+    const threadConfig = { configurable: { thread_id: threadId }, recursionLimit: 100 };
 
     const initialState = {
       messages: [{ role: 'user', content: 'create a report' }],
@@ -71,7 +71,7 @@ describe('Modern LangGraph HITL Architecture', () => {
     
     // Check internal state via thread config
     const stateSnapshot = await graph.getState(threadConfig);
-    expect(stateSnapshot.next).toContain('planner');
+    expect(stateSnapshot.next).toContain('global_planner');
 
     // 2. Resume run: pass feedback using Command({ resume })
     const resumeCommand = new Command({ resume: "Yes, I approve this plan!" });

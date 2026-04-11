@@ -207,7 +207,7 @@ class AgentRunner {
         const { messages: initialMessages } = (0, system_prompt_1.buildSystemMessages)(history, userInput, platform, conversationId, []);
         this.telemetry.updateSpinner('Building execution graph...');
         const eventQueue = [];
-        const graph = (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, [], this.shouldCaptureScreenshot(userInput));
+        const graph = (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId);
         this.telemetry.updateSpinner('Invoking agent node pipeline...');
         let graphDone = false;
         (async () => {

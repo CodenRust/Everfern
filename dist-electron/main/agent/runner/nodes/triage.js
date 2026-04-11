@@ -7,7 +7,10 @@ const createTriageNode = (runner, eventQueue) => {
         runner.telemetry.transition('triage');
         runner.telemetry.info('Analyzing user intent and decomposing task requirements...');
         eventQueue?.push({ type: 'thought', content: '🤖 Triage in progress: Analyzing intent and conversation context...' });
-        const lastUserMsg = state.messages.filter(m => m.role === 'user').pop();
+        const lastUserMsg = state.messages.filter(m => {
+            const msg = m;
+            return msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human';
+        }).pop();
         const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : '';
         // Pass entire state.messages for context-aware classification
         const classification = await (0, triage_1.classifyIntent)(content, runner.client, state.messages);
