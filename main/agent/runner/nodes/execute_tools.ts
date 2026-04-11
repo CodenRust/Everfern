@@ -52,9 +52,51 @@ export const createExecuteToolsNode = (
         id: a.id
       }));
 
-      const groupPromises = groupTools.map(async (tc) => {
+      // Pre-execution validation for the group
+      let groupValidationError: string | null = null;
+      const validatedGroup = groupTools.map(tc => {
         const correctedArgs = validateAndCorrectToolArgs(tc.name, tc.args as Record<string, unknown>, os.homedir(), conversationId || 'default');
-        const correctedToolCall = { ...tc, arguments: correctedArgs };
+        
+        // Block unresolved paths / invalid parallel steps
+        const readTools = ['read', 'read_file', 'view_file', 'edit', 'replace'];
+        if (readTools.includes(tc.name) && typeof correctedArgs.path === 'string') {
+          const p = correctedArgs.path as string;
+          if (p.startsWith('http') || p.startsWith('//') || p.startsWith('www.')) {
+            groupValidationError = `Invalid local path for ${tc.name}: "${p}" looks like a URL.`;
+          } else if (!fs.existsSync(p)) {
+            groupValidationError = `Local path does not exist for ${tc.name}: "${p}"`;
+          }
+        }
+        return { ...tc, arguments: correctedArgs };
+      });
+
+      if (groupValidationError) {
+          runner.telemetry.warn(`Group validation failed: ${groupValidationError}`);
+          const failedRecords = groupTools.map(tc => {
+              const record = {
+                toolName: tc.name,
+                args: tc.args as Record<string, unknown>,
+                result: { success: false, output: `Validation failed: ${groupValidationError}`, error: 'validation_error' },
+                timestamp: new Date().toISOString()
+              };
+              eventQueue?.push({ type: 'tool_call', toolCall: record });
+              return record;
+          });
+          newRecords.push(...failedRecords);
+          
+          failedRecords.forEach(r => {
+             newMessages.push({
+                role: 'tool',
+                tool_call_id: (groupTools.find(t => t.name === r.toolName) as any).id,
+                tool_name: r.toolName,
+                content: r.result.output,
+             });
+          });
+          break; // Stop executing further groups
+      }
+
+      const groupPromises = validatedGroup.map(async (tc) => {
+        const correctedToolCall = tc;
 
         runner.telemetry.action(correctedToolCall.name, correctedToolCall.arguments);
         eventQueue?.push({ type: 'tool_start', toolName: correctedToolCall.name, toolArgs: correctedToolCall.arguments as Record<string, unknown> });
@@ -190,10 +232,31 @@ export const createExecuteToolsNode = (
       newRecords.push(...groupResults);
     }
 
+    const nextPendingTools: any[] = [];
+    for (const rec of newRecords) {
+        if ((rec.toolName === 'run_command' || rec.toolName === 'command_status') && rec.result?.success) {
+            const out = typeof rec.result.output === 'string' ? rec.result.output : JSON.stringify(rec.result.output);
+            const lastLines = out.split('\n').slice(-3).join('\n');
+            const hasPrompt = lastLines.includes('> ') || lastLines.includes('$ ') || out.includes('Status: DONE') || out.includes('Exit code:');
+            
+            if (!hasPrompt) {
+                nextPendingTools.push({
+                    id: 'poll_' + Math.random().toString(36).slice(2, 6),
+                    name: 'command_status',
+                    arguments: {
+                        CommandId: rec.toolName === 'command_status' ? (rec.args as any).CommandId : 'agent-terminal',
+                        WaitDurationSeconds: 2,
+                        OutputCharacterCount: 2000
+                    }
+                });
+            }
+        }
+    }
+
     return {
       messages: newMessages,
       toolCallRecords: [...(state.toolCallRecords ?? []), ...newRecords],
-      pendingToolCalls: [],
+      pendingToolCalls: nextPendingTools,
       pauseGeneration: pauseGenFlag,
       userConfirmation: undefined,
       toolCallHistory: [...(state.toolCallHistory ?? [])],

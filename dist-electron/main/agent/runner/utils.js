@@ -50,7 +50,7 @@ function generateContextualVerifyMessage(intent, phase) {
         coding: 'write() → run_command() → verify output',
         build: 'write() files → run_command() to build → verify → present_files()',
         fix: 'view_file() to read error → write()/edit() to fix → run_command() to test',
-        analyze: 'write(discover.py) → run_command(python discover.py) → write(report) → present_files()',
+        analyze: 'write(report.html) using React/papaparse/recharts to visualize the data → present_files()',
         task: 'run_command() or write() — pick the correct tool and EXECUTE NOW',
         research: 'web_search() with your query → web_fetch() for full content → compile answer',
         automate: 'write(script.py) → run_command() to test → schedule or present',
@@ -79,7 +79,7 @@ function generateContextualCompletionMessage(intent) {
         coding: `write() your code → run_command() to execute → verify output → present_files()`,
         build: `write() all required files → run_command() to build/install → verify → present_files()`,
         fix: `view_file() → edit()/write() the fix → run_command() to test → confirm fixed`,
-        analyze: `write(discover.py) → run_command() → write(report.html to {{SITE_PATH}}) → run_command() → present_files()`,
+        analyze: `write(report.html to {{SITE_PATH}}) using React/papaparse/recharts → present_files()`,
         task: `Execute the task with run_command() or write() — then verify completion`,
         research: `web_search() → web_fetch() for top results → compile findings`,
         automate: `write(script) → test with run_command() → schedule or deliver`,
@@ -120,10 +120,10 @@ function getContextualSuggestions(intent, failedTool) {
             `- Try running with --verbose or adding print statements to isolate.`
         ],
         analyze: [
-            `- Run discover.py first to inspect column names — never guess schema.`,
-            `- Check file encoding: use pd.read_csv(..., encoding='utf-8') or 'latin-1'.`,
-            `- Verify the file path exists with run_command("dir <path>").`,
-            `- Start with df.head() and df.info() before any analysis.`
+            `- Read the data file first using view_file or read_file to inspect headers and schema.`,
+            `- Check file encoding or format issues if parsing fails.`,
+            `- Use papaparse or d3.js in your React component for CSV data.`,
+            `- Validate that the output HTML renders correctly in the browser.`
         ],
         task: [
             `- Check command syntax: run a simpler test command first.`,

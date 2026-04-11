@@ -136,7 +136,7 @@ const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast }: {
                     )}
 
                     {hasOutput && (
-                        <motion.span animate={{ rotate: isExpanded ? 180 : 0 }} Transition={{ duration: 0.2 }}>
+                        <motion.span animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
                             <ChevronDownIcon width={12} height={12} className="text-zinc-400" />
                         </motion.span>
                     )}

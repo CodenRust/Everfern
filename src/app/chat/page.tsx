@@ -162,8 +162,8 @@ function extractFileArtifacts(content: string) {
 
 // ── Markdown Renderer ────────────────────────────────────────────────────────
 const MarkdownRenderer = memo(({ content }: { content: string }) => {
-    // Hide raw tool_call tags that the model sometimes leaks into text
-    const cleanedContent = content.replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/gi, '> ⚙️ *Executing internal tool...*');
+    // Hide raw tool_call tags that the model sometimes leaks into text to prevent fake internal tool UI
+    const cleanedContent = content.replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/gi, '');
     const lines = cleanedContent.split('\n');
     const elements: React.ReactNode[] = [];
     let i = 0;

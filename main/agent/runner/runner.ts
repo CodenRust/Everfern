@@ -228,7 +228,7 @@ export class AgentRunner {
           pendingToolCalls: [],
           finalResponse: '',
           toolCallHistory: [],
-        }, { recursionLimit: 100 });
+        }, { configurable: { thread_id: convId }, recursionLimit: 100 });
       } catch (err) {
         console.error('[AgentRunner] Graph Error:', err);
         const errorMsg = err instanceof Error ? err.message : String(err);
