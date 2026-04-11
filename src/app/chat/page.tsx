@@ -2370,25 +2370,29 @@ export default function ChatPage() {
                 } else {
                     acpApi.removeStreamListeners();
                     isMessageCommittedRef.current = true;
-                    setLiveToolCalls(prevTools => {
-                        const finalToolCalls = prevTools.map(t => t.status === 'running' ? { ...t, status: 'done' as const } : t);
-                        const assistantMsg: Message = {
-                            id: crypto.randomUUID(),
-                            role: "assistant",
-                            content: streamingContentRef.current || "Done.",
-                            thought: streamingThoughtRef.current,
-                            timestamp: new Date(),
-                            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined
-                        };
-                        setMessages(prev => {
-                            const final = [...prev, assistantMsg];
-                            saveConversation(final);
-                            return final;
-                        });
-                        setStreamingContent("");
-                        setStreamingThought("");
-                        setIsLoading(false);
-                        return [];
+
+                    const finalContent = streamingContentRef.current || "Done.";
+                    const finalThought = streamingThoughtRef.current;
+                    const finalToolCalls = liveToolCallsRef.current.map(t =>
+                        t.status === 'running' ? { ...t, status: 'done' as const } : t
+                    );
+                    const assistantMsg: Message = {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content: finalContent,
+                        thought: finalThought,
+                        timestamp: new Date(),
+                        toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                    };
+
+                    setStreamingContent("");
+                    setStreamingThought("");
+                    setLiveToolCalls([]);
+                    setIsLoading(false);
+                    setMessages(prev => {
+                        const final = [...prev, assistantMsg];
+                        saveConversation(final);
+                        return final;
                     });
                 }
             });
@@ -2595,29 +2599,47 @@ export default function ChatPage() {
 
                 api.onStreamChunk(({ delta, done }: { delta: string; done: boolean }) => {
                     if (isMessageCommittedRef.current) return;
-                    if (!done) { accumulated += delta; streamingContentRef.current = accumulated; setStreamingContent(accumulated); }
-                    else {
+                    if (!done) {
+                        accumulated += delta;
+                        streamingContentRef.current = accumulated;
+                        setStreamingContent(accumulated);
+                    } else {
                         api.removeStreamListeners();
                         isMessageCommittedRef.current = true;
-                        setLiveToolCalls(prevTools => {
-                            const finalToolCalls = prevTools.map(t => t.status === 'running' ? { ...t, status: 'done' as const } : t);
-                            const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: accumulated || "Done.", thought: streamingThoughtRef.current, timestamp: new Date(), toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined };
-                            setMessages(prev => {
-                                const final = [...prev, assistantMsg];
-                                saveConversation(final);
-                                return final;
-                            });
-                            setStreamingContent("");
-                            setStreamingThought("");
-                            setIsLoading(false);
-                            setIsComputerUseActive(false);
-                            if (voiceOutputEnabled && voiceProvider === "elevenlabs" && voiceElevenlabsKey) handlePlayVoiceResponse(assistantMsg.content);
-                            if (activeConversationId) { checkForPlan(activeConversationId); checkForSites(activeConversationId); }
-                            return [];
+
+                        const finalContent = accumulated || "Done.";
+                        const finalThought = streamingThoughtRef.current;
+                        const finalToolCalls = liveToolCallsRef.current.map(t =>
+                            t.status === 'running' ? { ...t, status: 'done' as const } : t
+                        );
+                        const assistantMsg: Message = {
+                            id: crypto.randomUUID(),
+                            role: "assistant",
+                            content: finalContent,
+                            thought: finalThought,
+                            timestamp: new Date(),
+                            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                        };
+
+                        setStreamingContent("");
+                        setStreamingThought("");
+                        setLiveToolCalls([]);
+                        setIsLoading(false);
+                        setIsComputerUseActive(false);
+                        setMessages(prev => {
+                            const final = [...prev, assistantMsg];
+                            saveConversation(final);
+                            return final;
                         });
+
+                        if (voiceOutputEnabled && voiceProvider === "elevenlabs" && voiceElevenlabsKey)
+                            handlePlayVoiceResponse(assistantMsg.content);
+                        if (activeConversationId) {
+                            checkForPlan(activeConversationId);
+                            checkForSites(activeConversationId);
+                        }
                     }
                 });
-
                 await api.stream({
                     messages: newMessages.map(m => {
                         if (m.attachments && m.attachments.length > 0 && m.role === 'user') {
