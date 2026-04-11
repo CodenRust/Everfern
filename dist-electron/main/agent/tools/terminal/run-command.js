@@ -56,20 +56,21 @@ If the command remains running, this tool returns a CommandId which you MUST use
             let elapsedTime = 0;
             const pollInterval = 200;
             let lastBufferLength = beforeBufferLength;
-            while (elapsedTime < waitMs) {
+            // Let WaitMsBeforeAsync be the minimum, but we can poll up to 60s if we want to ensure completion
+            const maxWait = Math.max(waitMs, 30000);
+            while (elapsedTime < maxWait) {
                 await new Promise((r) => setTimeout(r, pollInterval));
                 elapsedTime += pollInterval;
                 const currentBuffer = registry.getCommand(id)?.outputBuffer || '';
-                if (currentBuffer.length > lastBufferLength) {
-                    // If output is still streaming, wait a bit more (but respect waitMs)
-                    lastBufferLength = currentBuffer.length;
-                    // If the last line looks like a prompt, we might be done early
-                    const lastLines = currentBuffer.split('\n').slice(-3).join('\n');
-                    if (lastLines.includes('> ') || lastLines.includes('$ ')) {
-                        // Heuristic: common prompt indicators
-                        break;
-                    }
+                // If output hasn't changed for a while, or if we see a prompt, we break
+                // Heuristic: common prompt indicators
+                const lastLines = currentBuffer.split('\n').slice(-3).join('\n');
+                if (lastLines.includes('> ') || lastLines.includes('$ ')) {
+                    // Wait an extra tick to capture any final output just in case
+                    await new Promise((r) => setTimeout(r, 200));
+                    break;
                 }
+                lastBufferLength = currentBuffer.length;
             }
             const record = registry.getCommand(id);
             if (!record) {

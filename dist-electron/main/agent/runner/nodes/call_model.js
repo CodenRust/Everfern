@@ -154,15 +154,22 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
                     /now (i|we)('ll| will)?/i.test(textContent) ||
                     textContent.includes('[ TASK:');
                 const hasMeaningfulContent = textContent.length > 50 && !lowerScrubbed.includes('i will now');
-                if (isActionIntent && narratingAction && !hasMeaningfulContent &&
-                    !textContent.includes('SYSTEM REMINDER:') && verifyIntentRetries < maxVerifyRetries) {
+                // IF parser encountered an explicit error OR model hallucinates action without tool call
+                const shouldNudge = parserResult.parseError || (isActionIntent && narratingAction && !textContent.includes('SYSTEM REMINDER:'));
+                if (shouldNudge && verifyIntentRetries < maxVerifyRetries) {
                     verifyIntentRetries++;
-                    const message = `SYSTEM REMINDER: You said you'd "${textContent.substring(0, 50).trim()}..." — DO IT NOW. Call the tool immediately: write, run_command, or edit.`;
+                    let message = `SYSTEM REMINDER: You did not format your tool call correctly or failed to call a tool. If you are completing a task, you MUST use a tool (write, run_command, edit, etc).`;
+                    if (parserResult.parseError) {
+                        message = `SYSTEM REMINDER: Your tool call failed to parse. ${parserResult.parseError}. Please output valid JSON.`;
+                    }
+                    else if (narratingAction) {
+                        message = `SYSTEM REMINDER: You said you'd "${textContent.substring(0, 50).trim()}..." — DO IT NOW. Ensure your tool call is valid JSON or correctly formatted.`;
+                    }
                     state.messages.push({ role: 'system', content: message });
                     response.toolCalls = [{
                             id: 'call_nudge_' + crypto.randomUUID().substring(0, 8),
                             name: 'system_verify_intent',
-                            arguments: { _context: { intent: currentIntent, phase: state.taskPhase } }
+                            arguments: { _context: { intent: currentIntent, phase: state.taskPhase, error: parserResult.parseError } }
                         }];
                     response.finishReason = 'tool_calls';
                 }
