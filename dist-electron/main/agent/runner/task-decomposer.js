@@ -167,10 +167,8 @@ function decomposeTask(userInput, availableTools) {
     const execDeps = steps.filter(s => s.priority === 'critical').map(s => s.id);
     switch (analysis.taskType) {
         case 'analyze':
-            steps.push(mk('Write data analysis script', 'write', execDeps, false, 'medium'));
-            steps.push(mk('Execute analysis script', 'run_command', [`step_${stepId - 1}`], false, 'high'));
-            steps.push(mk('Spawn sub-agent for UI design', 'spawn_agent', [`step_${stepId - 1}`], false, 'medium', 'normal', undefined, 'Design and implement a high-fidelity, interactive HTML dashboard using the frontend-design skill to visualize the analysis results computed in the previous step. Use Tailwind CSS and Chart.js.'));
-            steps.push(mk('Verify and finalize report', 'run_command', [`step_${stepId - 1}`], false, 'low'));
+            steps.push(mk('Write data analysis/visualization HTML artifact', 'write', execDeps, false, 'high'));
+            steps.push(mk('Verify artifact rendering', 'run_command', [`step_${stepId - 1}`], false, 'low'));
             break;
         case 'build':
         case 'coding':
