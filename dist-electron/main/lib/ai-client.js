@@ -25,6 +25,7 @@ const DEFAULT_URLS = {
     lmstudio: 'http://localhost:1234/v1',
     everfern: 'http://localhost:8000/v1',
     nvidia: 'https://integrate.api.nvidia.com/v1',
+    openrouter: 'https://openrouter.ai/api/v1',
 };
 const DEFAULT_MODELS = {
     openai: 'gpt-4o',
@@ -36,6 +37,7 @@ const DEFAULT_MODELS = {
     lmstudio: 'local-model',
     everfern: 'everfern-1',
     nvidia: 'meta/llama-3.1-8b-instruct',
+    openrouter: 'openai/gpt-5.2',
 };
 // ── AIClient ─────────────────────────────────────────────────────────
 class AIClient {
@@ -51,7 +53,7 @@ class AIClient {
             baseUrl: config.baseUrl ?? DEFAULT_URLS[config.provider],
             model: config.model ?? DEFAULT_MODELS[config.provider],
             temperature: config.temperature ?? (config.provider === 'nvidia' ? 0.1 : 0.7),
-            maxTokens: config.maxTokens ?? (config.provider === 'nvidia' ? 16383 : 4096),
+            maxTokens: config.maxTokens ?? (config.provider === 'nvidia' ? 16383 : config.provider === 'openrouter' ? 8192 : 4096),
             vlm: config.vlm,
         };
     }
@@ -147,6 +149,10 @@ class AIClient {
         const h = { 'Content-Type': 'application/json' };
         if (this.config.apiKey)
             h['Authorization'] = `Bearer ${this.config.apiKey}`;
+        if (this.config.provider === 'openrouter') {
+            h['HTTP-Referer'] = 'https://everfern.app';
+            h['X-OpenRouter-Title'] = 'EverFern';
+        }
         return h;
     }
     async _openAICompatChat(req) {
@@ -156,7 +162,7 @@ class AIClient {
             model: req.model ?? this.config.model,
             messages: messages.flatMap(m => {
                 let content = m.content;
-                // Nvidia NIM/OpenAI strict validation: 
+                // Nvidia NIM/OpenAI strict validation:
                 if (this.config.provider === 'nvidia') {
                     // Flatten assistant/system messages as before to prevent format errors
                     if (m.role === 'assistant' || m.role === 'system') {

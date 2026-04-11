@@ -15,7 +15,7 @@ import { DebugEmitter } from './debug';
 
 // ── Types ────────────────────────────────────────────────────────────
 
-export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'ollama-cloud' | 'lmstudio' | 'everfern' | 'gemini' | 'nvidia';
+export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'ollama-cloud' | 'lmstudio' | 'everfern' | 'gemini' | 'nvidia' | 'openrouter';
 
 export interface AIClientConfig {
   provider: ProviderType;
@@ -104,47 +104,49 @@ export interface ToolCall {
 // ── Provider Base URLs ───────────────────────────────────────────────
 
 const DEFAULT_URLS: Record<ProviderType, string> = {
-  openai:    'https://api.openai.com/v1',
+  openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com',
-  deepseek:  'https://api.deepseek.com',
-  gemini:    'https://generativelanguage.googleapis.com/v1beta/openai',
-  ollama:    'http://localhost:11434',
+  deepseek: 'https://api.deepseek.com',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  ollama: 'http://localhost:11434',
   'ollama-cloud': 'https://cloud.ollama.ai/v1',
-  lmstudio:  'http://localhost:1234/v1',
-  everfern:  'http://localhost:8000/v1',
-  nvidia:    'https://integrate.api.nvidia.com/v1',
+  lmstudio: 'http://localhost:1234/v1',
+  everfern: 'http://localhost:8000/v1',
+  nvidia: 'https://integrate.api.nvidia.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
 };
 
 const DEFAULT_MODELS: Record<ProviderType, string> = {
-  openai:    'gpt-4o',
+  openai: 'gpt-4o',
   anthropic: 'claude-3-5-sonnet-20241022',
-  deepseek:  'deepseek-chat',
-  gemini:    'gemini-3.1-pro-preview',
-  ollama:    'llama3',
+  deepseek: 'deepseek-chat',
+  gemini: 'gemini-3.1-pro-preview',
+  ollama: 'llama3',
   'ollama-cloud': 'llama3.3',
-  lmstudio:  'local-model',
-  everfern:  'everfern-1',
-  nvidia:    'meta/llama-3.1-8b-instruct',
+  lmstudio: 'local-model',
+  everfern: 'everfern-1',
+  nvidia: 'meta/llama-3.1-8b-instruct',
+  openrouter: 'openai/gpt-5.2',
 };
 
 // ── AIClient ─────────────────────────────────────────────────────────
 
 export class AIClient {
   private config: Required<Omit<AIClientConfig, 'vlm'>> & { vlm?: AIClientConfig['vlm'] };
-  
+
   constructor(config: AIClientConfig) {
     let finalApiKey = config.apiKey ?? '';
     const match = finalApiKey.match(/(?:nvapi-[A-Za-z0-9_-]+|sk-[A-Za-z0-9T\-]+)/);
     if (match) finalApiKey = match[0];
 
     this.config = {
-      provider:    config.provider,
-      apiKey:      finalApiKey,
-      baseUrl:     config.baseUrl   ?? DEFAULT_URLS[config.provider],
-      model:       config.model     ?? DEFAULT_MODELS[config.provider],
+      provider: config.provider,
+      apiKey: finalApiKey,
+      baseUrl: config.baseUrl ?? DEFAULT_URLS[config.provider],
+      model: config.model ?? DEFAULT_MODELS[config.provider],
       temperature: config.temperature ?? (config.provider === 'nvidia' ? 0.1 : 0.7),
-      maxTokens:   config.maxTokens   ?? (config.provider === 'nvidia' ? 16383 : 4096),
-      vlm:         config.vlm,
+      maxTokens: config.maxTokens ?? (config.provider === 'nvidia' ? 16383 : config.provider === 'openrouter' ? 8192 : 4096),
+      vlm: config.vlm,
     };
   }
 
@@ -169,27 +171,27 @@ export class AIClient {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     switch (this.config.provider) {
       case 'anthropic': return this._anthropicChat(request);
-      case 'ollama':    return this._ollamaChat(request);
+      case 'ollama': return this._ollamaChat(request);
       // All Gemini models (including gemini-2.5-computer-use-preview-10-2025) use
       // the OpenAI-compatible v1beta/openai endpoint. The crosshair grounding loop
       // does not require the proprietary Gemini native `computer_use` tool.
-      default:          return this._openAICompatChat(request);
+      default: return this._openAICompatChat(request);
     }
   }
 
   async *streamChat(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
     switch (this.config.provider) {
       case 'anthropic': yield* this._anthropicStream(request); break;
-      case 'ollama':    yield* this._ollamaStream(request);    break;
-      default:          yield* this._openAICompatStream(request); break;
+      case 'ollama': yield* this._ollamaStream(request); break;
+      default: yield* this._openAICompatStream(request); break;
     }
   }
 
   async listModels(): Promise<string[]> {
     switch (this.config.provider) {
-      case 'ollama':    return this._ollamaListModels();
+      case 'ollama': return this._ollamaListModels();
       case 'anthropic': return this._anthropicListModels();
-      default:          return this._openAICompatListModels();
+      default: return this._openAICompatListModels();
     }
   }
 
@@ -208,32 +210,32 @@ export class AIClient {
     let delay = 2000; // Start with 2s for 429s
 
     for (let i = 0; i <= maxRetries; i++) {
-        try {
-            if (url.includes('nvidia') || i > 0) {
-                console.log(`[AIClient] Fetching: ${url} (Attempt ${i + 1}/${maxRetries + 1})`);
-            }
-            const res = await fetch(url, options);
-            if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-                if (i < maxRetries) {
-                    const jitter = Math.random() * 500;
-                    const waitTime = delay + jitter;
-                    console.warn(`[AIClient] Received ${res.status}. ${res.status === 429 ? 'Rate limit hit — backing off.' : 'Server error.'} Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
-                    await new Promise(r => setTimeout(r, waitTime));
-                    delay *= 2;
-                    continue;
-                }
-            }
-            return res;
-        } catch (err) {
-            lastError = err instanceof Error ? err : new Error(String(err));
-            if (i < maxRetries) {
-                const waitTime = delay;
-                console.warn(`[AIClient] Network error: ${lastError.message}. Retrying in ${waitTime}ms...`);
-                await new Promise(r => setTimeout(r, waitTime));
-                delay *= 2;
-                continue;
-            }
+      try {
+        if (url.includes('nvidia') || i > 0) {
+          console.log(`[AIClient] Fetching: ${url} (Attempt ${i + 1}/${maxRetries + 1})`);
         }
+        const res = await fetch(url, options);
+        if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+          if (i < maxRetries) {
+            const jitter = Math.random() * 500;
+            const waitTime = delay + jitter;
+            console.warn(`[AIClient] Received ${res.status}. ${res.status === 429 ? 'Rate limit hit — backing off.' : 'Server error.'} Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
+            await new Promise(r => setTimeout(r, waitTime));
+            delay *= 2;
+            continue;
+          }
+        }
+        return res;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (i < maxRetries) {
+          const waitTime = delay;
+          console.warn(`[AIClient] Network error: ${lastError.message}. Retrying in ${waitTime}ms...`);
+          await new Promise(r => setTimeout(r, waitTime));
+          delay *= 2;
+          continue;
+        }
+      }
     }
     throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} retries`);
   }
@@ -243,6 +245,10 @@ export class AIClient {
   private get _oaiHeaders(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.config.apiKey) h['Authorization'] = `Bearer ${this.config.apiKey}`;
+    if (this.config.provider === 'openrouter') {
+      h['HTTP-Referer'] = 'https://everfern.app';
+      h['X-OpenRouter-Title'] = 'EverFern';
+    }
     return h;
   }
 
@@ -251,18 +257,18 @@ export class AIClient {
     const messages = req.messages;
 
     const body: Record<string, unknown> = {
-      model:       req.model       ?? this.config.model,
-      messages:    messages.flatMap(m => {
+      model: req.model ?? this.config.model,
+      messages: messages.flatMap(m => {
         let content = m.content;
-        
-        // Nvidia NIM/OpenAI strict validation: 
+
+        // Nvidia NIM/OpenAI strict validation:
         if (this.config.provider === 'nvidia') {
           // Flatten assistant/system messages as before to prevent format errors
           if (m.role === 'assistant' || m.role === 'system') {
-            content = typeof m.content === 'string' 
-              ? m.content 
+            content = typeof m.content === 'string'
+              ? m.content
               : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
-          } 
+          }
           // Tool responses CANNOT contain image_url blocks in strict OpenAI schemas (like NIM).
           // We must split the image into a subsequent user message.
           else if (m.role === 'tool' && Array.isArray(m.content)) {
@@ -270,22 +276,22 @@ export class AIClient {
             if (hasImages) {
               const textContent = m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
               const imageChunks = m.content.filter(c => c.type === 'image_url');
-              
+
               const toolMsg: any = { role: 'tool', content: textContent || 'Action complete.' };
               if (m.tool_call_id) toolMsg.tool_call_id = m.tool_call_id;
-              
+
               // NIM enforces strict alternating sequences. We must bridge the Tool -> User gap.
               const bridgeAssistantMsg: any = { role: 'assistant', content: 'Action completed. Please provide the visual result of this action.' };
-              
+
               // Exactly matches Python test structure: [ {type: 'text'}, {type: 'image_url', image_url: ...} ]
-              const userMsg: any = { 
-                role: 'user', 
+              const userMsg: any = {
+                role: 'user',
                 content: [
                   { type: 'text', text: 'Screenshot provided from the system:' },
                   ...imageChunks
-                ] 
+                ]
               };
-              
+
               return [toolMsg, bridgeAssistantMsg, userMsg];
             }
           }
@@ -303,8 +309,8 @@ export class AIClient {
         return [msg];
       }),
       temperature: req.temperature ?? this.config.temperature,
-      max_tokens:  req.maxTokens   ?? this.config.maxTokens,
-      stream:      isStreaming,
+      max_tokens: req.maxTokens ?? this.config.maxTokens,
+      stream: isStreaming,
     };
     if (this.config.provider === 'nvidia') {
       const modelName = req.model ?? this.config.model;
@@ -371,7 +377,7 @@ export class AIClient {
     const res = await this._fetchWithRetry(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST', headers, body: JSON.stringify(body),
     });
-    
+
     DebugEmitter.emit('log', 'API Response status', {
       status: res.status,
       statusText: res.statusText
@@ -386,13 +392,13 @@ export class AIClient {
         if (txt.toLowerCase().includes('image') || txt.toLowerCase().includes('vision') || txt.toLowerCase().includes('format') || txt.toLowerCase().includes('validation') || res.status === 422) {
           isFormatError = true;
         }
-      } catch {}
-      
+      } catch { }
+
       // If Nvidia rejects an image payload (e.g. text-only model receives screenshot)
       if (this.config.provider === 'nvidia' && (res.status === 400 || res.status === 422 || isFormatError)) {
         throw new Error(`[${this.config.provider}] HTTP ${res.status}: ${errorMsg}. No vision capability for this model. Please select a valid vision endpoint.`);
       }
-      
+
       throw new Error(`[${this.config.provider}] HTTP ${res.status}: ${errorMsg}`);
     }
 
@@ -405,17 +411,17 @@ export class AIClient {
         arguments: JSON.parse(tc.function.arguments || '{}'),
       }));
       return {
-        id:           data.id ?? `${this.config.provider}-${Date.now()}`,
-        content:      choice?.message?.content ?? '',
-        model:        data.model ?? this.config.model,
+        id: data.id ?? `${this.config.provider}-${Date.now()}`,
+        content: choice?.message?.content ?? '',
+        model: data.model ?? this.config.model,
         toolCalls,
-        usage:        data.usage ? {
-          promptTokens:     data.usage.prompt_tokens,
+        usage: data.usage ? {
+          promptTokens: data.usage.prompt_tokens,
           completionTokens: data.usage.completion_tokens,
-          totalTokens:      data.usage.total_tokens,
+          totalTokens: data.usage.total_tokens,
         } : undefined,
         finishReason: choice?.finish_reason === 'tool_calls' ? 'tool_calls' :
-                      (choice?.finish_reason as ChatResponse['finishReason']) ?? 'stop',
+          (choice?.finish_reason as ChatResponse['finishReason']) ?? 'stop',
       };
     }
 
@@ -447,18 +453,18 @@ export class AIClient {
           const d = JSON.parse(payload);
           if (d.id) responseId = d.id;
           const delta = d.choices?.[0]?.delta;
-          
+
           let deltaContent = delta?.content ?? '';
           if (delta?.reasoning_content !== undefined) {
-             if (!isReasoning) {
-               isReasoning = true;
-               deltaContent = '<think>' + delta.reasoning_content;
-             } else {
-               deltaContent = delta.reasoning_content;
-             }
+            if (!isReasoning) {
+              isReasoning = true;
+              deltaContent = '<think>' + delta.reasoning_content;
+            } else {
+              deltaContent = delta.reasoning_content;
+            }
           } else if (isReasoning && delta?.content !== undefined) {
-             isReasoning = false;
-             deltaContent = '</think>' + delta.content;
+            isReasoning = false;
+            deltaContent = '</think>' + delta.content;
           }
 
           if (deltaContent) {
@@ -479,9 +485,9 @@ export class AIClient {
             }
           }
           if (d.choices?.[0]?.finish_reason) {
-             finishReason = d.choices[0].finish_reason;
+            finishReason = d.choices[0].finish_reason;
           }
-        } catch {}
+        } catch { }
       }
     }
 
@@ -514,8 +520,8 @@ export class AIClient {
       let content = m.content;
       if (this.config.provider === 'nvidia') {
         if (m.role === 'tool' || m.role === 'assistant' || m.role === 'system') {
-          content = typeof m.content === 'string' 
-            ? m.content 
+          content = typeof m.content === 'string'
+            ? m.content
             : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
         } else if (m.role === 'user') {
           const modelName = (req.model ?? this.config.model).toLowerCase();
@@ -529,11 +535,11 @@ export class AIClient {
     });
 
     const streamBody: Record<string, unknown> = {
-        model:       req.model       ?? this.config.model,
-        messages:    messages,
-        temperature: req.temperature ?? this.config.temperature,
-        max_tokens:  req.maxTokens   ?? this.config.maxTokens,
-        stream:      true,
+      model: req.model ?? this.config.model,
+      messages: messages,
+      temperature: req.temperature ?? this.config.temperature,
+      max_tokens: req.maxTokens ?? this.config.maxTokens,
+      stream: true,
     };
     if (this.config.provider === 'nvidia') {
       const modelName = req.model ?? this.config.model;
@@ -565,7 +571,7 @@ export class AIClient {
       }));
       streamBody['tool_choice'] = 'auto';
     }
-    
+
     // Handle JSON response formats in stream
     if (req.responseFormat === 'json') {
       if (this.config.provider === 'openai' || this.config.provider === 'deepseek') {
@@ -593,7 +599,7 @@ export class AIClient {
       method: 'POST', headers,
       body: JSON.stringify(streamBody),
     });
-    
+
     DebugEmitter.emit('log', 'API Response status (Stream)', {
       status: res.status,
       statusText: res.statusText
@@ -604,7 +610,7 @@ export class AIClient {
       try {
         const json = JSON.parse(txt);
         if (json.error) errorMsg = json.error.message || json.error;
-      } catch {}
+      } catch { }
       throw new Error(`[${this.config.provider}] Stream HTTP ${res.status}: ${errorMsg}`);
     }
 
@@ -640,23 +646,23 @@ export class AIClient {
 
           let deltaContent = delta?.content ?? '';
           if (delta?.reasoning_content !== undefined) {
-             if (!isReasoning) {
-               isReasoning = true;
-               deltaContent = '<think>' + delta.reasoning_content;
-             } else {
-               deltaContent = delta.reasoning_content;
-             }
+            if (!isReasoning) {
+              isReasoning = true;
+              deltaContent = '<think>' + delta.reasoning_content;
+            } else {
+              deltaContent = delta.reasoning_content;
+            }
           } else if (isReasoning && delta?.content !== undefined) {
-             isReasoning = false;
-             deltaContent = '</think>' + delta.content;
+            isReasoning = false;
+            deltaContent = '</think>' + delta.content;
           }
 
-          yield { 
-            id, 
-            delta: deltaContent, 
+          yield {
+            id,
+            delta: deltaContent,
             toolCalls: delta?.tool_calls,
-            done: false, 
-            model: d.model 
+            done: false,
+            model: d.model
           };
         } catch { /* skip malformed */ }
       }
@@ -687,7 +693,7 @@ export class AIClient {
           parts.push({
             function_response: {
               name: (m as any).tool_name || 'unknown', // We might need to pass this down
-              response: { 
+              response: {
                 result: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
                 // If it was a computer_use tool, we might have safety_acknowledgement: "true"
                 ...(typeof m.content !== 'string' && (m.content as any).safety_acknowledgement ? { safety_acknowledgement: "true" } : {})
@@ -710,12 +716,12 @@ export class AIClient {
           for (const c of m.content) {
             if (c.type === 'text' && c.text) parts.push({ text: c.text });
             if (c.type === 'image_url') {
-               const b64 = c.image_url.url.split(',')[1] || c.image_url.url;
-               parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
+              const b64 = c.image_url.url.split(',')[1] || c.image_url.url;
+              parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } });
             }
           }
         }
-        
+
         if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
           for (const tc of m.tool_calls) {
             parts.push({
@@ -763,7 +769,7 @@ export class AIClient {
     const startTime = Date.now();
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': this.config.apiKey || ''
       },
@@ -782,14 +788,14 @@ export class AIClient {
     const candidate = data.candidates?.[0];
     const content = candidate?.content?.parts?.find((p: any) => p.text)?.text ?? '';
     const googleCalls = candidate?.content?.parts?.filter((p: any) => p.function_call);
-    
+
     // Extract safety_decision from function_call args if present
     let safetyDecision = undefined;
     for (const gc of (googleCalls || [])) {
-       if (gc.function_call.args?.safety_decision) {
-         safetyDecision = gc.function_call.args.safety_decision;
-         break;
-       }
+      if (gc.function_call.args?.safety_decision) {
+        safetyDecision = gc.function_call.args.safety_decision;
+        break;
+      }
     }
 
     const toolCalls = googleCalls?.map((gc: any): ToolCall => ({
@@ -805,8 +811,8 @@ export class AIClient {
       toolCalls: toolCalls?.length ? toolCalls : undefined,
       safetyDecision: safetyDecision,
       finishReason: candidate?.finishReason === 'RECITATION' ? 'stop' :
-                    candidate?.finishReason === 'MAX_TOKENS' ? 'length' :
-                    toolCalls?.length ? 'tool_calls' : 'stop',
+        candidate?.finishReason === 'MAX_TOKENS' ? 'length' :
+          toolCalls?.length ? 'tool_calls' : 'stop',
     };
   }
 
@@ -814,8 +820,8 @@ export class AIClient {
 
   private get _anthropicHeaders(): Record<string, string> {
     return {
-      'Content-Type':      'application/json',
-      'x-api-key':         this.config.apiKey,
+      'Content-Type': 'application/json',
+      'x-api-key': this.config.apiKey,
       'anthropic-version': '2023-06-01',
     };
   }
@@ -836,9 +842,9 @@ export class AIClient {
     const isStreaming = !!req.onStreamChunk;
     const { system, msgs } = this._splitSystemMessages(req.messages);
     const body: Record<string, unknown> = {
-      model:      req.model       ?? this.config.model,
-      max_tokens: req.maxTokens   ?? this.config.maxTokens,
-      messages:   msgs.map(m => {
+      model: req.model ?? this.config.model,
+      max_tokens: req.maxTokens ?? this.config.maxTokens,
+      messages: msgs.map(m => {
         // Anthropic: Tool results go into a 'user' message with type: 'tool_result' content blocks
         if (m.role === 'tool') {
           return {
@@ -865,7 +871,7 @@ export class AIClient {
         }
         return m;
       }),
-      stream:     isStreaming,
+      stream: isStreaming,
     };
     if (system) body['system'] = system;
     if (req.tools?.length) {
@@ -890,17 +896,17 @@ export class AIClient {
         ?.map((tc: any): ToolCall => ({ id: tc.id, name: tc.name, arguments: tc.input }));
 
       return {
-        id:           data.id ?? `anthropic-${Date.now()}`,
-        content:      text,
-        model:        data.model ?? this.config.model,
-        toolCalls:    toolUses?.length ? toolUses : undefined,
-        usage:        data.usage ? {
-          promptTokens:     data.usage.input_tokens,
+        id: data.id ?? `anthropic-${Date.now()}`,
+        content: text,
+        model: data.model ?? this.config.model,
+        toolCalls: toolUses?.length ? toolUses : undefined,
+        usage: data.usage ? {
+          promptTokens: data.usage.input_tokens,
           completionTokens: data.usage.output_tokens,
-          totalTokens:      (data.usage.input_tokens + data.usage.output_tokens),
+          totalTokens: (data.usage.input_tokens + data.usage.output_tokens),
         } : undefined,
         finishReason: data.stop_reason === 'tool_use' ? 'tool_calls' :
-                      data.stop_reason === 'max_tokens' ? 'length' : 'stop',
+          data.stop_reason === 'max_tokens' ? 'length' : 'stop',
       };
     }
 
@@ -928,22 +934,22 @@ export class AIClient {
         try {
           const d = JSON.parse(t.slice(6));
           if (d.type === 'message_start') {
-             responseId = d.message?.id ?? responseId;
+            responseId = d.message?.id ?? responseId;
           }
           if (d.type === 'content_block_delta' && d.delta?.type === 'text_delta') {
-             fullContent += d.delta.text;
-             req.onStreamChunk!(d.delta.text);
+            fullContent += d.delta.text;
+            req.onStreamChunk!(d.delta.text);
           }
           if (d.type === 'content_block_start' && d.content_block?.type === 'tool_use') {
-             toolCallsMap[d.index] = { id: d.content_block.id, name: d.content_block.name, arguments: '' };
+            toolCallsMap[d.index] = { id: d.content_block.id, name: d.content_block.name, arguments: '' };
           }
           if (d.type === 'content_block_delta' && d.delta?.type === 'input_json_delta') {
-             if (toolCallsMap[d.index]) toolCallsMap[d.index].arguments += d.delta.partial_json;
+            if (toolCallsMap[d.index]) toolCallsMap[d.index].arguments += d.delta.partial_json;
           }
           if (d.type === 'message_delta' && d.delta?.stop_reason) {
-             finishReason = d.delta.stop_reason;
+            finishReason = d.delta.stop_reason;
           }
-        } catch {}
+        } catch { }
       }
     }
 
@@ -959,17 +965,17 @@ export class AIClient {
       model: this.config.model,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       finishReason: finishReason === 'tool_use' || toolCalls.length > 0 ? 'tool_calls' :
-                    finishReason === 'max_tokens' ? 'length' : 'stop',
+        finishReason === 'max_tokens' ? 'length' : 'stop',
     };
   }
 
   private async *_anthropicStream(req: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
     const { system, msgs } = this._splitSystemMessages(req.messages);
     const body: Record<string, unknown> = {
-      model:      req.model     ?? this.config.model,
+      model: req.model ?? this.config.model,
       max_tokens: req.maxTokens ?? this.config.maxTokens,
-      messages:   msgs,
-      stream:     true,
+      messages: msgs,
+      stream: true,
     };
     if (system) body['system'] = system;
 
@@ -1049,9 +1055,9 @@ export class AIClient {
   private async _ollamaChat(req: ChatRequest): Promise<ChatResponse> {
     const isStreaming = !!req.onStreamChunk;
     const body: Record<string, unknown> = {
-      model:   req.model ?? this.config.model,
+      model: req.model ?? this.config.model,
       messages: this._mapOllamaMessages(req.messages),
-      stream:  isStreaming,
+      stream: isStreaming,
       options: { temperature: req.temperature ?? this.config.temperature },
     };
     if (req.responseFormat === 'json') body['format'] = 'json';
@@ -1067,20 +1073,20 @@ export class AIClient {
       try {
         const json = JSON.parse(txt);
         if (json.error) errorMsg = json.error.message || json.error;
-      } catch {}
+      } catch { }
       throw new Error(`[ollama] HTTP ${res.status}: ${errorMsg}`);
     }
 
     if (!isStreaming) {
       const data = await res.json();
       return {
-        id:           `ollama-${Date.now()}`,
-        content:      data.message?.content ?? '',
-        model:        data.model ?? this.config.model,
-        usage:        data.eval_count ? {
-          promptTokens:     data.prompt_eval_count ?? 0,
+        id: `ollama-${Date.now()}`,
+        content: data.message?.content ?? '',
+        model: data.model ?? this.config.model,
+        usage: data.eval_count ? {
+          promptTokens: data.prompt_eval_count ?? 0,
           completionTokens: data.eval_count ?? 0,
-          totalTokens:      (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+          totalTokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
         } : undefined,
         finishReason: 'stop',
       };
@@ -1111,7 +1117,7 @@ export class AIClient {
           }
           if (d.prompt_eval_count) promptTokens = d.prompt_eval_count;
           if (d.eval_count) completionTokens = d.eval_count;
-        } catch {}
+        } catch { }
       }
     }
 
@@ -1133,9 +1139,9 @@ export class AIClient {
       method: 'POST',
       headers: this._oaiHeaders,
       body: JSON.stringify({
-        model:   req.model ?? this.config.model,
+        model: req.model ?? this.config.model,
         messages: this._mapOllamaMessages(req.messages),
-        stream:  true,
+        stream: true,
         options: { temperature: req.temperature ?? this.config.temperature },
       }),
     });
@@ -1145,7 +1151,7 @@ export class AIClient {
       try {
         const json = JSON.parse(txt);
         if (json.error) errorMsg = json.error.message || json.error;
-      } catch {}
+      } catch { }
       throw new Error(`[ollama] Stream HTTP ${res.status}: ${errorMsg}`);
     }
 
@@ -1153,12 +1159,12 @@ export class AIClient {
     if (!reader) throw new Error('No response body');
 
     const dec = new TextDecoder();
-    const id  = `ollama-${Date.now()}`;
+    const id = `ollama-${Date.now()}`;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const text  = dec.decode(value, { stream: true });
+      const text = dec.decode(value, { stream: true });
       const lines = text.split('\n').filter(l => l.trim());
 
       for (const line of lines) {

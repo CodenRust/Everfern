@@ -1,2 +1,0 @@
-src/app/chat/page.tsx(1320,75): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
-  Type 'null' is not assignable to type 'boolean | undefined'.

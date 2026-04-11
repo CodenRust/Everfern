@@ -27,6 +27,7 @@ interface MCPConnector {
     name: string;
     description: string;
     domain: string;
+    logo?: string;
     fields: { key: string; label: string; type: string; placeholder?: string }[];
 }
 
@@ -36,6 +37,7 @@ const MCP_CONNECTORS: MCPConnector[] = [
         name: "GitHub",
         description: "Access repositories, pull requests, issues, and actions in GitHub",
         domain: "github.com",
+        logo: "github.png",
         fields: [{ key: "apiKey", label: "Personal Access Token", type: "password", placeholder: "ghp_..." }]
     },
     {
@@ -43,6 +45,7 @@ const MCP_CONNECTORS: MCPConnector[] = [
         name: "Slack",
         description: "Read messages, channels, and post to Slack workspaces",
         domain: "slack.com",
+        logo: "slack.png",
         fields: [{ key: "apiKey", label: "Bot User OAuth Token", type: "password", placeholder: "xoxb-..." }]
     },
     {
@@ -68,6 +71,7 @@ const MCP_CONNECTORS: MCPConnector[] = [
         name: "Linear",
         description: "Manage issues, projects & team workflows in Linear",
         domain: "linear.app",
+        logo: "linear.png",
         fields: [{ key: "apiKey", label: "API Key", type: "password", placeholder: "lin_api_..." }]
     },
     {
@@ -75,6 +79,7 @@ const MCP_CONNECTORS: MCPConnector[] = [
         name: "Hugging Face",
         description: "Access the Hugging Face Hub and thousands of Gradio Apps",
         domain: "huggingface.co",
+        logo: "huggingface.png",
         fields: [{ key: "token", label: "Access Token", type: "password", placeholder: "hf_..." }]
     },
     {
@@ -82,6 +87,7 @@ const MCP_CONNECTORS: MCPConnector[] = [
         name: "Amplitude",
         description: "Search, access, and get insights on your Amplitude data",
         domain: "amplitude.com",
+        logo: "amplitude.png",
         fields: [
             { key: "apiKey", label: "API Key", type: "password", placeholder: "..." },
             { key: "secretKey", label: "Secret Key", type: "password", placeholder: "..." }
@@ -106,6 +112,7 @@ const MCP_CONNECTORS: MCPConnector[] = [
         name: "Cloudflare Developer Platform",
         description: "Access Cloudflare Workers and Pages",
         domain: "cloudflare.com",
+        logo: "cloudflare.png",
         fields: [
             { key: "accountId", label: "Account ID", type: "text", placeholder: "..." },
             { key: "apiToken", label: "API Token", type: "password", placeholder: "..." }
@@ -540,7 +547,7 @@ export default function DirectoryModal({ isOpen, onClose }: DirectoryModalProps)
                                                     }}>
                                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                                         <img
-                                                            src={`https://logo.clearbit.com/${mcp.domain}`}
+                                                            src={mcp.logo ? `/images/integrations/${mcp.logo}` : `https://logo.clearbit.com/${mcp.domain}`}
                                                             alt={mcp.name}
                                                             style={{ width: "24px", height: "24px", objectFit: "contain" }}
                                                             onError={(e) => {
@@ -759,7 +766,7 @@ export default function DirectoryModal({ isOpen, onClose }: DirectoryModalProps)
                                                 }}>
                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                     <img
-                                                        src={`https://logo.clearbit.com/${selectedMCP.domain}`}
+                                                        src={selectedMCP.logo ? `/images/integrations/${selectedMCP.logo}` : `https://logo.clearbit.com/${selectedMCP.domain}`}
                                                         alt={selectedMCP.name}
                                                         style={{ width: "20px", height: "20px", objectFit: "contain" }}
                                                         onError={(e) => {

@@ -35,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn("font-body", "h-full", "antialiased", ebGaramond.variable, jetbrainsMono.variable, firaCode.variable, "font-sans", geist.variable)}>
+    <html lang="en" suppressHydrationWarning className={cn("font-body", "h-full", "antialiased", ebGaramond.variable, jetbrainsMono.variable, firaCode.variable, "font-sans", geist.variable)}>
       <head>
         <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
         <link href="https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,300..900;1,300..900&display=swap" rel="stylesheet" />
@@ -43,7 +43,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Fira+Code:wght@300..700&display=swap" rel="stylesheet" />
       </head>
-      <body className="min-h-full flex flex-col bg-background text-on-surface">
+      <body suppressHydrationWarning className="min-h-full flex flex-col bg-background text-on-surface">
         {children}
       </body>
     </html>

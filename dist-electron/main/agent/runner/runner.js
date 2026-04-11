@@ -44,7 +44,6 @@ const crypto = __importStar(require("crypto"));
 const system_prompt_1 = require("./system-prompt");
 const graph_1 = require("./graph");
 const skills_loader_1 = require("./skills-loader");
-const cache_1 = require("../../lib/cache");
 const tools_manager_1 = require("./tools_manager");
 const telemetry_logger_1 = require("../helpers/telemetry-logger");
 const pi_tools_1 = require("../tools/pi-tools");
@@ -199,20 +198,17 @@ class AgentRunner {
             this.telemetry.warn(`Critical context pressure detected. Compacted history proactively (${status.estimatedTokens} tokens).`);
         }
         this.telemetry.begin(textInput);
-        // Semantic Cache Check
-        const cached = await (0, cache_1.lookupCache)(textInput);
-        if (cached) {
-            yield { type: 'chunk', content: typeof cached.content === 'string' ? cached.content : '' };
-            yield { type: 'done' };
-            return;
-        }
+        this.telemetry.updateSpinner('Loading tool definitions...');
         const piTools = await (0, pi_tools_1.getPiCodingTools)();
         if (!this.tools.find(t => t.name === piTools[0].name))
             this.tools.push(...piTools);
+        this.telemetry.updateSpinner('Compiling system messages...');
         const platform = os.platform();
         const { messages: initialMessages } = (0, system_prompt_1.buildSystemMessages)(history, userInput, platform, conversationId, []);
+        this.telemetry.updateSpinner('Building execution graph...');
         const eventQueue = [];
         const graph = (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, [], this.shouldCaptureScreenshot(userInput));
+        this.telemetry.updateSpinner('Invoking agent node pipeline...');
         let graphDone = false;
         (async () => {
             try {

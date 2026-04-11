@@ -43,6 +43,10 @@ const NvidiaLogo = ({ size = 20 }: { size?: number }) => (
     <Image src="/images/ai-providers/nvidia.svg" alt="Nvidia Logo" width={size} height={size} className="grayscale opacity-80" />
 );
 
+const OpenRouterLogo = ({ size = 20 }: { size?: number }) => (
+    <Image src="/images/ai-providers/openrouter.svg" alt="OpenRouter Logo" width={size} height={size} className="grayscale opacity-80" />
+);
+
 const OllamaLogo = ({ size = 20 }: { size?: number }) => (
     <Image src="/images/ai-providers/ollama.svg" alt="Ollama Logo" width={size} height={size} />
 );
@@ -713,7 +717,8 @@ export default function SetupPage() {
                                             { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
                                             { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
                                             { id: "gemini", name: "Google Gemini", logo: GeminiLogo },
-                                            { id: "nvidia", name: "Nvidia NIM", logo: NvidiaLogo }
+                                            { id: "nvidia", name: "Nvidia NIM", logo: NvidiaLogo },
+                                            { id: "openrouter", name: "OpenRouter", logo: OpenRouterLogo }
                                         ].map(p => (
                                             <ProviderRow key={p.id} p={p} onClick={() => { setProvider(p.id); setStep(3); }} />
                                         ))}

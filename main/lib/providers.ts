@@ -69,6 +69,17 @@ export const PROVIDER_MODELS: Record<ProviderType, string[]> = {
     'everfern-1',
     'everfern-fast',
   ],
+  openrouter: [
+    'openrouter/free',
+    'nvidia/nemotron-3-nano-30b-a3b',
+    'z-ai/glm-4-5-air',
+    'arcee-ai/trinity-large-preview',
+    'minimax/minimax-m2.5',
+    'openai/gpt-oss-120b',
+    'google/gemma-4-31b',
+    'meta-llama/llama-3.3-70b-instruct',
+    'qwen/qwen3-coder-480b-a35b',
+  ],
 };
 
 // ── Provider Metadata ────────────────────────────────────────────────
@@ -165,6 +176,16 @@ export const PROVIDER_REGISTRY: Record<ProviderType, ProviderMeta> = {
     engine: 'everfern',
     baseUrl: 'http://localhost:8000',
   },
+  openrouter: {
+    type: 'openrouter',
+    name: 'OpenRouter',
+    description: 'A unified API to access dozens of top open and closed source models',
+    requiresApiKey: true,
+    isLocal: false,
+    defaultModel: 'openai/gpt-oss-120b',
+    engine: 'online',
+    baseUrl: 'https://openrouter.ai/api/v1',
+  },
   nvidia: {
     type: 'nvidia',
     name: 'Nvidia NIM',
@@ -203,7 +224,7 @@ export function getAllModelsFlat(): FlatModelEntry[] {
   for (let [type, models] of Object.entries(PROVIDER_MODELS) as [ProviderType, string[]][]) {
     // Legacy alias normalization
     if ((type as string) === 'google') type = 'gemini';
-    
+
     const meta = PROVIDER_REGISTRY[type];
     if (!meta) continue;
 
@@ -238,8 +259,8 @@ export function getModelsForConfig(engine: string, provider?: string): FlatModel
   const meta = PROVIDER_REGISTRY[providerType];
   // Normalization for legacy IDs
   if (!meta && (providerType as string) === 'google') {
-      const geminiMeta = PROVIDER_REGISTRY['gemini'];
-      if (geminiMeta) return getModelsForConfig(engine, 'gemini');
+    const geminiMeta = PROVIDER_REGISTRY['gemini'];
+    if (geminiMeta) return getModelsForConfig(engine, 'gemini');
   }
   if (!meta) return [];
 

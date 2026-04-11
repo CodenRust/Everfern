@@ -58,7 +58,7 @@ export interface StreamChunk {
 
 // ── Provider Configuration ──────────────────────────────────────────
 
-export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'ollama-cloud' | 'lmstudio' | 'everfern' | 'gemini' | 'nvidia';
+export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'ollama-cloud' | 'lmstudio' | 'everfern' | 'gemini' | 'nvidia' | 'openrouter';
 
 export interface ProviderConfig {
   type: ProviderType;

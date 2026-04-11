@@ -202,22 +202,21 @@ export class AgentRunner {
 
     this.telemetry.begin(textInput);
 
-    // Semantic Cache Check
-    const cached = await lookupCache(textInput);
-    if (cached) {
-       yield { type: 'chunk', content: typeof cached.content === 'string' ? cached.content : '' };
-       yield { type: 'done' };
-       return;
-    }
 
+
+    this.telemetry.updateSpinner('Loading tool definitions...');
     const piTools = await getPiCodingTools();
     if (!this.tools.find(t => t.name === piTools[0].name)) this.tools.push(...piTools);
 
+    this.telemetry.updateSpinner('Compiling system messages...');
     const platform = os.platform();
     const { messages: initialMessages } = buildSystemMessages(history, userInput, platform, conversationId, []);
     
+    this.telemetry.updateSpinner('Building execution graph...');
     const eventQueue: StreamEvent[] = [];
     const graph = buildGraph(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, [], this.shouldCaptureScreenshot(userInput));
+
+    this.telemetry.updateSpinner('Invoking agent node pipeline...');
 
     let graphDone = false;
     (async () => {

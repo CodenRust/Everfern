@@ -69,6 +69,10 @@ export class TelemetryLogger {
     }, 80);
   }
 
+  public updateSpinner(task: string) {
+    this.startSpinner(task);
+  }
+
   private printLog(msg: string, resumeSpinnerTask?: string) {
     this.stopSpinner();
     console.log(msg);
@@ -151,9 +155,10 @@ export class TelemetryLogger {
     this.stopSpinner();
     const status = success ? '\x1b[32mCOMPLETED\x1b[0m' : '\x1b[31mABORTED\x1b[0m';
     const summary = responseSummary ? ` | Result: \x1b[97m${responseSummary.substring(0, 50)}...\x1b[0m` : '';
+    const duration = ((Date.now() - this.startTime) / 1000).toFixed(2);
     
     const divider = `\x1b[90m${'='.repeat(90)}\x1b[0m`;
-    const finishLine = `\x1b[1m\x1b[32m[🏁 COMPLETE]\x1b[0m Mission ${status} | Final Steps: \x1b[1m${this.iteration}\x1b[0m${summary}`;
+    const finishLine = `\x1b[1m\x1b[32m[🏁 COMPLETE]\x1b[0m Mission ${status} | Duration: \x1b[1m${duration}s\x1b[0m | Final Steps: \x1b[1m${this.iteration}\x1b[0m${summary}`;
     console.log(`${divider}\n${this.getTimestamp()} ${finishLine}\n${divider}\n`);
   }
 }
