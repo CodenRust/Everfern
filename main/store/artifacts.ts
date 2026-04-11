@@ -1,0 +1,111 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+export interface ArtifactMeta {
+  id: string;
+  chatId: string;
+  name: string;
+  lastEdited: number;
+  snippet: string;
+  size: number;
+}
+
+/**
+ * Lists all artifacts, optionally filtering by chatId.
+ * Scans ~/.everfern/artifacts/
+ */
+export function listArtifacts(chatId?: string): ArtifactMeta[] {
+  const artifactsDir = path.join(os.homedir(), '.everfern', 'artifacts');
+  if (!fs.existsSync(artifactsDir)) return [];
+
+  const results: ArtifactMeta[] = [];
+  
+  // Scans all subdirectories (each represents a chatId) unless a specific one is provided
+  let dirsToScan: string[] = [];
+  try {
+      dirsToScan = chatId ? [chatId] : fs.readdirSync(artifactsDir).filter(f => fs.statSync(path.join(artifactsDir, f)).isDirectory());
+  } catch (e) {
+      return [];
+  }
+
+  for (const dir of dirsToScan) {
+    const dirPath = path.join(artifactsDir, dir);
+    if (!fs.existsSync(dirPath)) continue;
+    
+    let files: string[] = [];
+    try {
+        files = fs.readdirSync(dirPath).filter(f => fs.statSync(path.join(dirPath, f)).isFile());
+    } catch (e) {
+        continue;
+    }
+
+    for (const file of files) {
+      if (file.startsWith('.')) continue; // ignore hidden files
+      
+      const filePath = path.join(dirPath, file);
+      try {
+          const stats = fs.statSync(filePath);
+          // Read snippet securely
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const snippet = content.slice(0, 500).trim();
+
+          results.push({
+            id: file,
+            chatId: dir,
+            name: file,
+            lastEdited: stats.mtimeMs,
+            snippet,
+            size: stats.size
+          });
+      } catch (e) {
+          console.error(`Failed to read artifact ${filePath}:`, e);
+      }
+    }
+  }
+
+  // Sort by newest first
+  return results.sort((a, b) => b.lastEdited - a.lastEdited);
+}
+
+/**
+ * Reads the actual content of an artifact.
+ */
+export function readArtifact(chatId: string, filename: string): string | null {
+  const filepath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+  if (fs.existsSync(filepath)) {
+    try {
+        return fs.readFileSync(filepath, 'utf-8');
+    } catch (e) {
+        return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Writes (creates or overwrites) an artifact file.
+ */
+export function writeArtifact(chatId: string, filename: string, content: string): { success: boolean; error?: string } {
+  try {
+    const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), content, 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * Deletes an artifact file.
+ */
+export function deleteArtifact(chatId: string, filename: string): { success: boolean } {
+  try {
+    const p = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    return { success: true };
+  } catch {
+    return { success: false };
+  }
+}

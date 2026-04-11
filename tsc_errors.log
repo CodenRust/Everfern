@@ -1,0 +1,5 @@
+src/app/components/Sidebar.tsx(99,17): error TS2353: Object literal may only specify known properties, and 'WebkitAppRegion' does not exist in type 'Properties<string | number, string & {}>'.
+src/app/components/Sidebar.tsx(104,86): error TS2353: Object literal may only specify known properties, and 'WebkitAppRegion' does not exist in type 'Properties<string | number, string & {}>'.
+src/app/components/Sidebar.tsx(108,163): error TS2353: Object literal may only specify known properties, and 'WebkitAppRegion' does not exist in type 'Properties<string | number, string & {}>'.
+src/app/components/Sidebar.tsx(113,159): error TS2353: Object literal may only specify known properties, and 'WebkitAppRegion' does not exist in type 'Properties<string | number, string & {}>'.
+src/app/components/WindowControls.tsx(36,17): error TS2353: Object literal may only specify known properties, and 'WebkitAppRegion' does not exist in type 'Properties<string | number, string & {}>'.

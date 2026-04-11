@@ -1,0 +1,13 @@
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  output: "export",
+  distDir: "out",
+  images: {
+    unoptimized: true,
+  },
+  transpilePackages: ["tw-animate-css", "tw-shimmer"],
+  // Do NOT set turbopack.root — defaults to app directory, not monorepo root
+};
+
+export default nextConfig;

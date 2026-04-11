@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "outDir": "./dist-electron",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "allowJs": true
+  },
+  "include": [
+    "main/**/*",
+    "preload/**/*"
+  ],
+  "exclude": [
+    "main/agent/openclaw-agents/**/*",
+    "main/**/*.test.ts"
+  ]
+}
