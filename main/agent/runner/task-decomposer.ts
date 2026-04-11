@@ -113,10 +113,11 @@ export function analyzeTask(userInput: string): TaskAnalysis {
         canParallelize && uniqueActions > 3 ? 'hybrid' :
         canParallelize ? 'parallel' : 'sequential';
 
-    // Feature flags
-    const requiresExternalData  = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(text);
-    const requiresFileOps       = /\b(file|folder|directory|path|write|read|create|edit|save|csv|xlsx|pdf|docx)\b/i.test(text);
-    const requiresCommandExecution = /\b(run|execute|install|pip|npm|python|node|bash|shell|command|compile|build)\b/i.test(text);
+    // Feature flags (calculated on non-data lines to avoid false positives from pasted CSV/JSON data)
+    const nonDataText = text.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
+    const requiresExternalData  = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(nonDataText);
+    const requiresFileOps       = /\b(file|folder|directory|path|write|read|create|edit|save|csv|xlsx|pdf|docx)\b/i.test(nonDataText);
+    const requiresCommandExecution = /\b(run|execute|install|pip|npm|python|node|bash|shell|command|compile|build)\b/i.test(nonDataText);
 
     return {
         complexity,
@@ -164,10 +165,11 @@ export function decomposeTask(
         agentPrompt,
     });
 
-    // Extract concrete targets from user text
-    const urls      = (userInput.match(/https?:\/\/[^\s]+/g) || []);
-    const filePaths = (userInput.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
-    const topics    = (userInput.match(/"([^"]+)"|'([^']+)'/g) || []).map(s => s.replace(/['"]/g, ''));
+    // Extract concrete targets from user text, but ignore lines that look like CSV data (>= 2 commas)
+    const nonDataLines = userInput.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
+    const urls      = (nonDataLines.match(/https?:\/\/[^\s"',]+/g) || []);
+    const filePaths = (nonDataLines.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
+    const topics    = (nonDataLines.match(/"([^"]+)"|'([^']+)'/g) || []).map(s => s.replace(/['"]/g, ''));
 
     // ── Phase 0: Skill reading ────────────────────────────────────────────
     if (['analyze', 'coding', 'build'].includes(analysis.taskType)) {
