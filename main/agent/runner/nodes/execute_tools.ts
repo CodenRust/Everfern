@@ -10,6 +10,7 @@ import { getAgentEvents } from '../../infra/agent-events';
 import { getDefaultToolPolicyPipeline } from '../tool-policy';
 import { detectToolCallLoop, recordToolCall, recordToolOutcome } from '../loop-detection';
 import { captureScreen } from '../../tools/computer-use';
+import { interrupt } from '@langchain/langgraph';
 
 export const createExecuteToolsNode = (
   runner: any,
@@ -129,7 +130,18 @@ export const createExecuteToolsNode = (
             toolCall: { toolName: correctedToolCall.name, args: correctedToolCall.arguments, result: { success: true, output: '' } } as any,
             reason: `Tool "${correctedToolCall.name}" requires explicit approval`
           });
-          result = { success: false, output: 'Tool requires owner approval', error: 'owner_approval_required' };
+          
+          const feedback = interrupt({
+            question: `Approval required for tool: ${correctedToolCall.name}`,
+            toolCall: correctedToolCall
+          });
+          
+          if (typeof feedback === 'string' && feedback.toLowerCase().includes('approve')) {
+             runner.telemetry.info(`Tool ${correctedToolCall.name} approved by user.`);
+             result = null; // proceed to execution
+          } else {
+             result = { success: false, output: `Tool rejected by user: ${feedback}`, error: 'owner_approval_required' };
+          }
         }
 
         if (!tool && !result) {

@@ -212,14 +212,23 @@ class AgentRunner {
         let graphDone = false;
         (async () => {
             try {
-                await graph.invoke({
-                    messages: initialMessages,
-                    toolCallRecords: [],
-                    iterations: 0,
-                    pendingToolCalls: [],
-                    finalResponse: '',
-                    toolCallHistory: [],
-                }, { configurable: { thread_id: convId }, recursionLimit: 100 });
+                const threadConfig = { configurable: { thread_id: convId }, recursionLimit: 100 };
+                const currentState = await graph.getState(threadConfig);
+                const { Command } = await Promise.resolve().then(() => __importStar(require('@langchain/langgraph')));
+                if (currentState && currentState.next && currentState.next.length > 0) {
+                    this.telemetry.info(`Resuming session ${convId} from interrupted state...`);
+                    await graph.invoke(new Command({ resume: textInput }), threadConfig);
+                }
+                else {
+                    await graph.invoke({
+                        messages: initialMessages,
+                        toolCallRecords: [],
+                        iterations: 0,
+                        pendingToolCalls: [],
+                        finalResponse: '',
+                        toolCallHistory: [],
+                    }, threadConfig);
+                }
             }
             catch (err) {
                 console.error('[AgentRunner] Graph Error:', err);
