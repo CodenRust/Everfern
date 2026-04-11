@@ -41,6 +41,7 @@ const parallel_executor_1 = require("../parallel-executor");
 const utils_1 = require("../utils");
 const tool_policy_1 = require("../tool-policy");
 const loop_detection_1 = require("../loop-detection");
+const langgraph_1 = require("@langchain/langgraph");
 const createExecuteToolsNode = (runner, tools, config, eventQueue, conversationId) => {
     return async (state) => {
         runner.telemetry.transition('execute_tools');
@@ -138,7 +139,17 @@ const createExecuteToolsNode = (runner, tools, config, eventQueue, conversationI
                         toolCall: { toolName: correctedToolCall.name, args: correctedToolCall.arguments, result: { success: true, output: '' } },
                         reason: `Tool "${correctedToolCall.name}" requires explicit approval`
                     });
-                    result = { success: false, output: 'Tool requires owner approval', error: 'owner_approval_required' };
+                    const feedback = (0, langgraph_1.interrupt)({
+                        question: `Approval required for tool: ${correctedToolCall.name}`,
+                        toolCall: correctedToolCall
+                    });
+                    if (typeof feedback === 'string' && feedback.toLowerCase().includes('approve')) {
+                        runner.telemetry.info(`Tool ${correctedToolCall.name} approved by user.`);
+                        result = null; // proceed to execution
+                    }
+                    else {
+                        result = { success: false, output: `Tool rejected by user: ${feedback}`, error: 'owner_approval_required' };
+                    }
                 }
                 if (!tool && !result) {
                     runner.telemetry.warn(`Tool definition missing: ${correctedToolCall.name}`);

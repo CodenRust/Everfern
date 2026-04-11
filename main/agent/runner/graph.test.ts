@@ -1,9 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { buildGraph } from './graph';
 import { GraphState } from './state';
-import { END } from '@langchain/langgraph';
-
-let runCount = 0;
+import { interrupt, Command } from '@langchain/langgraph';
 
 vi.mock('./nodes/triage', () => ({
   createTriageNode: vi.fn(() => async (state: any) => {
@@ -13,90 +11,78 @@ vi.mock('./nodes/triage', () => ({
 
 vi.mock('./nodes/planner', () => ({
   createPlannerNode: vi.fn(() => async (state: any) => {
-    return { taskPhase: 'planning' };
+    // This will pause on first call, and return feedback on second call
+    const feedback = interrupt({ question: "Approve plan?" });
+    return { taskPhase: 'executing', messages: [{ role: 'system', content: `Approved: ${feedback}` }] };
   })
 }));
 
 vi.mock('./nodes/call_model', () => ({
   createCallModelNode: vi.fn(() => async (state: any) => {
-    runCount++;
-    if (runCount === 1) {
-        // First run: output a tool call
-        return { 
-            messages: [{ role: 'assistant', content: 'doing work' }],
-            pendingToolCalls: [{ id: 'tc_1', name: 'write', arguments: { path: 'test.ts' } }] 
-        };
-    } else {
-        // Second run: no more tool calls, just finish
-        return { 
-            messages: [{ role: 'assistant', content: 'done' }],
-            pendingToolCalls: []
-        };
-    }
+    return { 
+        messages: [{ role: 'assistant', content: 'done' }],
+        pendingToolCalls: []
+    };
   })
 }));
 
 vi.mock('./nodes/execute_tools', () => ({
   createExecuteToolsNode: vi.fn(() => async (state: any) => {
-    if (state.pendingToolCalls?.length > 0) {
-        return { 
-            toolCallRecords: [{ toolName: 'write', args: {}, result: { success: true } }],
-            pendingToolCalls: [],
-            pauseGeneration: true // Simulate pausing after first tool execution
-        };
-    }
-    return { pauseGeneration: false };
+    return {};
   })
 }));
 
-describe('LangGraph Checkpointer Persistence', () => {
+describe('Modern LangGraph HITL Architecture', () => {
   let mockRunner: any;
 
   beforeEach(() => {
-    runCount = 0;
     mockRunner = {
       config: { maxIterations: 10 },
       telemetry: {
         warn: vi.fn(),
         info: vi.fn(),
         action: vi.fn(),
+        transition: vi.fn(),
       }
     };
   });
 
-  it('should persist state across interrupts/pauses using checkpointer', async () => {
+  it('should pause execution at interrupt() and resume with user feedback using Command', async () => {
+    const threadId = 'test-hitl-thread-' + Date.now();
     const graph = buildGraph(mockRunner, [], [], [], 'test-conv-id', [], false);
-    const threadConfig = { configurable: { thread_id: 'test-thread-1' }, recursionLimit: 50 };
+    const threadConfig = { configurable: { thread_id: threadId }, recursionLimit: 50 };
 
     const initialState = {
-      messages: [{ role: 'user', content: 'test request' }],
+      messages: [{ role: 'user', content: 'create a report' }],
       toolCallRecords: [],
       iterations: 0,
       pendingToolCalls: [],
       finalResponse: '',
       toolCallHistory: [],
+      decomposedTask: { id: 't1', title: 'Task 1', steps: [] }
     };
 
-    // First invocation
+    // 1. Initial run: should hit the planner and pause at interrupt()
     const firstResult = await graph.invoke(initialState, threadConfig);
 
-    expect(firstResult.currentIntent).toBe('coding');
-    expect(firstResult.pauseGeneration).toBe(true);
-    expect(firstResult.toolCallRecords.length).toBe(1);
-    expect(firstResult.toolCallRecords[0].toolName).toBe('write');
-
-    // We manually clear pauseGeneration to resume execution
-    // And provide empty pendingToolCalls so call_model mock knows to finish
-    const updatedState = { pauseGeneration: false, iterations: 1 };
-
-    // Second invocation
-    const secondResult = await graph.invoke(updatedState, threadConfig);
-
-    expect(secondResult.pauseGeneration).toBe(false);
+    // Verify graph is paused
+    expect(firstResult.__interrupt__).toBeDefined();
+    expect(firstResult.__interrupt__[0].value.question).toBe("Approve plan?");
     
-    // Checkpointer should preserve the toolCallRecords from the first run!
-    // Since execute_tools doesn't run again (pendingToolCalls empty), it should still be 1.
-    expect(secondResult.toolCallRecords.length).toBe(1);
-    expect(secondResult.toolCallRecords[0].toolName).toBe('write');
+    // Check internal state via thread config
+    const stateSnapshot = await graph.getState(threadConfig);
+    expect(stateSnapshot.next).toContain('planner');
+
+    // 2. Resume run: pass feedback using Command({ resume })
+    const resumeCommand = new Command({ resume: "Yes, I approve this plan!" });
+    const secondResult = await graph.invoke(resumeCommand, threadConfig);
+
+    // Verify it resumed and finished
+    expect(secondResult.__interrupt__).toBeUndefined();
+    
+    // The messages reducer concatenates arrays.
+    const systemMsgs = secondResult.messages.filter((m: any) => m.role === 'system');
+    const approvalMsg = systemMsgs.find((m: any) => m.content.includes("Approved: Yes, I approve this plan!"));
+    expect(approvalMsg).toBeDefined();
   });
 });
