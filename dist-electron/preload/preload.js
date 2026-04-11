@@ -84,6 +84,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         onSkillDetected: (cb) => {
             electron_1.ipcRenderer.on('acp:skill-detected', (_e, data) => cb(data));
         },
+        onSurfaceAction: (cb) => {
+            electron_1.ipcRenderer.on('acp:surface-action', (_e, data) => cb(data));
+        },
         onUsage: (cb) => {
             electron_1.ipcRenderer.on('acp:usage', (_e, data) => cb(data));
         },
@@ -105,6 +108,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:show-plan');
             electron_1.ipcRenderer.removeAllListeners('acp:view-skill');
             electron_1.ipcRenderer.removeAllListeners('acp:skill-detected');
+            electron_1.ipcRenderer.removeAllListeners('acp:surface-action');
             electron_1.ipcRenderer.removeAllListeners('acp:usage');
             electron_1.ipcRenderer.removeAllListeners('agent:permission-request');
         },

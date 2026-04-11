@@ -1065,7 +1065,7 @@ electron_1.ipcMain.handle('acp:stream', async (event, request) => {
                 });
             }
             else if (streamEvent.type === 'surface_action') {
-                safeSend('acp:surface-action', streamEvent.data);
+                safeSend('acp:surface-action', streamEvent);
             }
         }
         globalThis.__everfernSystemFilesPermissionGranted = false;

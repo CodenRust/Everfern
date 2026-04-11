@@ -1092,7 +1092,7 @@ ipcMain.handle('acp:stream', async (event, request: {
           totalTokens: streamEvent.totalTokens,
         });
       } else if (streamEvent.type === 'surface_action') {
-        safeSend('acp:surface-action', streamEvent.data);
+        safeSend('acp:surface-action', streamEvent);
       }
     }
     (globalThis as any).__everfernSystemFilesPermissionGranted = false;

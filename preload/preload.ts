@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onSkillDetected: (cb: (data: { skillName: string; skillDescription: string; reason: string }) => void) => {
       ipcRenderer.on('acp:skill-detected', (_e, data) => cb(data));
     },
+    onSurfaceAction: (cb: (data: any) => void) => {
+      ipcRenderer.on('acp:surface-action', (_e, data) => cb(data));
+    },
     onUsage: (cb: (data: { promptTokens: number; completionTokens: number; totalTokens: number }) => void) => {
       ipcRenderer.on('acp:usage', (_e, data) => cb(data));
     },
@@ -109,6 +112,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:show-plan');
       ipcRenderer.removeAllListeners('acp:view-skill');
       ipcRenderer.removeAllListeners('acp:skill-detected');
+      ipcRenderer.removeAllListeners('acp:surface-action');
       ipcRenderer.removeAllListeners('acp:usage');
       ipcRenderer.removeAllListeners('agent:permission-request');
     },
@@ -228,6 +232,7 @@ export type ElectronAPI = {
     onShowPlan:            (cb: (data: { chatId: string; content: string }) => void) => void;
     onViewSkill:           (cb: (data: { name: string }) => void) => void;
     onSkillDetected:       (cb: (data: { skillName: string; skillDescription: string; reason: string }) => void) => void;
+    onSurfaceAction:       (cb: (data: any) => void) => void;
     onAgentPermissionRequest: (cb: () => void) => void;
     agentPermissionResponse: (granted: boolean) => Promise<{ success: boolean }>;
     playSound: (soundPath: string) => Promise<boolean>;
