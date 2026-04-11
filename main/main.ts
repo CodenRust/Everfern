@@ -1083,6 +1083,12 @@ ipcMain.handle('acp:stream', async (event, request: {
         safeSend('acp:parallel-group-start', { groupIndex: streamEvent.groupIndex, toolNames: streamEvent.toolNames });
       } else if (streamEvent.type === 'parallel_group_end') {
         safeSend('acp:parallel-group-end', { groupIndex: streamEvent.groupIndex, durationMs: streamEvent.durationMs });
+      } else if (streamEvent.type === 'mission_step_update') {
+        safeSend('acp:mission-step-update', { step: streamEvent.step, timeline: streamEvent.timeline });
+      } else if (streamEvent.type === 'mission_phase_change') {
+        safeSend('acp:mission-phase-change', { phase: streamEvent.phase, timeline: streamEvent.timeline });
+      } else if (streamEvent.type === 'mission_complete') {
+        safeSend('acp:mission-complete', { timeline: streamEvent.timeline, steps: streamEvent.steps });
       } else if (streamEvent.type === 'done') {
         safeSend('acp:stream-chunk', { delta: '', done: true });
       } else if (streamEvent.type === 'usage') {

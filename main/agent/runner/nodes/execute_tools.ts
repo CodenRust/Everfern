@@ -11,18 +11,26 @@ import { getDefaultToolPolicyPipeline } from '../tool-policy';
 import { detectToolCallLoop, recordToolCall, recordToolOutcome } from '../loop-detection';
 import { captureScreen } from '../../tools/computer-use';
 import { interrupt } from '@langchain/langgraph';
+import type { MissionTracker } from '../mission-tracker';
+import { createMissionIntegrator } from '../mission-integrator';
 
 export const createExecuteToolsNode = (
   runner: any,
   tools: AgentTool[],
   config: AgentRunnerConfig,
   eventQueue?: StreamEvent[],
-  conversationId?: string
+  conversationId?: string,
+  missionTracker?: MissionTracker
 ) => {
+  const integrator = createMissionIntegrator(missionTracker);
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
-    runner.telemetry.transition('execute_tools');
+    const nodeIntegrator = createMissionIntegrator(missionTracker);
+    nodeIntegrator.startNode('execute_tools', `Executing ${state.pendingToolCalls?.length || 0} tool calls`);
+    
+    try {
+      runner.telemetry.transition('execute_tools');
 
-    const calls = state.pendingToolCalls;
+      const calls = state.pendingToolCalls;
     if (!calls || calls.length === 0) {
       runner.telemetry.warn('Execute tools node reached but no pending calls found.');
       return { pendingToolCalls: [], iterations: (state.iterations || 0) + 1 };
@@ -300,7 +308,7 @@ export const createExecuteToolsNode = (
       });
     }
 
-    return {
+    const result = {
       messages: newMessages,
       toolCallRecords: [...(state.toolCallRecords ?? []), ...newRecords],
       pendingToolCalls: nextPendingTools,
@@ -308,5 +316,12 @@ export const createExecuteToolsNode = (
       userConfirmation: undefined,
       toolCallHistory: [...(state.toolCallHistory ?? [])],
     };
+
+    nodeIntegrator.completeNode('execute_tools', `Completed ${calls.length} tool calls`);
+    return result;
+    } catch (error) {
+      nodeIntegrator.failNode('execute_tools', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   };
 };

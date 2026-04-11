@@ -101,6 +101,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPermissionSoundUrl: () => '/sounds/permission.mp3',
     playSound: (soundPath: string) => ipcRenderer.invoke('audio:play-sound', soundPath),
     validateNvidiaModel: (modelId: string, apiKey: string) => ipcRenderer.invoke('acp:validate-nvidia-model', modelId, apiKey),
+    
+    // Mission Timeline Events (OpenClaw style)
+    onMissionStepUpdate: (cb: (data: { step: any; timeline: any }) => void) => {
+      ipcRenderer.on('acp:mission-step-update', (_e, data) => cb(data));
+    },
+    onMissionPhaseChange: (cb: (data: { phase: string; timeline: any }) => void) => {
+      ipcRenderer.on('acp:mission-phase-change', (_e, data) => cb(data));
+    },
+    onMissionComplete: (cb: (data: { timeline: any; steps: any[] }) => void) => {
+      ipcRenderer.on('acp:mission-complete', (_e, data) => cb(data));
+    },
+
     removeStreamListeners: () => {
       ipcRenderer.removeAllListeners('acp:stream-chunk');
       ipcRenderer.removeAllListeners('acp:thought');
@@ -115,6 +127,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:surface-action');
       ipcRenderer.removeAllListeners('acp:usage');
       ipcRenderer.removeAllListeners('agent:permission-request');
+      ipcRenderer.removeAllListeners('acp:mission-step-update');
+      ipcRenderer.removeAllListeners('acp:mission-phase-change');
+      ipcRenderer.removeAllListeners('acp:mission-complete');
     },
   },
 
@@ -237,6 +252,9 @@ export type ElectronAPI = {
     agentPermissionResponse: (granted: boolean) => Promise<{ success: boolean }>;
     playSound: (soundPath: string) => Promise<boolean>;
     validateNvidiaModel: (modelId: string, apiKey: string) => Promise<{ valid: boolean; hasVision?: boolean; error?: string }>;
+    onMissionStepUpdate: (cb: (data: { step: any; timeline: any }) => void) => void;
+    onMissionPhaseChange: (cb: (data: { phase: string; timeline: any }) => void) => void;
+    onMissionComplete: (cb: (data: { timeline: any; steps: any[] }) => void) => void;
     removeStreamListeners: () => void;
   };
   history: {

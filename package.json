@@ -96,6 +96,7 @@
     "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "fast-check": "^4.6.0",
     "jsdom": "^29.0.2",
     "tailwindcss": "^4",
     "typescript": "^5",

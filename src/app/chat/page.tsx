@@ -37,6 +37,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { CheckIcon as CheckSolidIcon } from "@heroicons/react/24/solid";
 import { AgentTimeline } from "../../components/AgentTimeline";
+import MissionTimelineComponent from "../../components/MissionTimeline";
+import type { MissionTimeline as MissionTimelineType, MissionStep as MissionStepType } from "../../components/MissionTimeline";
 import StreamView from "../../components/StreamView";
 import WindowControls from "../components/WindowControls";
 import Sidebar from "../components/Sidebar";
@@ -1985,6 +1987,8 @@ export default function ChatPage() {
     const [streamingContent, setStreamingContent] = useState("");
     const [streamingThought, setStreamingThought] = useState("");
     const [modelCallInfo, setModelCallInfo] = useState<{ model: string; toolsCount: number } | null>(null);
+    const [missionTimeline, setMissionTimeline] = useState<MissionTimelineType | null>(null);
+    const [missionComplete, setMissionComplete] = useState(false);
 
     // Settings
     const [settingsShowuiUrl, setSettingsShowuiUrl] = useState("http://127.0.0.1:7860");
@@ -2384,6 +2388,64 @@ export default function ChatPage() {
                         setStreamingContent(streamingContentRef.current);
                     }
                 } else {
+                    // Don't mark as done yet - wait for mission_complete event
+                    if (delta) {
+                        streamingContentRef.current += delta;
+                        setStreamingContent(streamingContentRef.current);
+                    }
+                }
+            });
+
+            // Listen to mission timeline updates
+            acpApi.onMissionStepUpdate(({ step, timeline }: { step: any; timeline: MissionTimelineType }) => {
+                setMissionTimeline(timeline);
+            });
+
+            acpApi.onMissionPhaseChange(({ phase, timeline }: { phase: string; timeline: MissionTimelineType }) => {
+                setMissionTimeline(timeline);
+            });
+
+            acpApi.onMissionComplete(({ timeline, steps }: { timeline: MissionTimelineType; steps: any[] }) => {
+                setMissionTimeline(timeline);
+                setMissionComplete(true);
+                acpApi.removeStreamListeners();
+                isMessageCommittedRef.current = true;
+
+                const finalContent = streamingContentRef.current || "Done.";
+                const finalThought = streamingThoughtRef.current;
+                const finalToolCalls = liveToolCallsRef.current.map(t =>
+                    t.status === 'running' ? { ...t, status: 'done' as const } : t
+                );
+                const assistantMsg: Message = {
+                    id: crypto.randomUUID(),
+                    role: "assistant",
+                    content: finalContent,
+                    thought: finalThought,
+                    timestamp: new Date(),
+                    toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                };
+
+                setStreamingContent("");
+                setStreamingThought("");
+                setLiveToolCalls([]);
+                setIsLoading(false);
+                setMessages(prev => {
+                    // Prevent duplicate message if the last message is identical
+                    if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                        console.warn('[Chat] Duplicate plan message prevented');
+                        return prev;
+                    }
+                    const final = [...prev, assistantMsg];
+                    saveConversation(final);
+                    return final;
+                });
+            });
+
+            // Fallback: if no mission_complete event within reasonable time, mark as done
+            // This handles edge cases where mission tracking isn't properly initialized
+            const fallbackTimeout = setTimeout(() => {
+                if (!isMessageCommittedRef.current && missionComplete === false) {
+                    setMissionComplete(true);
                     acpApi.removeStreamListeners();
                     isMessageCommittedRef.current = true;
 
@@ -2406,12 +2468,17 @@ export default function ChatPage() {
                     setLiveToolCalls([]);
                     setIsLoading(false);
                     setMessages(prev => {
+                        // Prevent duplicate message if the last message is identical
+                        if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                            console.warn('[Chat] Duplicate fallback message prevented');
+                            return prev;
+                        }
                         const final = [...prev, assistantMsg];
                         saveConversation(final);
                         return final;
                     });
                 }
-            });
+            }, 120000); // 2 minute fallback
 
             try {
                 await acpApi.stream({
@@ -2552,6 +2619,11 @@ export default function ChatPage() {
                                     toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined
                                 };
                                 setMessages(prev => {
+                                    // Prevent duplicate message if the last message is identical
+                                    if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                                        console.warn('[Chat] Duplicate execution plan message prevented');
+                                        return prev;
+                                    }
                                     const final = [...prev, assistantMsg];
                                     saveConversation(final);
                                     return final;
@@ -2597,6 +2669,11 @@ export default function ChatPage() {
                         const finalToolCalls = liveToolCallsRef.current.map(t => t.status === 'running' ? { ...t, status: 'done' as const } : t);
                         const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: accumulated || "", thought: streamingThoughtRef.current, timestamp: new Date(), toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined };
                         setMessages(prev => {
+                            // Prevent duplicate message if the last message is identical
+                            if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                                console.warn('[Chat] Duplicate plan detail message prevented');
+                                return prev;
+                            }
                             const updatedMessages = [...prev, assistantMsg];
                             saveConversation(updatedMessages);
                             return updatedMessages;
@@ -2651,6 +2728,11 @@ export default function ChatPage() {
                         setIsLoading(false);
                         setIsComputerUseActive(false);
                         setMessages(prev => {
+                            // Prevent duplicate message if the last message is identical
+                            if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                                console.warn('[Chat] Duplicate message prevented:', assistantMsg.content.substring(0, 50));
+                                return prev;
+                            }
                             const final = [...prev, assistantMsg];
                             saveConversation(final);
                             return final;
@@ -2686,6 +2768,11 @@ export default function ChatPage() {
                 const finalToolCalls = liveToolCallsRef.current.map(t => t.status === 'running' ? { ...t, status: 'error' as const } : t);
                 const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: streamingContentRef.current ? streamingContentRef.current + `\n\n❌ ${errorMessage}` : `❌ ${errorMessage}`, thought: streamingThoughtRef.current, toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined, timestamp: new Date() };
                 setMessages(prev => {
+                    // Prevent duplicate message if the last message is identical
+                    if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                        console.warn('[Chat] Duplicate error message prevented');
+                        return prev;
+                    }
                     const final = [...prev, assistantMsg];
                     saveConversation(final);
                     return final;
@@ -3428,6 +3515,22 @@ export default function ChatPage() {
                                         </motion.div>
                                     )}
                                     <div ref={messagesEndRef} />
+
+                                    {/* Mission Timeline Display */}
+                                    {missionTimeline && isLoading && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            exit={{ opacity: 0, y: -10 }}
+                                            transition={{ duration: 0.3 }}
+                                            className="mx-auto w-full max-w-2xl px-6 py-4"
+                                        >
+                                            <MissionTimelineComponent
+                                                timeline={missionTimeline}
+                                                isRunning={isLoading && !missionComplete}
+                                            />
+                                        </motion.div>
+                                    )}
                                 </div>
                             </div>
 

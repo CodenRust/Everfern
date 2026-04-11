@@ -19,4 +19,9 @@ exports.GraphState = langgraph_1.Annotation.Root({
     // Multi-Agent State
     activeAgent: (0, langgraph_1.Annotation)(),
     validationResult: (0, langgraph_1.Annotation)(),
+    // Mission Tracking (OpenClaw style)
+    missionId: (0, langgraph_1.Annotation)(),
+    missionTimeline: (0, langgraph_1.Annotation)(),
+    missionSteps: (0, langgraph_1.Annotation)(),
+    currentStepId: (0, langgraph_1.Annotation)(),
 });

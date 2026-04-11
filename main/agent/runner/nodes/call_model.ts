@@ -4,6 +4,8 @@ import { AIClient, ChatMessage, ChatRequest, ToolDefinition } from '../../../lib
 import { GraphStateType, StreamEvent } from '../state';
 import { parseTextToToolCalls } from '../../parsers/text-to-tool';
 import { AgentRunner } from '../runner';
+import type { MissionTracker } from '../mission-tracker';
+import { createMissionIntegrator } from '../mission-integrator';
 
 import { normalizeMessages } from '../services/message-utils';
 
@@ -12,12 +14,16 @@ export const createCallModelNode = (
   toolDefs: ToolDefinition[],
   eventQueue?: StreamEvent[],
   maxIterations: number = 10,
-  maxVerifyRetries: number = 3
+  maxVerifyRetries: number = 3,
+  missionTracker?: MissionTracker
 ) => {
   let verifyIntentRetries = 0;
+  const integrator = createMissionIntegrator(missionTracker);
 
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
-    runner.telemetry.transition('call_model');
+    integrator.startNode('call_model', 'Calling AI model');
+    try {
+      runner.telemetry.transition('call_model');
     runner.telemetry.metrics(state.iterations);
 
     const iterations = state.iterations;
@@ -250,11 +256,17 @@ You do not need to use complex execution plans or tools for this interaction.`;
       eventQueue?.push({ type: 'chunk', content: scrubbed });
     }
 
-    return {
+    const result = {
       messages: [assistantMsg as any],
       pendingToolCalls: response.toolCalls ?? [],
       iterations,
       finalResponse: response.finishReason !== 'tool_calls' ? scrubbed : '',
     };
+    integrator.completeNode('call_model', 'Model call completed');
+    return result;
+    } catch (error) {
+      integrator.failNode('call_model', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   };
 };

@@ -1,0 +1,124 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - Short Affirmative Context Loss
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Test concrete failing cases - short affirmatives ("yes", "ok", "proceed") following messages with clear intent signals (file uploads, explicit requests)
+  - Test that `classifyIntent` with input `{ currentMessage: "yes", conversationHistory: [userUploadedCSV, "analyze this"] }` returns intent "analyze" (from Bug Condition in design)
+  - Test that `classifyIntent` with input `{ currentMessage: "ok proceed", conversationHistory: ["fix the auth bug"] }` returns intent "fix"
+  - Test that `classifyIntent` with input `{ currentMessage: "continue", conversationHistory: [userUploadedCodeFile, "review this"] }` returns intent "coding"
+  - The test assertions should match the Expected Behavior Properties from design (intent inheritance, confidence >= 0.85, reasoning contains "inherit")
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found: short affirmatives are classified as "conversation" instead of inheriting previous intent
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Non-Affirmative Message Classification
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs:
+    - Substantive messages: "analyze this CSV file" should classify as "analyze"
+    - Greetings: "hello" at conversation start should classify as "conversation"
+    - Standalone affirmatives: "yes" without prior context should classify as "conversation"
+    - Keyword-rich messages: "write a function to parse JSON" should classify as "coding"
+    - Multi-action patterns: "find all files and analyze them" should classify correctly
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements
+  - Property-based testing generates many test cases for stronger guarantees
+  - Test that for all substantive messages (length > 10, contains intent keywords), classification matches original behavior
+  - Test that for all greetings at conversation start, classification returns "conversation"
+  - Test that for all standalone affirmatives (no prior context), classification returns "conversation"
+  - Test that for all messages with explicit coding/research/task keywords, classification matches original scoring
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [x] 3. Fix for triage context awareness
+
+  - [x] 3.1 Add context signal detection helper functions
+    - Create `isShortAffirmative(message: string): boolean` function
+    - Detect affirmatives: ['yes', 'ok', 'okay', 'proceed', 'continue', 'sure', 'go ahead', 'yep', 'yeah']
+    - Handle variations and short messages (< 10 characters)
+    - Create `extractPreviousIntent(history: any[]): IntentType | null` function
+    - Extract last user message from history (offset=1)
+    - Check for file attachments (CSV/data files → "analyze", code files → "coding")
+    - Check for explicit intent keywords in previous message content
+    - Return appropriate intent or null if no context signals found
+    - Create `hasFileAttachment(message: any): boolean` helper
+    - Create `hasExplicitIntentKeywords(message: any): boolean` helper
+    - _Bug_Condition: isBugCondition(input) where isShortAffirmative(input.currentMessage) AND hasPreviousContextSignal(input.conversationHistory) AND NOT intentInherited(input.currentMessage, input.conversationHistory)_
+    - _Expected_Behavior: expectedBehavior(result) where result.intent == extractPreviousIntent(input.conversationHistory) AND result.confidence >= 0.85 AND result.reasoning CONTAINS "inherit"_
+    - _Preservation: Preservation Requirements - all non-affirmative inputs must produce identical results_
+    - _Requirements: 2.1, 2.2, 2.4, 2.5, 2.6_
+
+  - [x] 3.2 Modify classifyIntent fast-path logic
+    - Before returning heuristic classification for short messages, check if it's an affirmative
+    - If affirmative and history exists, call extractPreviousIntent
+    - If previous intent found, return inherited intent with high confidence (0.95)
+    - Include reasoning: "Short affirmative detected - inheriting previous intent: {intent}"
+    - Only use fast-path for greetings or non-affirmative short messages
+    - Ensure standalone affirmatives without context still classify as "conversation"
+    - _Bug_Condition: isBugCondition(input) from design_
+    - _Expected_Behavior: expectedBehavior(result) from design_
+    - _Preservation: Preservation Requirements - greetings and standalone affirmatives must continue to work_
+    - _Requirements: 2.1, 2.2, 2.3, 2.6, 3.2, 3.3_
+
+  - [x] 3.3 Enhance classifyIntentAI prompt with context inheritance
+    - Add explicit instructions to recognize short affirmatives as continuations
+    - Emphasize checking conversation history for file uploads and previous intents
+    - Provide examples of context inheritance in the prompt
+    - Example: "Previous: [USER uploads sales.csv] 'Can you analyze this?' Current: 'yes' → Classification: 'analyze' (inherit from previous context)"
+    - Example: "Previous: [USER] 'Fix the auth bug' Current: 'ok proceed' → Classification: 'fix' (inherit from previous context)"
+    - _Bug_Condition: isBugCondition(input) from design_
+    - _Expected_Behavior: expectedBehavior(result) from design_
+    - _Preservation: Preservation Requirements - AI classification for non-affirmatives must remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.4, 2.6_
+
+  - [x] 3.4 Enhance classifyIntentHeuristic with context awareness
+    - Accept and use `history` parameter (currently not used)
+    - Before keyword scoring, check if message is short affirmative
+    - If affirmative, call extractPreviousIntent with history
+    - If previous intent found, return inherited intent with confidence 0.90
+    - Include reasoning: "Heuristic: Short affirmative - inherited {intent} from previous message"
+    - Continue with original keyword scoring logic for non-affirmatives
+    - _Bug_Condition: isBugCondition(input) from design_
+    - _Expected_Behavior: expectedBehavior(result) from design_
+    - _Preservation: Preservation Requirements - heuristic classification for non-affirmatives must remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.5, 2.6_
+
+  - [x] 3.5 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Short Affirmative Context Inheritance
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - Verify that short affirmatives following file uploads now inherit "analyze" intent
+    - Verify that short affirmatives following explicit requests now inherit correct intent ("fix", "coding", etc.)
+    - Verify confidence >= 0.85 and reasoning contains "inherit"
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
+
+  - [x] 3.6 Verify preservation tests still pass
+    - **Property 2: Preservation** - Non-Affirmative Message Classification
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - Verify substantive messages still classify correctly based on content
+    - Verify greetings at conversation start still classify as "conversation"
+    - Verify standalone affirmatives without context still classify as "conversation"
+    - Verify keyword-rich messages still classify according to existing heuristics
+    - Verify multi-action patterns still score correctly
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix (no regressions)
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [x] 4. Checkpoint - Ensure all tests pass
+  - Run all bug condition exploration tests - verify they now pass
+  - Run all preservation property tests - verify they still pass
+  - Run any existing unit tests for triage system - verify no regressions
+  - Test integration: simulate CSV upload → "yes" → verify DATA_ANALYST routing
+  - Test integration: simulate fix request → "ok" → verify correct specialist routing
+  - Ensure all tests pass, ask the user if questions arise

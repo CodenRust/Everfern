@@ -1,0 +1,109 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - Premature Task Completion on Incomplete Work
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate premature END routing when specialist nodes complete without tool calls on incomplete tasks
+  - **Scoped PBT Approach**: Scope the property to concrete failing cases: specialist nodes (coding_specialist, data_analyst, web_explorer, computer_use_agent) completing with empty pendingToolCalls on incomplete task objectives
+  - Test that when `isBugCondition(state)` is true (specialist completes without tools AND task objective not achieved), the validation node routes to END instead of global_planner
+  - Concrete test cases:
+    - Coding task: "Create a Python script" → coding_specialist returns text without write tool calls → routes to END (should route to global_planner)
+    - Research task: "Research AI trends" → web_explorer returns one result without continuing → routes to END (should route to global_planner)
+    - Data task: "Analyze dataset and create visualizations" → data_analyst returns text without chart tool calls → routes to END (should route to global_planner)
+  - Run test on UNFIXED code in `main/agent/runner/nodes/validation.ts` and `main/agent/runner/graph.ts`
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found: validation routes to END when `!hasTools` even though task objective is not achieved
+  - Examine failures to understand root cause: missing completion validation logic in validation node
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Tool Execution and HITL Approval Flows
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs (cases where specialist nodes generate tool calls)
+  - Observe: When specialist generates tool calls → validation routes to hitl_approval (if high-risk) OR multi_tool_orchestrator → global_planner
+  - Observe: When high-risk tools detected → validation routes to hitl_approval for human approval
+  - Observe: When tool execution completes → orchestrator routes back to global_planner for next iteration
+  - Observe: When max iterations reached → system terminates mission to prevent infinite loops
+  - Observe: When read-only task completes (question, conversation) → system routes to END appropriately
+  - Write property-based tests capturing observed behavior patterns:
+    - For all states where `hasTools == true`, validation routing decision matches original behavior
+    - For all states where `isHighRisk == true`, validation routes to hitl_approval
+    - For all states where `iterations >= MAX_ITERATIONS`, system routes to END
+    - For all states where `currentIntent IN ['question', 'conversation']` and no tools, system routes to END
+  - Property-based testing generates many test cases for stronger preservation guarantees
+  - Run tests on UNFIXED code in `main/agent/runner/nodes/validation.ts` and `main/agent/runner/graph.ts`
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [x] 3. Fix for premature task completion
+
+  - [x] 3.1 Add completion validation logic to validation node
+    - Implement `shouldCompleteTask(state)` function in `main/agent/runner/nodes/validation.ts`
+    - Evaluation heuristics:
+      - If `state.iterations >= MAX_ITERATIONS`, return true (force completion to prevent infinite loops)
+      - If `state.currentIntent IN ['question', 'conversation']`, return true (read-only tasks complete without tools)
+      - If `state.decomposedTask` exists and all steps marked complete, return true
+      - Check last assistant message for completion indicators ("Task completed", "Here is the result", etc.)
+      - Default: return false (continue iterating)
+    - Add `shouldContinueIteration` field to validation node return value
+    - Set `shouldContinueIteration: !shouldCompleteTask(state)` in validation result
+    - _Bug_Condition: isBugCondition(state) where (state.taskPhase == 'validation') AND (state.pendingToolCalls.length == 0) AND (state.activeAgent IN specialist nodes) AND NOT isTaskObjectiveAchieved(state) AND routingDecision(state) == END_
+    - _Expected_Behavior: When isBugCondition(state) is true, validation node SHALL return shouldContinueIteration: true, causing routing to global_planner instead of END_
+    - _Preservation: Tool execution flow (hasTools == true) SHALL produce same routing decision as original code_
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+  - [x] 3.2 Extend GraphStateType with shouldContinueIteration field
+    - Add `shouldContinueIteration: Annotation<boolean>()` to GraphState in `main/agent/runner/state.ts`
+    - This field signals to graph routing logic whether to continue iterating or complete the mission
+    - _Requirements: 2.1, 2.3_
+
+  - [x] 3.3 Update graph routing logic to check task completion
+    - Modify `action_validation` conditional edge in `main/agent/runner/graph.ts` (lines 56-62)
+    - When `!hasTools`, check `state.shouldContinueIteration` before routing to END
+    - If `shouldContinueIteration == true`, route to `global_planner` for next iteration
+    - If `shouldContinueIteration == false`, route to END (task complete)
+    - Add `global_planner` to conditional edge targets
+    - Preserve existing logic: if `hasTools`, route to hitl_approval (if high-risk) OR multi_tool_orchestrator
+    - Add max iterations safety check: if `state.iterations >= MAX_ITERATIONS`, force route to END
+    - _Bug_Condition: Original code routes to END when !hasTools without checking task completion_
+    - _Expected_Behavior: Fixed code routes to global_planner when !hasTools AND shouldContinueIteration == true_
+    - _Preservation: When hasTools == true, routing decision SHALL match original behavior (hitl_approval OR multi_tool_orchestrator)_
+    - _Requirements: 2.1, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4_
+
+  - [x] 3.4 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Task Completion Validation Works
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1 on FIXED code
+    - Verify that when specialist completes without tools on incomplete task, validation routes to global_planner (not END)
+    - Verify concrete test cases now pass:
+      - Coding task: "Create a Python script" → routes to global_planner for tool generation
+      - Research task: "Research AI trends" → routes to global_planner to continue research
+      - Data task: "Analyze dataset and create visualizations" → routes to global_planner for chart tool calls
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+  - [x] 3.5 Verify preservation tests still pass
+    - **Property 2: Preservation** - Tool Execution and HITL Flows Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2 on FIXED code
+    - Verify tool execution flow preserved: hasTools == true → hitl_approval OR multi_tool_orchestrator → global_planner
+    - Verify HITL approval flow preserved: isHighRisk == true → hitl_approval
+    - Verify max iterations preserved: iterations >= MAX_ITERATIONS → END
+    - Verify read-only task flow preserved: question/conversation intent with no tools → END
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all preservation tests still pass after fix
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [x] 4. Checkpoint - Ensure all tests pass
+  - Run all bug condition exploration tests - verify they now pass (bug is fixed)
+  - Run all preservation property tests - verify they still pass (no regressions)
+  - Run existing unit tests for validation node and graph routing
+  - Run integration tests for multi-iteration missions
+  - Verify max iterations enforcement prevents infinite loops
+  - Verify read-only tasks still complete quickly
+  - Ensure all tests pass, ask the user if questions arise

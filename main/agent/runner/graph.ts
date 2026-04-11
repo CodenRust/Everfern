@@ -8,6 +8,7 @@ import { createValidationNode } from './nodes/validation';
 import { createCodingSpecialistNode, createDataAnalystNode, createComputerUseNode, createWebExplorerNode } from './nodes/specialized_agents';
 import { AgentRunner } from './runner';
 import { isReadOnlyTask } from './triage';
+import type { MissionTracker } from './mission-tracker';
 
 const memorySaver = new MemorySaver();
 
@@ -16,27 +17,30 @@ export const buildGraph = (
   toolDefs: any[],
   tools: any[],
   eventQueue?: StreamEvent[],
-  conversationId?: string
+  conversationId?: string,
+  missionTracker?: MissionTracker,
 ) => {
   const config = (runner as any).config;
 
   const hitlNode = async (state: GraphStateType) => {
     runner.telemetry.transition('hitl');
+    if (missionTracker) missionTracker.startStep('step:hitl');
     const feedback = interrupt({ question: "High-risk action detected. Approve?", task: state.pendingToolCalls });
+    if (missionTracker) missionTracker.completeStep('step:hitl');
     return { taskPhase: 'orchestrating' };
   };
 
-  const orchestrator = createExecuteToolsNode(runner, tools, config, eventQueue, conversationId);
-  const validator = createValidationNode(runner);
+  const orchestrator = createExecuteToolsNode(runner, tools, config, eventQueue, conversationId, missionTracker);
+  const validator = createValidationNode(runner, missionTracker);
   
-  const codingSpecialist = createCodingSpecialistNode(runner, eventQueue);
-  const dataAnalyst = createDataAnalystNode(runner, eventQueue);
-  const computerUse = createComputerUseNode(runner, eventQueue);
-  const webExplorer = createWebExplorerNode(runner, eventQueue);
+  const codingSpecialist = createCodingSpecialistNode(runner, eventQueue, missionTracker, toolDefs);
+  const dataAnalyst = createDataAnalystNode(runner, eventQueue, missionTracker, toolDefs);
+  const computerUse = createComputerUseNode(runner, eventQueue, missionTracker, toolDefs);
+  const webExplorer = createWebExplorerNode(runner, eventQueue, missionTracker, toolDefs);
 
   return new StateGraph(GraphState)
-    .addNode('intent_classifier', createTriageNode(runner, eventQueue))
-    .addNode('global_planner', createPlannerNode(runner, eventQueue))
+    .addNode('intent_classifier', createTriageNode(runner, eventQueue, missionTracker))
+    .addNode('global_planner', createPlannerNode(runner, eventQueue, missionTracker))
     .addNode('coding_specialist', codingSpecialist)
     .addNode('data_analyst', dataAnalyst)
     .addNode('computer_use_agent', computerUse)
@@ -70,10 +74,16 @@ export const buildGraph = (
     .addEdge('web_explorer', 'action_validation')
     .addConditionalEdges('action_validation', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        if (!hasTools) return END; // Model finished without tools
+        
+        // If no tools, check if task is actually complete
+        if (!hasTools) {
+          // Check if we should continue iterating or complete the mission
+          return state.shouldContinueIteration ? 'global_planner' : END;
+        }
 
         return state.validationResult?.isHighRisk ? 'hitl_approval' : 'multi_tool_orchestrator';
     }, { 
+        global_planner: 'global_planner',
         hitl_approval: 'hitl_approval', 
         multi_tool_orchestrator: 'multi_tool_orchestrator',
         [END]: END 

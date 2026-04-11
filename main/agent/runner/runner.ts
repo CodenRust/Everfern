@@ -190,6 +190,35 @@ export class AgentRunner {
     sessionCreated(sessionKey);
     emitLifecycle(sessionKey, 'session_started', { convId, model: this.client.model });
 
+    // Initialize mission tracker for timeline tracking
+    const { createMissionTracker } = await import('./mission-tracker');
+    const missionTracker = createMissionTracker(convId);
+    
+    // Add initial mission steps
+    missionTracker.addStep({
+      id: 'step:triage',
+      name: 'Analyzing Intent',
+      description: 'Classifying user request and identifying task type',
+      phase: 'triage',
+    });
+
+    // Setup mission tracker event emission to IPC
+    missionTracker.onStepUpdate((step, timeline) => {
+      eventQueue.push({
+        type: 'mission_step_update',
+        step,
+        timeline,
+      });
+    });
+
+    missionTracker.onPhaseChange((phase, timeline) => {
+      eventQueue.push({
+        type: 'mission_phase_change',
+        phase,
+        timeline,
+      });
+    });
+
     // Check Context Window before proceeding
     const textInput = typeof userInput === 'string' ? userInput : JSON.stringify(userInput);
     const { ContextWindowGuard } = await import('./context-window-guard');
@@ -219,7 +248,8 @@ export class AgentRunner {
       this._buildToolDefinitions(), 
       this.tools,
       eventQueue,
-      convId
+      convId,
+      missionTracker
     );
 
     this.telemetry.updateSpinner('Invoking agent node pipeline...');
@@ -233,8 +263,10 @@ export class AgentRunner {
 
         if (currentState && currentState.next && currentState.next.length > 0) {
             this.telemetry.info(`Resuming session ${convId} from interrupted state...`);
+            missionTracker.startStep('step:triage');
             await graph.invoke(new Command({ resume: textInput }), threadConfig);
         } else {
+            missionTracker.startStep('step:triage');
             await graph.invoke({
               messages: initialMessages,
               toolCallRecords: [],
@@ -242,8 +274,13 @@ export class AgentRunner {
               pendingToolCalls: [],
               finalResponse: '',
               toolCallHistory: [],
+              missionId: convId,
+              missionTimeline: missionTracker.getTimeline(),
+              missionSteps: missionTracker.getSteps(),
+              currentStepId: 'step:triage',
             }, threadConfig);
         }
+        missionTracker.complete();
       } catch (err) {
         console.error('[AgentRunner] Graph Error:', err);
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -254,8 +291,10 @@ export class AgentRunner {
             type: 'chunk', 
             content: `\n\n⚠️ **Rate Limit Reached**: The AI provider (Gemini) is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.` 
           });
+          missionTracker.fail(errorMsg);
         } else {
           eventQueue.push({ type: 'chunk', content: `\n\n❌ **Error during execution:** ${errorMsg}` });
+          missionTracker.fail(errorMsg);
         }
         
         this.telemetry.warn(`Graph mission aborted: ${errorMsg}`);
@@ -265,12 +304,24 @@ export class AgentRunner {
       }
     })();
 
-    while (!graphDone || eventQueue.length > 0) {
-      if (eventQueue.length > 0) yield eventQueue.shift()!;
-      else await new Promise(r => setTimeout(r, 10));
+    // Drain all events and wait for mission completion
+    while (!graphDone || eventQueue.length > 0 || !missionTracker.getTimeline().isComplete) {
+      if (eventQueue.length > 0) {
+        yield eventQueue.shift()!;
+      } else {
+        await new Promise(r => setTimeout(r, 10));
+      }
     }
 
     this.telemetry.terminate(true);
+    
+    // Emit final mission completion event
+    yield {
+      type: 'mission_complete',
+      timeline: missionTracker.getTimeline(),
+      steps: missionTracker.getSteps(),
+    };
+    
     yield { type: 'done' };
   }
 }

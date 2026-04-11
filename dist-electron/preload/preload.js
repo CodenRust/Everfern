@@ -97,6 +97,16 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         getPermissionSoundUrl: () => '/sounds/permission.mp3',
         playSound: (soundPath) => electron_1.ipcRenderer.invoke('audio:play-sound', soundPath),
         validateNvidiaModel: (modelId, apiKey) => electron_1.ipcRenderer.invoke('acp:validate-nvidia-model', modelId, apiKey),
+        // Mission Timeline Events (OpenClaw style)
+        onMissionStepUpdate: (cb) => {
+            electron_1.ipcRenderer.on('acp:mission-step-update', (_e, data) => cb(data));
+        },
+        onMissionPhaseChange: (cb) => {
+            electron_1.ipcRenderer.on('acp:mission-phase-change', (_e, data) => cb(data));
+        },
+        onMissionComplete: (cb) => {
+            electron_1.ipcRenderer.on('acp:mission-complete', (_e, data) => cb(data));
+        },
         removeStreamListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:stream-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:thought');
@@ -111,6 +121,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:surface-action');
             electron_1.ipcRenderer.removeAllListeners('acp:usage');
             electron_1.ipcRenderer.removeAllListeners('agent:permission-request');
+            electron_1.ipcRenderer.removeAllListeners('acp:mission-step-update');
+            electron_1.ipcRenderer.removeAllListeners('acp:mission-phase-change');
+            electron_1.ipcRenderer.removeAllListeners('acp:mission-complete');
         },
     },
     // ── Chat History ───────────────────────────────────────────────
