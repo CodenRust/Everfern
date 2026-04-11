@@ -24,7 +24,7 @@ import WindowControls from "../components/WindowControls";
 // ── Provider Logos ────────────────
 
 const OpenAILogo = ({ size = 20 }: { size?: number }) => (
-    <Image src="/images/ai-providers/openai.svg" alt="OpenAI Logo" width={size} height={size} className="invert opacity-80" />
+    <Image src="/images/ai-providers/openai.svg" alt="OpenAI Logo" width={size} height={size} />
 );
 
 const AnthropicLogo = ({ size = 20 }: { size?: number }) => (
@@ -44,7 +44,7 @@ const NvidiaLogo = ({ size = 20 }: { size?: number }) => (
 );
 
 const OllamaLogo = ({ size = 20 }: { size?: number }) => (
-    <Image src="/images/ai-providers/ollama.svg" alt="Ollama Logo" width={size} height={size} className="invert opacity-80" />
+    <Image src="/images/ai-providers/ollama.svg" alt="Ollama Logo" width={size} height={size} />
 );
 
 const LMStudioLogo = ({ size = 20 }: { size?: number }) => (
@@ -52,7 +52,7 @@ const LMStudioLogo = ({ size = 20 }: { size?: number }) => (
 );
 
 const EverFernBglessLogo = ({ size = 20 }: { size?: number }) => (
-    <Image src="/images/logos/everfern-withoutbg.png" alt="EverFern Cloud" width={size} height={size} className="grayscale opacity-80" />
+    <Image src="/images/logos/black-logo-withoutbg.png" alt="EverFern Cloud" width={size} height={size} />
 );
 
 const MORE_PROVIDERS = [
@@ -153,8 +153,8 @@ function CoffeeBreakBanner({ currentPkg, pipPct, pipSpeed, overallPct }: {
 }) {
     return (
         <div style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(32,30,36,0.04)",
+            border: "1px solid rgba(32,30,36,0.1)",
             borderRadius: 16,
             padding: "16px 20px",
             display: "flex",
@@ -167,55 +167,55 @@ function CoffeeBreakBanner({ currentPkg, pipPct, pipSpeed, overallPct }: {
             <div style={{ flexShrink: 0, position: "relative" }}>
                 <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
                     {/* Steam trails */}
-                    <path d="M17 12 Q19 7 17 2" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round"
+                    <path d="M17 12 Q19 7 17 2" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round"
                         style={{ animation: "steam 2s ease-in-out infinite", animationDelay: "0s", opacity: 0.7 }} />
-                    <path d="M23 12 Q25 6 23 1" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round"
+                    <path d="M23 12 Q25 6 23 1" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round"
                         style={{ animation: "steam 2s ease-in-out infinite", animationDelay: "0.4s", opacity: 0.7 }} />
-                    <path d="M29 12 Q31 7 29 2" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round"
+                    <path d="M29 12 Q31 7 29 2" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round"
                         style={{ animation: "steam 2s ease-in-out infinite", animationDelay: "0.8s", opacity: 0.7 }} />
                     {/* Cup body */}
                     <rect x="9" y="15" width="28" height="22" rx="4"
-                        fill="rgba(96,165,250,0.1)" stroke="rgba(96,165,250,0.35)" strokeWidth="1.2" />
+                        fill="rgba(59,130,246,0.1)" stroke="rgba(59,130,246,0.35)" strokeWidth="1.2" />
                     {/* Liquid surface */}
                     <rect x="11" y="27" width="24" height="8" rx="2"
-                        fill="rgba(96,165,250,0.18)" />
+                        fill="rgba(59,130,246,0.18)" />
                     {/* Handle */}
                     <path d="M37 19 Q45 19 45 26 Q45 33 37 33"
-                        stroke="rgba(96,165,250,0.35)" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+                        stroke="rgba(59,130,246,0.35)" strokeWidth="1.5" fill="none" strokeLinecap="round" />
                     {/* Saucer */}
                     <ellipse cx="23" cy="39" rx="17" ry="3.5"
-                        fill="rgba(96,165,250,0.07)" stroke="rgba(96,165,250,0.2)" strokeWidth="1" />
+                        fill="rgba(59,130,246,0.07)" stroke="rgba(59,130,246,0.2)" strokeWidth="1" />
                 </svg>
             </div>
 
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: "#f4f4f5" }}>Take a coffee break</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#201e24" }}>Take a coffee break</span>
                     <span style={{
                         fontSize: 9, fontWeight: 700, textTransform: "uppercase" as const,
                         letterSpacing: "0.12em", background: "rgba(59,130,246,0.15)",
-                        color: "#60a5fa", padding: "2px 7px", borderRadius: 999,
+                        color: "#3b82f6", padding: "2px 7px", borderRadius: 999,
                     }}>Installing</span>
                 </div>
-                <p style={{ fontSize: 12, color: "#52525b", lineHeight: 1.6, margin: "0 0 10px" }}>
+                <p style={{ fontSize: 12, color: "#8a8886", lineHeight: 1.6, margin: "0 0 10px" }}>
                     This might take a few minutes. Dependencies are being downloaded automatically.
                 </p>
 
                 {/* Overall progress */}
                 <div>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                        <span style={{ fontSize: 10, color: "#3f3f46", textTransform: "uppercase" as const, letterSpacing: "0.1em", fontWeight: 600 }}>
+                        <span style={{ fontSize: 10, color: "#8a8886", textTransform: "uppercase" as const, letterSpacing: "0.1em", fontWeight: 600 }}>
                             Overall Progress
                         </span>
-                        <span style={{ fontSize: 10, color: "#52525b", fontFamily: "monospace" }}>
+                        <span style={{ fontSize: 10, color: "#201e24", fontFamily: "monospace" }}>
                             {Math.round(overallPct)}%
                         </span>
                     </div>
-                    <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ height: 4, background: "rgba(32,30,36,0.1)", borderRadius: 999, overflow: "hidden" }}>
                         <div style={{
                             height: "100%",
                             width: `${overallPct}%`,
-                            background: "linear-gradient(90deg, #3b82f6, #60a5fa)",
+                            background: "linear-gradient(90deg, #2563eb, #3b82f6)",
                             borderRadius: 999,
                             transition: "width 0.4s ease",
                         }} />
@@ -234,36 +234,35 @@ function PipProgressBar({ pkg, pct, speed, eta }: {
     return (
         <div style={{
             padding: "8px 14px",
-            borderBottom: "1px solid rgba(255,255,255,0.04)",
-            background: "rgba(0,0,0,0.2)",
+            borderBottom: "1px solid rgba(32,30,36,0.05)",
+            background: "rgba(32,30,36,0.02)",
         }}>
             {/* Package name line */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, fontFamily: "monospace", fontSize: 11.5 }}>
-                <span style={{ color: "#60a5fa" }}>Downloading</span>
-                <span style={{ color: "#f9a8d4", fontWeight: 700 }}>{pkg}</span>
-                {speed && <span style={{ color: "#52525b", marginLeft: "auto" }}>{speed}</span>}
-                {eta && <span style={{ color: "#3f3f46" }}>eta {eta}</span>}
+                <span style={{ color: "#3b82f6" }}>Downloading</span>
+                <span style={{ color: "#201e24", fontWeight: 700 }}>{pkg}</span>
+                {speed && <span style={{ color: "#8a8886", marginLeft: "auto" }}>{speed}</span>}
+                {eta && <span style={{ color: "#a1a1aa" }}>eta {eta}</span>}
             </div>
             {/* Progress bar row */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {/* pip-style bar with block chars feel */}
                 <div style={{
                     flex: 1, height: 6,
-                    background: "rgba(255,255,255,0.06)",
+                    background: "rgba(32,30,36,0.1)",
                     borderRadius: 3, overflow: "hidden",
                 }}>
                     <div style={{
                         height: "100%",
                         width: `${pct}%`,
-                        background: "#3b82f6",
+                        background: "#2563eb",
                         borderRadius: 3,
                         transition: "width 0.2s linear",
-                        boxShadow: pct > 0 ? "0 0 6px rgba(59,130,246,0.5)" : "none",
                     }} />
                 </div>
                 <span style={{
                     fontSize: 10, fontFamily: "monospace",
-                    color: pct === 100 ? "#4ade80" : "#52525b",
+                    color: pct === 100 ? "#16a34a" : "#8a8886",
                     minWidth: 32, textAlign: "right" as const,
                 }}>
                     {pct}%
@@ -294,25 +293,25 @@ function StepPills({ installStep }: { installStep: number }) {
                         padding: "12px 10px",
                         borderRadius: 12,
                         background: isDone
-                            ? "rgba(74,222,128,0.04)"
+                            ? "rgba(34,197,94,0.08)"
                             : isActive
-                                ? "rgba(59,130,246,0.05)"
-                                : "rgba(255,255,255,0.015)",
+                                ? "rgba(59,130,246,0.08)"
+                                : "rgba(32,30,36,0.03)",
                         border: isDone
-                            ? "1px solid rgba(74,222,128,0.3)"
+                            ? "1px solid rgba(34,197,94,0.25)"
                             : isActive
-                                ? "1px solid rgba(59,130,246,0.35)"
-                                : "1px solid rgba(255,255,255,0.04)",
-                        opacity: (!isDone && !isActive) ? 0.4 : 1,
+                                ? "1px solid rgba(59,130,246,0.3)"
+                                : "1px solid rgba(32,30,36,0.08)",
+                        opacity: (!isDone && !isActive) ? 0.6 : 1,
                         transition: "all 0.3s ease",
                     }}>
                         <span style={{ fontSize: 18 }}>{s.icon}</span>
                         <div style={{
                             fontSize: 10, fontWeight: 700,
-                            color: isDone ? "#4ade80" : isActive ? "#60a5fa" : "#a1a1aa",
+                            color: isDone ? "#16a34a" : isActive ? "#2563eb" : "#8a8886",
                             textTransform: "uppercase" as const, letterSpacing: "0.1em",
                         }}>{s.title}</div>
-                        <div style={{ fontSize: 10, color: "#3f3f46" }}>{s.desc}</div>
+                        <div style={{ fontSize: 10, color: "#8a8886" }}>{s.desc}</div>
                     </div>
                 );
             })}
@@ -368,7 +367,7 @@ export default function SetupPage() {
             setModelInstalled(res.modelInstalled);
             // If both are installed, and we are on step 4, we can finish early
             if (res.installed && res.modelInstalled && step === 4) {
-               handleSave();
+                handleSave();
             }
         }
     };
@@ -398,7 +397,7 @@ export default function SetupPage() {
                     if (data.pct !== undefined) {
                         setPipPct(data.pct);
                         // Micro-advance overall progress during pip for better UX
-                        setOverallPct(prev => Math.min(prev + 0.1, 99)); 
+                        setOverallPct(prev => Math.min(prev + 0.1, 99));
                     }
                     if (data.speed) setPipSpeed(data.speed);
                     if (data.eta) setPipEta(data.eta);
@@ -406,9 +405,9 @@ export default function SetupPage() {
                 }
 
                 setInstallLogs(prev => [...prev, data]);
-                
+
                 if (data.step > 0 && data.pct === undefined) {
-                   setInstallStep(prev => Math.max(prev, data.step));
+                    setInstallStep(prev => Math.max(prev, data.step));
                 }
 
                 if (data.kind === "fail") setInstallError(data.line);
@@ -522,7 +521,7 @@ export default function SetupPage() {
             (window as any).electronAPI.system.onOllamaInstallLine((data: { line: string }) => {
                 const rawLine = data.line;
                 const cleanLine = stripAnsi(rawLine);
-                
+
                 // Parse percentage like "###### 78.5%" or " 2%"
                 const pctMatch = cleanLine.match(/(\d+\.?\d*)%/);
                 if (pctMatch) {
@@ -573,10 +572,7 @@ export default function SetupPage() {
                 style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
             >
                 <div style={{ display: "flex", alignItems: "center", gap: 8, WebkitAppRegion: "no-drag" } as React.CSSProperties}>
-                    <Image unoptimized src="/images/logos/everfern-withoutbg.png" alt="" width={18} height={18} />
-                    <span style={{ fontSize: 13, fontWeight: 500, color: "#3f3f46", letterSpacing: "0.02em" }}>
-                        Setup Wizard
-                    </span>
+                    <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={18} height={18} />
                 </div>
                 <div style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
                     <WindowControls />
@@ -590,7 +586,7 @@ export default function SetupPage() {
                             width: s === step ? 20 : 6,
                             height: 4,
                             borderRadius: 999,
-                            background: s === step ? "#ffffff" : s < step ? "#3f3f46" : "#27272a",
+                            background: s === step ? "#201e24" : s < step ? "#4b5563" : "#d1d5db",
                             transition: "all 0.3s ease",
                         }}
                     />
@@ -632,7 +628,7 @@ export default function SetupPage() {
                                         onClick={() => { setEngine(opt.id as any); setStep(2); }}
                                         style={{
                                             background: "rgba(255,255,255,0.02)",
-                                            border: "1px solid rgba(255,255,255,0.06)",
+                                            border: "1px solid #e2e2e2",
                                             borderRadius: 16,
                                             padding: "28px 20px",
                                             display: "flex",
@@ -646,12 +642,12 @@ export default function SetupPage() {
                                         }}
                                         onMouseEnter={e => {
                                             (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)";
-                                            (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.1)";
+                                            (e.currentTarget as HTMLElement).style.borderColor = "#8a8886";
                                             (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)";
                                         }}
                                         onMouseLeave={e => {
                                             (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)";
-                                            (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.06)";
+                                            (e.currentTarget as HTMLElement).style.borderColor = "#e2e2e2";
                                             (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
                                         }}
                                     >
@@ -785,7 +781,7 @@ export default function SetupPage() {
                                     Authenticator
                                 </h2>
                                 <p style={{ fontSize: 13, color: "#8a8886", lineHeight: 1.6, maxWidth: 280 }}>
-                                    {engine === "local" 
+                                    {engine === "local"
                                         ? <>Enter your <span style={{ color: "#8a8886", fontWeight: 500 }}>{provider}</span> Server URL below, or leave blank for default.</>
                                         : <>Enter your <span style={{ color: "#8a8886", fontWeight: 500 }}>{provider}</span> API key below.</>
                                     }
@@ -893,94 +889,94 @@ export default function SetupPage() {
                                 {vlmMode === "local" && (
                                     <>
                                         {(ollamaInstalled === false || ollamaInstalled === null) ? (
-                                    <div style={{ background: "rgba(32,30,36,0.04)", border: "1px solid rgba(32,30,36,0.1)", borderRadius: 16, padding: 24 }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(32,30,36,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                                <OllamaLogo size={22} />
-                                            </div>
-                                            <div style={{ textAlign: "left" }}>
-                                                <div style={{ fontSize: 15, fontWeight: 600, color: "#201e24" }}>Install Ollama</div>
-                                                <div style={{ fontSize: 12, color: "#8a8886" }}>Required to run the local vision model</div>
-                                            </div>
-                                        </div>
-                                        <button onClick={handleInstallOllama} disabled={isInstallingOllama}
-                                            style={{ width: "100%", padding: "14px", backgroundColor: "#201e24", color: "#f5f4f0", borderRadius: 12, fontWeight: 600, fontSize: 14, border: "none", cursor: isInstallingOllama ? "wait" : "pointer", opacity: isInstallingOllama ? 0.7 : 1 }}>
-                                            {isInstallingOllama ? "Installing..." : "Install Automatically"}
-                                        </button>
+                                            <div style={{ background: "rgba(32,30,36,0.04)", border: "1px solid rgba(32,30,36,0.1)", borderRadius: 16, padding: 24 }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+                                                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(32,30,36,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                                        <OllamaLogo size={22} />
+                                                    </div>
+                                                    <div style={{ textAlign: "left" }}>
+                                                        <div style={{ fontSize: 15, fontWeight: 600, color: "#201e24" }}>Install Ollama</div>
+                                                        <div style={{ fontSize: 12, color: "#8a8886" }}>Required to run the local vision model</div>
+                                                    </div>
+                                                </div>
+                                                <button onClick={handleInstallOllama} disabled={isInstallingOllama}
+                                                    style={{ width: "100%", padding: "14px", backgroundColor: "#201e24", color: "#f5f4f0", borderRadius: 12, fontWeight: 600, fontSize: 14, border: "none", cursor: isInstallingOllama ? "wait" : "pointer", opacity: isInstallingOllama ? 0.7 : 1 }}>
+                                                    {isInstallingOllama ? "Installing..." : "Install Automatically"}
+                                                </button>
 
-                                        {/* Progress bar — shown while installing */}
-                                        {(isInstallingOllama || ollamaInstallDone) && (
-                                            <div style={{ marginTop: 22 }}>
-                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                                                    <span style={{ fontSize: 12, color: ollamaInstallPhase === "done" ? "#4ade80" : "#a1a1aa", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
-                                                        {ollamaInstallPhase === "downloading" && (
-                                                            <motion.span animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}>⬇ Downloading Ollama...</motion.span>
-                                                        )}
-                                                        {ollamaInstallPhase === "finalizing" && (
-                                                            <motion.span animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 0.8 }}>⚙ Finalizing installation...</motion.span>
-                                                        )}
-                                                        {ollamaInstallPhase === "done" && <span>✓ Installation complete!</span>}
-                                                    </span>
-                                                    <span style={{ fontSize: 12, color: "#8a8886", fontFamily: "monospace" }}>
-                                                        {ollamaInstallPhase !== "done" ? `${ollamaInstallPct.toFixed(1)}%` : "100%"}
-                                                    </span>
+                                                {/* Progress bar — shown while installing */}
+                                                {(isInstallingOllama || ollamaInstallDone) && (
+                                                    <div style={{ marginTop: 22 }}>
+                                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                                            <span style={{ fontSize: 12, color: ollamaInstallPhase === "done" ? "#4ade80" : "#a1a1aa", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+                                                                {ollamaInstallPhase === "downloading" && (
+                                                                    <motion.span animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}>⬇ Downloading Ollama...</motion.span>
+                                                                )}
+                                                                {ollamaInstallPhase === "finalizing" && (
+                                                                    <motion.span animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 0.8 }}>⚙ Finalizing installation...</motion.span>
+                                                                )}
+                                                                {ollamaInstallPhase === "done" && <span>✓ Installation complete!</span>}
+                                                            </span>
+                                                            <span style={{ fontSize: 12, color: "#8a8886", fontFamily: "monospace" }}>
+                                                                {ollamaInstallPhase !== "done" ? `${ollamaInstallPct.toFixed(1)}%` : "100%"}
+                                                            </span>
+                                                        </div>
+                                                        <div style={{ width: "100%", height: 6, borderRadius: 999, background: "rgba(32,30,36,0.1)", overflow: "hidden" }}>
+                                                            <motion.div
+                                                                animate={{ width: `${ollamaInstallPhase === "finalizing" ? 100 : ollamaInstallPct}%` }}
+                                                                transition={{ ease: "linear", duration: 0.3 }}
+                                                                style={{
+                                                                    height: "100%", borderRadius: 999,
+                                                                    background: ollamaInstallPhase === "done"
+                                                                        ? "linear-gradient(90deg, #4ade80, #22c55e)"
+                                                                        : "linear-gradient(90deg, #3b82f6, #60a5fa)",
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div style={{ background: "rgba(32,30,36,0.04)", border: "1px solid rgba(32,30,36,0.1)", borderRadius: 16, padding: 24, position: "relative" }}>
+                                                <div style={{ position: "absolute", top: 12, right: 12, background: "rgba(74, 222, 128, 0.15)", color: "#4ade80", padding: "4px 8px", borderRadius: 8, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", border: "1px solid rgba(74, 222, 128, 0.3)" }}>Ollama Installed</div>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+                                                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(32,30,36,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                                        <OllamaLogo size={22} />
+                                                    </div>
+                                                    <div style={{ textAlign: "left" }}>
+                                                        <div style={{ fontSize: 15, fontWeight: 600, color: "#201e24" }}>Qwen3 VL (2B)</div>
+                                                        <div style={{ fontSize: 12, color: "#8a8886" }}>~2.5 GB • Fast Local Inference</div>
+                                                    </div>
                                                 </div>
-                                                <div style={{ width: "100%", height: 6, borderRadius: 999, background: "rgba(32,30,36,0.1)", overflow: "hidden" }}>
-                                                    <motion.div
-                                                        animate={{ width: `${ollamaInstallPhase === "finalizing" ? 100 : ollamaInstallPct}%` }}
-                                                        transition={{ ease: "linear", duration: 0.3 }}
-                                                        style={{
-                                                            height: "100%", borderRadius: 999,
-                                                            background: ollamaInstallPhase === "done"
-                                                                ? "linear-gradient(90deg, #4ade80, #22c55e)"
-                                                                : "linear-gradient(90deg, #3b82f6, #60a5fa)",
-                                                        }}
-                                                    />
-                                                </div>
+                                                <button onClick={handlePullModel} disabled={isPullingModel || isInstallingOllama}
+                                                    style={{ width: "100%", padding: "14px", backgroundColor: "#3b82f6", color: "#ffffff", borderRadius: 12, fontWeight: 600, fontSize: 14, border: "none", cursor: (isPullingModel || isInstallingOllama) ? "wait" : "pointer", opacity: (isPullingModel || isInstallingOllama) ? 0.7 : 1 }}>
+                                                    {isPullingModel ? `Downloading... ${pullPct.toFixed(1)}%` : "Download & Set as Default"}
+                                                </button>
+
+                                                {/* Pull progress bar */}
+                                                {isPullingModel && (
+                                                    <div style={{ marginTop: 18 }}>
+                                                        <div style={{ width: "100%", height: 6, borderRadius: 999, background: "rgba(32,30,36,0.1)", overflow: "hidden" }}>
+                                                            <motion.div
+                                                                animate={{ width: `${pullPct}%` }}
+                                                                transition={{ ease: "linear", duration: 0.3 }}
+                                                                style={{ height: "100%", borderRadius: 999, background: "linear-gradient(90deg, #3b82f6, #60a5fa)" }}
+                                                            />
+                                                        </div>
+                                                        <p style={{ fontSize: 11, color: "#8a8886", marginTop: 8, textAlign: "center" }}>Downloading model weights... ~2.5 GB total</p>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
-                                    </div>
-                                ) : (
-                                    <div style={{ background: "rgba(32,30,36,0.04)", border: "1px solid rgba(32,30,36,0.1)", borderRadius: 16, padding: 24, position: "relative" }}>
-                                        <div style={{ position: "absolute", top: 12, right: 12, background: "rgba(74, 222, 128, 0.15)", color: "#4ade80", padding: "4px 8px", borderRadius: 8, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", border: "1px solid rgba(74, 222, 128, 0.3)" }}>Ollama Installed</div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(32,30,36,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                                <OllamaLogo size={22} />
-                                            </div>
-                                            <div style={{ textAlign: "left" }}>
-                                                <div style={{ fontSize: 15, fontWeight: 600, color: "#201e24" }}>Qwen3 VL (2B)</div>
-                                                <div style={{ fontSize: 12, color: "#8a8886" }}>~2.5 GB • Fast Local Inference</div>
-                                            </div>
-                                        </div>
-                                        <button onClick={handlePullModel} disabled={isPullingModel || isInstallingOllama}
-                                            style={{ width: "100%", padding: "14px", backgroundColor: "#3b82f6", color: "#ffffff", borderRadius: 12, fontWeight: 600, fontSize: 14, border: "none", cursor: (isPullingModel || isInstallingOllama) ? "wait" : "pointer", opacity: (isPullingModel || isInstallingOllama) ? 0.7 : 1 }}>
-                                            {isPullingModel ? `Downloading... ${pullPct.toFixed(1)}%` : "Download & Set as Default"}
-                                        </button>
 
-                                        {/* Pull progress bar */}
-                                        {isPullingModel && (
-                                            <div style={{ marginTop: 18 }}>
-                                                <div style={{ width: "100%", height: 6, borderRadius: 999, background: "rgba(32,30,36,0.1)", overflow: "hidden" }}>
-                                                    <motion.div
-                                                        animate={{ width: `${pullPct}%` }}
-                                                        transition={{ ease: "linear", duration: 0.3 }}
-                                                        style={{ height: "100%", borderRadius: 999, background: "linear-gradient(90deg, #3b82f6, #60a5fa)" }}
-                                                    />
-                                                </div>
-                                                <p style={{ fontSize: 11, color: "#8a8886", marginTop: 8, textAlign: "center" }}>Downloading model weights... ~2.5 GB total</p>
+                                        {/* Terminal Output for Ollama */}
+                                        {(ollamaLogs.length > 0) && (
+                                            <div style={{ width: "100%", height: 120, backgroundColor: "#f5f4f0", borderRadius: 12, padding: 12, border: "1px solid rgba(32,30,36,0.1)", overflowY: "auto", textAlign: "left" }}>
+                                                <pre style={{ margin: 0, color: "#8a8886", fontSize: 11, fontFamily: "monospace", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                                                    {ollamaLogs.join('\n')}
+                                                </pre>
                                             </div>
                                         )}
-                                    </div>
-                                )}
-
-                                {/* Terminal Output for Ollama */}
-                                {(ollamaLogs.length > 0) && (
-                                    <div style={{ width: "100%", height: 120, backgroundColor: "#f5f4f0", borderRadius: 12, padding: 12, border: "1px solid rgba(32,30,36,0.1)", overflowY: "auto", textAlign: "left" }}>
-                                        <pre style={{ margin: 0, color: "#8a8886", fontSize: 11, fontFamily: "monospace", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                                            {ollamaLogs.join('\n')}
-                                        </pre>
-                                    </div>
-                                )}
                                     </>
                                 )}
 
@@ -990,10 +986,10 @@ export default function SetupPage() {
                                             <label style={{ fontSize: 12, fontWeight: 600, color: "#8a8886", textTransform: "uppercase", letterSpacing: "0.05em" }}>Provider</label>
                                             <select value={vlmCloudProvider} onChange={(e) => setVlmCloudProvider(e.target.value)}
                                                 style={{ width: "100%", padding: "14px 18px", backgroundColor: "rgba(32, 30, 36,0.04)", border: "1px solid rgba(32, 30, 36,0.1)", borderRadius: 14, color: "#201e24", fontSize: 14, outline: "none", cursor: "pointer", transition: "all 0.2s" }}>
-                                                    <option value="ollama" style={{ background: "#f5f4f0" }}>Ollama Compatible Endpoint</option>
-                                                    <option value="openai" style={{ background: "#f5f4f0" }}>OpenAI</option>
-                                                    <option value="anthropic" style={{ background: "#f5f4f0" }}>Anthropic</option>
-                                                    <option value="nvidia" style={{ background: "#f5f4f0" }}>Nvidia NIM</option>
+                                                <option value="ollama" style={{ background: "#f5f4f0" }}>Ollama Compatible Endpoint</option>
+                                                <option value="openai" style={{ background: "#f5f4f0" }}>OpenAI</option>
+                                                <option value="anthropic" style={{ background: "#f5f4f0" }}>Anthropic</option>
+                                                <option value="nvidia" style={{ background: "#f5f4f0" }}>Nvidia NIM</option>
                                             </select>
                                         </div>
                                         <div style={{ display: "flex", flexDirection: "column", gap: 6, textAlign: "left" }}>

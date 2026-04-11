@@ -47,7 +47,7 @@ export default function OnboardingPage() {
       >
         {/* Logo */}
         <Image
-          src="/images/logos/everfern-withoutbg.png"
+          src="/images/logos/black-logo-withoutbg.png"
           alt="EverFern Logo"
           width={72}
           height={72}

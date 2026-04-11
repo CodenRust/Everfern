@@ -88,7 +88,7 @@ const HuggingFaceLogo = ({ size = 16 }: { size?: number }) => (
 );
 
 const EverFernBglessLogo = ({ size = 16 }: { size?: number }) => (
-    <Image unoptimized src="/images/logos/everfern-withoutbg.png" alt="" width={size} height={size} />
+    <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={size} height={size} />
 );
 
 // ── Waveform Icon SVG ────────────────────────────────────────────────────────
@@ -715,8 +715,8 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                                     fontFamily: "'Matter', sans-serif", transition: 'all 0.15s',
                                                     cursor: 'default'
                                                 }}
-                                                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
-                                                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
+                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
                                                 >
                                                     <MagnifyingGlassIcon width={14} height={14} color="#6b7280" strokeWidth={2.5} />
                                                     {q}
@@ -740,8 +740,8 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                                     fontFamily: "'Matter', sans-serif", transition: 'all 0.15s',
                                                     cursor: 'pointer'
                                                 }}
-                                                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
-                                                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
+                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
                                                 >
                                                     <DocumentTextIcon width={14} height={14} color="#3b82f6" strokeWidth={2} />
                                                     {d}
@@ -1853,8 +1853,8 @@ const RateLimitContinueButton = ({ content, onContinue }: { content: string; onC
     if (!content.includes('Rate Limit Reached') && !content.includes('429')) return null;
 
     return (
-        <motion.div 
-            initial={{ opacity: 0, y: 5 }} 
+        <motion.div
+            initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             style={{ marginTop: 16, padding: '16px', backgroundColor: 'rgba(251, 191, 36, 0.05)', border: '1px solid rgba(251, 191, 36, 0.2)', borderRadius: 16, display: 'flex', flexDirection: 'column', gap: 12 }}
         >
@@ -2492,7 +2492,7 @@ export default function ChatPage() {
                     liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                     setLiveToolCalls(liveToolCallsRef.current);
                 });
-                
+
                 let accumulated = "";
 
                 api.onToolCall((record: any) => {
@@ -2864,8 +2864,8 @@ export default function ChatPage() {
             {renderModelSelector(true)}
 
             {isLoading ? (
-                <button onClick={() => { 
-                    (window as any).electronAPI?.acp?.stop?.(); 
+                <button onClick={() => {
+                    (window as any).electronAPI?.acp?.stop?.();
                     setIsLoading(false);
                     isMessageCommittedRef.current = true;
                     setStreamingContent("");
@@ -3240,7 +3240,7 @@ export default function ChatPage() {
                                                 style={{ marginBottom: 28, display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}
                                             >
                                                 <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8886", letterSpacing: "0.02em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase" }}>
-                                                    {msg.role === "assistant" && <Image unoptimized src="/images/logos/everfern-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.6, filter: 'invert(1)' }} />}
+                                                    {msg.role === "assistant" && <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.6, filter: 'invert(1)' }} />}
                                                     {msg.role === "user" ? "You" : "Fern"}
                                                 </div>
                                                 <div style={{ maxWidth: msg.role === "user" ? "80%" : "100%", padding: msg.role === "user" ? "12px 18px" : "0", borderRadius: msg.role === "user" ? 16 : 0, borderTopRightRadius: msg.role === "user" ? 4 : 0, background: msg.role === "user" ? "#f5f4f0" : "transparent", border: msg.role === "user" ? "1px solid #e8e6d9" : "none", fontSize: 15, lineHeight: 1.7 }}>
@@ -3336,7 +3336,7 @@ export default function ChatPage() {
                                     {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === "assistant" && streamingContent && messages[messages.length - 1].content?.trim() === streamingContent?.trim()) && (
                                         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 32, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
                                             <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8886", letterSpacing: "0.08em", marginBottom: 8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
-                                                <Image unoptimized src="/images/logos/everfern-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.5, filter: 'invert(1)' }} />
+                                                <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.5, filter: 'invert(1)' }} />
                                                 Fern
                                             </div>
                                             <div style={{ width: "100%" }}>

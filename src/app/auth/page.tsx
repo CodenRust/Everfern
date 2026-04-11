@@ -47,9 +47,9 @@ export default function AuthPage() {
 
             {/* Main Form Pane */}
             <div className="flex-1 flex flex-col items-center justify-center relative px-8 bg-[#f5f4f0]">
-                
+
                 {/* Back Button */}
-                <button 
+                <button
                     onClick={() => router.push("/")}
                     className="absolute top-12 left-8 flex items-center gap-2 text-[#8a8886] hover:text-[#4a4846] transition-colors text-sm font-medium z-50 focus:outline-none"
                 >
@@ -63,7 +63,7 @@ export default function AuthPage() {
                     className="absolute top-12 flex items-center gap-2"
                 >
                     <Image
-                        src="/images/logos/everfern-withoutbg.png"
+                        src="/images/logos/black-logo-withoutbg.png"
                         alt="EverFern"
                         width={28}
                         height={28}
