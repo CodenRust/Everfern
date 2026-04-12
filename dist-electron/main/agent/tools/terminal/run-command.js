@@ -55,22 +55,41 @@ If the command remains running, this tool returns a CommandId which you MUST use
             // Wait for output to accumulate or timeout
             let elapsedTime = 0;
             const pollInterval = 200;
+            let noChangeCount = 0;
             let lastBufferLength = beforeBufferLength;
-            // Let WaitMsBeforeAsync be the minimum, but we can poll up to 60s if we want to ensure completion
+            // Use WaitMsBeforeAsync as the minimum wait time
             const maxWait = Math.max(waitMs, 30000);
             while (elapsedTime < maxWait) {
                 await new Promise((r) => setTimeout(r, pollInterval));
                 elapsedTime += pollInterval;
                 const currentBuffer = registry.getCommand(id)?.outputBuffer || '';
-                // If output hasn't changed for a while, or if we see a prompt, we break
-                // Heuristic: common prompt indicators
+                const currentLength = currentBuffer.length;
+                // Check if we see a prompt (command completed)
                 const lastLines = currentBuffer.split('\n').slice(-3).join('\n');
-                if (lastLines.includes('> ') || lastLines.includes('$ ')) {
-                    // Wait an extra tick to capture any final output just in case
-                    await new Promise((r) => setTimeout(r, 200));
+                const hasPrompt = lastLines.includes('> ') || lastLines.includes('$ ') || lastLines.includes('PS ');
+                // If output hasn't changed AND we see a prompt, command is complete
+                if (currentLength === lastBufferLength && hasPrompt) {
+                    noChangeCount++;
+                    // Wait for 3 consecutive polls (600ms) with no change AND a prompt before declaring complete
+                    if (noChangeCount >= 3) {
+                        console.log('[RunCommand] Output stabilized with prompt detected, command complete');
+                        break;
+                    }
+                }
+                else if (currentLength > lastBufferLength) {
+                    // Output is still coming, reset counter
+                    noChangeCount = 0;
+                }
+                else {
+                    // No change but no prompt yet, increment counter
+                    noChangeCount++;
+                }
+                // Only break early if we've waited at least the minimum time AND output is stable
+                if (elapsedTime >= waitMs && noChangeCount >= 3 && hasPrompt) {
+                    console.log('[RunCommand] Minimum wait time reached and output stable, returning');
                     break;
                 }
-                lastBufferLength = currentBuffer.length;
+                lastBufferLength = currentLength;
             }
             const record = registry.getCommand(id);
             if (!record) {
@@ -78,10 +97,18 @@ If the command remains running, this tool returns a CommandId which you MUST use
             }
             // Return the new output since the last call or start
             const newOutput = record.outputBuffer.slice(beforeBufferLength);
-            const out = stripAnsi(newOutput).trim() || '(No new output yet)';
+            const out = stripAnsi(newOutput).trim();
+            console.log('[RunCommand] Returning output, length:', out.length, 'elapsed:', elapsedTime, 'ms');
+            // CRITICAL: Always return output to AI, even if empty
+            if (!out) {
+                return {
+                    success: true,
+                    output: `[Command Executed]\nCommand: ${commandLine}\nOutput: (No output captured - command may still be running. Use command_status to check for output.)\n\n(Terminal session remains active. You can run more commands in this session.)`
+                };
+            }
             return {
                 success: true,
-                output: `[Main Terminal] Session: ${id}\n\n${out}\n\n(Terminal session remains active. You can run more commands in this session.)`
+                output: `[Command Executed]\nCommand: ${commandLine}\n\n${out}\n\n(Terminal session remains active. You can run more commands in this session.)`
             };
         }
         catch (err) {

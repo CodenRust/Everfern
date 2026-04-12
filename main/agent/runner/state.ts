@@ -1,5 +1,6 @@
 import { Annotation, MessagesAnnotation } from '@langchain/langgraph';
 import type { MissionTimeline, MissionStep } from './mission-tracker';
+import type { ThinkingDuration } from './duration-tracker';
 
 // Type definitions to fix imports
 export type IntentType = 'unknown' | 'coding' | 'research' | 'task' | 'question' | 'conversation' | 'build' | 'fix' | 'analyze' | 'automate';
@@ -34,9 +35,61 @@ export interface IntentClassification {
   reasoning: string;
 }
 
-export interface StreamEvent {
+// Base stream event type
+export interface BaseStreamEvent {
   type: string;
   [key: string]: any;
+}
+
+// Specific stream event types
+export type StreamEvent =
+  | { type: 'thought'; content: string }
+  | { type: 'chunk'; content: string }
+  | { type: 'tool_call'; toolCall: any }
+  | { type: 'mission_complete'; timeline: MissionTimeline | null; steps: MissionStep[]; thinkingDuration?: ThinkingDuration }
+  | { type: 'mission_step_update'; step: MissionStep; timeline: MissionTimeline | null }
+  | { type: 'mission_phase_change'; phase: string; timeline: MissionTimeline | null }
+  | { type: 'parallel_group_start'; groupIndex: number; stepCount: number }
+  | { type: 'parallel_group_end'; groupIndex: number; durationMs: number }
+  | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number }
+  | { type: 'done' }
+  | BaseStreamEvent; // Fallback for other event types
+
+// Type guard for mission_complete events
+export function isMissionCompleteEvent(event: StreamEvent): event is { type: 'mission_complete'; timeline: MissionTimeline | null; steps: MissionStep[]; thinkingDuration?: ThinkingDuration } {
+  return event.type === 'mission_complete';
+}
+
+// Type guard for events with thinking duration
+export function hasThinkingDuration(event: StreamEvent): event is { type: 'mission_complete'; timeline: MissionTimeline | null; steps: MissionStep[]; thinkingDuration: ThinkingDuration } {
+  return isMissionCompleteEvent(event) && event.thinkingDuration !== undefined;
+}
+
+// Validate thinking duration data
+export function isValidThinkingDuration(duration: ThinkingDuration | undefined): duration is ThinkingDuration {
+  if (!duration) return false;
+  
+  const { startTime, endTime, duration: durationMs } = duration;
+  
+  // Validate required fields
+  if (typeof startTime !== 'number' || startTime < 0) return false;
+  
+  // If endTime is present, validate it
+  if (endTime !== undefined) {
+    if (typeof endTime !== 'number' || endTime < startTime) return false;
+  }
+  
+  // If duration is present, validate it
+  if (durationMs !== undefined) {
+    if (typeof durationMs !== 'number' || durationMs < 0) return false;
+    
+    // If both endTime and startTime are present, duration should match
+    if (endTime !== undefined && Math.abs(durationMs - (endTime - startTime)) > 1) {
+      return false;
+    }
+  }
+  
+  return true;
 }
 
 export const GraphState = Annotation.Root({
@@ -60,6 +113,12 @@ export const GraphState = Annotation.Root({
     reasoning: string;
   }>(),
   shouldContinueIteration: Annotation<boolean>(),
+  // HITL Approval State
+  hitlApprovalResult: Annotation<{
+    approved: boolean;
+    response: string;
+    reasoning: string;
+  }>(),
   // Mission Tracking (OpenClaw style)
   missionId: Annotation<string>(),
   missionTimeline: Annotation<MissionTimeline | null>(),

@@ -5,9 +5,14 @@ import { AgentRunner } from '../runner';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 
-export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[], missionTracker?: MissionTracker) => {
+export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[], missionTracker?: MissionTracker, shouldAbort?: () => boolean) => {
   const integrator = createMissionIntegrator(missionTracker);
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
+    // Check for abort signal
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     integrator.startNode('triage', 'Analyzing user intent and decomposing task');
     try {
       runner.telemetry.transition('triage');

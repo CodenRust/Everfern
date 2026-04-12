@@ -89,23 +89,34 @@ class SessionManager {
         const record = this.sessions.get(sessionId);
         if (!record)
             return false;
-        // Mutex to prevent race conditions during concurrent parallel-executor turns
-        while (this.prepareTurnMutexes.has(sessionId)) {
-            await this.prepareTurnMutexes.get(sessionId);
+        // Check if preparation is already in progress for this session
+        const existingMutex = this.prepareTurnMutexes.get(sessionId);
+        if (existingMutex) {
+            // Wait for existing preparation to complete and return its result
+            await existingMutex;
+            return true; // Assume success if no exception was thrown
         }
+        // Create new mutex for this session
         let releaseMutex;
-        const mutexPromise = new Promise(resolve => { releaseMutex = resolve; });
+        let rejectMutex;
+        const mutexPromise = new Promise((resolve, reject) => {
+            releaseMutex = resolve;
+            rejectMutex = reject;
+        });
         this.prepareTurnMutexes.set(sessionId, mutexPromise);
         try {
-            // 1. Reconcile identity
-            const { meta: newMeta } = await (0, manager_identity_reconcile_1.reconcileManagerRuntimeSessionIdentifiers)({
+            // 1. Reconcile identity (async but non-blocking for other sessions)
+            const identityPromise = (0, manager_identity_reconcile_1.reconcileManagerRuntimeSessionIdentifiers)({
                 sessionKey: sessionId,
                 handle: { agentSessionId: record.meta.identity?.agentSessionId },
                 meta: record.meta,
             });
-            record.meta = newMeta;
-            // 2. Apply runtime controls (only if signature changed)
+            // 2. Get cached signature while identity reconciliation is running
             const cached = this.cache.get(sessionId) ?? {};
+            // Wait for identity reconciliation to complete
+            const { meta: newMeta } = await identityPromise;
+            record.meta = newMeta;
+            // 3. Apply runtime controls (only if signature changed)
             const newSignature = await (0, manager_runtime_controls_1.applyManagerRuntimeControls)({
                 sessionKey: sessionId,
                 handle: { agentSessionId: newMeta.identity?.agentSessionId },
@@ -114,15 +125,16 @@ class SessionManager {
             });
             this.cache.set(sessionId, { signature: newSignature });
             // Check loop failure and circuit break limits if we had them here...
+            releaseMutex();
             return true;
         }
         catch (e) {
             console.error(`[ACP/SessionManager] Turn preparation failed for ${sessionId}:`, e);
+            rejectMutex(e);
             return false;
         }
         finally {
             this.prepareTurnMutexes.delete(sessionId);
-            releaseMutex();
         }
     }
 }

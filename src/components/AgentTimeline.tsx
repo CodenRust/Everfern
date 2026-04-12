@@ -13,7 +13,7 @@ import { BrainIcon } from "lucide-react";
 export interface ToolCallDisplay {
     id: string;
     toolName: string;
-    icon?: string;
+    icon?: React.ReactNode;
     label?: string;
     color?: string;
     status: "running" | "done" | "error";

@@ -50,6 +50,12 @@ export function resolveToolDisplay(toolName: string, args?: Record<string, unkno
       const cmdStr = args?.command || args?.CommandLine || args?.commandLine || '';
       const cmd = typeof cmdStr === 'string' ? cmdStr.trim() : '';
       const label = cmd ? resolveTerminalLabel(cmd) : 'Running command';
+      
+      // Enhanced logging for debugging
+      console.log(`[ToolDisplay] run_command - cmdStr:`, cmdStr);
+      console.log(`[ToolDisplay] run_command - cmd:`, cmd);
+      console.log(`[ToolDisplay] run_command - label:`, label);
+      
       if (cmd && cmd.startsWith('ls')) {
         return {
           icon: React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", width: 16, height: 16 },

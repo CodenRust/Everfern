@@ -65,10 +65,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('acp:model-call-info', (_e, data) => cb(data));
     },
     onToolStart: (cb: (record: { toolName: string; toolArgs: Record<string, unknown> }) => void) => {
-      ipcRenderer.on('acp:tool-start', (_e, record) => cb(record));
+      ipcRenderer.on('acp:tool-start', (_e, record) => {
+        if (record.toolName === 'ask_user_question') {
+          console.log('[Preload] Received ask_user_question tool-start:', JSON.stringify(record, null, 2));
+        }
+        cb(record);
+      });
     },
     onToolCall: (cb: (record: any) => void) => {
-      ipcRenderer.on('acp:tool-call', (_e, record) => cb(record));
+      ipcRenderer.on('acp:tool-call', (_e, record) => {
+        if (record.toolName === 'ask_user_question') {
+          console.log('[Preload] Received ask_user_question tool-call:', JSON.stringify(record, null, 2));
+        }
+        cb(record);
+      });
     },
     onToolUpdate: (cb: (data: { toolName: string; update: string }) => void) => {
       ipcRenderer.on('acp:tool-update', (_e, data) => cb(data));
@@ -102,7 +112,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     playSound: (soundPath: string) => ipcRenderer.invoke('audio:play-sound', soundPath),
     validateNvidiaModel: (modelId: string, apiKey: string) => ipcRenderer.invoke('acp:validate-nvidia-model', modelId, apiKey),
     
-    // Mission Timeline Events (OpenClaw style)
+    // Mission Timeline Events 
     onMissionStepUpdate: (cb: (data: { step: any; timeline: any }) => void) => {
       ipcRenderer.on('acp:mission-step-update', (_e, data) => cb(data));
     },
@@ -111,6 +121,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     onMissionComplete: (cb: (data: { timeline: any; steps: any[] }) => void) => {
       ipcRenderer.on('acp:mission-complete', (_e, data) => cb(data));
+    },
+    onHitlRequest: (cb: (data: any) => void) => {
+      console.log('[Preload] 🔧 Setting up HITL request listener');
+      ipcRenderer.on('acp:hitl-request', (_e, data) => {
+        console.log('[Preload] ✅ HITL request received from main process:', data);
+        cb(data);
+      });
     },
 
     removeStreamListeners: () => {
@@ -130,6 +147,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:mission-step-update');
       ipcRenderer.removeAllListeners('acp:mission-phase-change');
       ipcRenderer.removeAllListeners('acp:mission-complete');
+      ipcRenderer.removeAllListeners('acp:hitl-request');
     },
   },
 
@@ -254,7 +272,8 @@ export type ElectronAPI = {
     validateNvidiaModel: (modelId: string, apiKey: string) => Promise<{ valid: boolean; hasVision?: boolean; error?: string }>;
     onMissionStepUpdate: (cb: (data: { step: any; timeline: any }) => void) => void;
     onMissionPhaseChange: (cb: (data: { phase: string; timeline: any }) => void) => void;
-    onMissionComplete: (cb: (data: { timeline: any; steps: any[] }) => void) => void;
+    onMissionComplete: (cb: (data: { timeline: any; steps: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => void) => void;
+    onHitlRequest: (cb: (data: any) => void) => void;
     removeStreamListeners: () => void;
   };
   history: {

@@ -33,11 +33,111 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadSkillsAsync = loadSkillsAsync;
 exports.loadSkills = loadSkills;
 exports.formatSkillsForPrompt = formatSkillsForPrompt;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const skills_sync_1 = require("../../lib/skills-sync");
+/**
+ * Load skills asynchronously using fs.promises for non-blocking I/O
+ * This function should be used during initialization to avoid blocking the event loop
+ */
+async function loadSkillsAsync() {
+    const skillsDir = (0, skills_sync_1.getSkillsPath)();
+    const skills = [];
+    console.log(`[SkillsLoader] 📂 Loading skills asynchronously from: ${skillsDir}`);
+    try {
+        // Check if directory exists using async access
+        try {
+            await fs.promises.access(skillsDir);
+        }
+        catch {
+            console.warn(`[SkillsLoader] ⚠️ Skills directory does not exist: ${skillsDir}`);
+            return skills;
+        }
+        const loadSkillFiles = async (currentPath, depth = 0) => {
+            const indent = '  '.repeat(depth);
+            console.log(`[SkillsLoader] ${indent}📁 Scanning directory: ${currentPath}`);
+            const items = await fs.promises.readdir(currentPath);
+            console.log(`[SkillsLoader] ${indent}   Found ${items.length} items`);
+            for (const item of items) {
+                const itemPath = path.join(currentPath, item);
+                const stat = await fs.promises.stat(itemPath);
+                if (stat.isDirectory()) {
+                    console.log(`[SkillsLoader] ${indent}   📁 [DIR] ${item}`);
+                    await loadSkillFiles(itemPath, depth + 1);
+                }
+                else if (item === 'SKILL.md' || (item.endsWith('.md') && item.includes('SKILL'))) {
+                    console.log(`[SkillsLoader] ${indent}   📄 [SKILL] ${item}`);
+                    try {
+                        const content = await fs.promises.readFile(itemPath, 'utf-8');
+                        console.log(`[SkillsLoader] ${indent}      Parsing SKILL.md (${content.length} bytes)...`);
+                        // Improved YAML frontmatter parser - handle quoted multiline descriptions
+                        const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+                        if (match) {
+                            const frontmatter = match[1];
+                            console.log(`[SkillsLoader] ${indent}      Found YAML frontmatter (${frontmatter.length} bytes)`);
+                            // Extract name: handle various YAML formats
+                            const nameMatch = frontmatter.match(/(?:^|##\s*)name:\s*["']?([^"'\n]+)["']?/m);
+                            console.log(`[SkillsLoader] ${indent}      Name match: ${nameMatch ? nameMatch[1] : 'NOT FOUND'}`);
+                            // Extract description: handle quoted strings (single or double quotes)
+                            let description = '';
+                            // Try double quotes first
+                            let descMatch = frontmatter.match(/description:\s*"([^"]*)"/m);
+                            if (!descMatch) {
+                                // Try single quotes
+                                descMatch = frontmatter.match(/description:\s*'([^']*)'/m);
+                            }
+                            if (!descMatch) {
+                                // Try unquoted (up to newline)
+                                descMatch = frontmatter.match(/description:\s*([^\n]+)/m);
+                            }
+                            if (descMatch && descMatch[1]) {
+                                description = descMatch[1].trim();
+                            }
+                            console.log(`[SkillsLoader] ${indent}      Description: ${description.slice(0, 50)}...`);
+                            if (nameMatch && nameMatch[1] && description) {
+                                const skillName = nameMatch[1].trim();
+                                const skillPath = itemPath.replace(/\\/g, '/');
+                                console.log(`[SkillsLoader] ${indent}      ✅ Added skill: ${skillName}`);
+                                skills.push({
+                                    name: skillName,
+                                    description: description,
+                                    path: skillPath
+                                });
+                            }
+                            else {
+                                console.warn(`[SkillsLoader] ${indent}      ❌ Missing name or description in frontmatter`);
+                            }
+                        }
+                        else {
+                            console.warn(`[SkillsLoader] ${indent}      ❌ No YAML frontmatter found`);
+                        }
+                    }
+                    catch (err) {
+                        console.error(`[SkillsLoader] ${indent}      ❌ Error parsing skill at ${itemPath}:`, err);
+                    }
+                }
+            }
+        };
+        await loadSkillFiles(skillsDir);
+        console.log(`[SkillsLoader] ✅ Async skill loading complete: Found ${skills.length} skills`);
+        for (const skill of skills) {
+            console.log(`[SkillsLoader]    • ${skill.name}`);
+        }
+        return skills;
+    }
+    catch (error) {
+        console.error('[SkillsLoader] ❌ Error loading skills asynchronously:', error);
+        return [];
+    }
+}
+/**
+ * Load skills synchronously (DEPRECATED - use loadSkillsAsync instead)
+ * This function performs blocking file I/O and should not be called during graph compilation
+ * @deprecated Use loadSkillsAsync() instead to avoid blocking the event loop
+ */
 function loadSkills() {
     const skillsDir = (0, skills_sync_1.getSkillsPath)();
     const skills = [];

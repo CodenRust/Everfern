@@ -12,6 +12,83 @@
  */
 
 import { DebugEmitter } from './debug';
+import OpenAI from 'openai';
+
+// ── Client Pool for Connection Reuse ────────────────────────────────
+
+interface ClientPoolEntry {
+  client: AIClient;
+  lastUsed: number;
+  inUse: boolean;
+}
+
+class AIClientPool {
+  private pool = new Map<string, ClientPoolEntry[]>();
+  private maxPoolSize = 5;
+  private maxIdleTime = 300000; // 5 minutes
+
+  private getPoolKey(config: AIClientConfig): string {
+    return `${config.provider}:${config.baseUrl}:${config.model}`;
+  }
+
+  get(config: AIClientConfig): AIClient {
+    const key = this.getPoolKey(config);
+    const entries = this.pool.get(key) || [];
+    
+    // Find available client
+    const available = entries.find(entry => !entry.inUse);
+    if (available) {
+      available.inUse = true;
+      available.lastUsed = Date.now();
+      return available.client;
+    }
+    
+    // Create new client if pool not full
+    if (entries.length < this.maxPoolSize) {
+      const client = new AIClient(config);
+      const entry: ClientPoolEntry = {
+        client,
+        lastUsed: Date.now(),
+        inUse: true
+      };
+      entries.push(entry);
+      this.pool.set(key, entries);
+      return client;
+    }
+    
+    // Pool full, create temporary client
+    return new AIClient(config);
+  }
+
+  release(client: AIClient, config: AIClientConfig): void {
+    const key = this.getPoolKey(config);
+    const entries = this.pool.get(key) || [];
+    const entry = entries.find(e => e.client === client);
+    if (entry) {
+      entry.inUse = false;
+      entry.lastUsed = Date.now();
+    }
+  }
+
+  cleanup(): void {
+    const now = Date.now();
+    for (const [key, entries] of this.pool.entries()) {
+      const active = entries.filter(entry => 
+        entry.inUse || (now - entry.lastUsed) < this.maxIdleTime
+      );
+      if (active.length === 0) {
+        this.pool.delete(key);
+      } else {
+        this.pool.set(key, active);
+      }
+    }
+  }
+}
+
+const globalClientPool = new AIClientPool();
+
+// Cleanup idle connections every 2 minutes
+setInterval(() => globalClientPool.cleanup(), 120000);
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -109,7 +186,7 @@ const DEFAULT_URLS: Record<ProviderType, string> = {
   deepseek: 'https://api.deepseek.com',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
   ollama: 'http://localhost:11434',
-  'ollama-cloud': 'https://cloud.ollama.ai/v1',
+  'ollama-cloud': 'https://ollama.com', // Ollama Cloud API endpoint
   lmstudio: 'http://localhost:1234/v1',
   everfern: 'http://localhost:8000/v1',
   nvidia: 'https://integrate.api.nvidia.com/v1',
@@ -122,7 +199,7 @@ const DEFAULT_MODELS: Record<ProviderType, string> = {
   deepseek: 'deepseek-chat',
   gemini: 'gemini-3.1-pro-preview',
   ollama: 'llama3',
-  'ollama-cloud': 'llama3.3',
+  'ollama-cloud': 'llama3.3', // Cloud model accessed via Ollama Cloud API
   lmstudio: 'local-model',
   everfern: 'everfern-1',
   nvidia: 'meta/llama-3.1-8b-instruct',
@@ -133,6 +210,7 @@ const DEFAULT_MODELS: Record<ProviderType, string> = {
 
 export class AIClient {
   private config: Required<Omit<AIClientConfig, 'vlm'>> & { vlm?: AIClientConfig['vlm'] };
+  private openaiClient?: OpenAI; // For NVIDIA NIM and Ollama Cloud
 
   constructor(config: AIClientConfig) {
     let finalApiKey = config.apiKey ?? '';
@@ -148,6 +226,20 @@ export class AIClient {
       maxTokens: config.maxTokens ?? (config.provider === 'nvidia' ? 16383 : config.provider === 'openrouter' ? 8192 : 4096),
       vlm: config.vlm,
     };
+
+    // Initialize OpenAI client for NVIDIA NIM only
+    // NOTE: Ollama Cloud uses native Ollama API (/api/chat), NOT OpenAI SDK
+    if (config.provider === 'nvidia') {
+      this.openaiClient = new OpenAI({
+        apiKey: this.config.apiKey || 'dummy-key',
+        baseURL: this.config.baseUrl,
+        timeout: 60000, // 60 second timeout
+        maxRetries: 3,
+        defaultHeaders: {
+          'User-Agent': 'EverFern/1.0'
+        }
+      });
+    }
   }
 
   get model(): string {
@@ -169,9 +261,15 @@ export class AIClient {
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
+    // Use OpenAI SDK for NVIDIA NIM only (Ollama Cloud uses native Ollama API)
+    if (this.config.provider === 'nvidia') {
+      return this._openAISDKChat(request);
+    }
+    
     switch (this.config.provider) {
       case 'anthropic': return this._anthropicChat(request);
       case 'ollama': return this._ollamaChat(request);
+      case 'ollama-cloud': return this._ollamaChat(request); // Cloud models use native Ollama API
       // All Gemini models (including gemini-2.5-computer-use-preview-10-2025) use
       // the OpenAI-compatible v1beta/openai endpoint. The crosshair grounding loop
       // does not require the proprietary Gemini native `computer_use` tool.
@@ -180,10 +278,347 @@ export class AIClient {
   }
 
   async *streamChat(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    // Use OpenAI SDK for NVIDIA NIM only (Ollama Cloud uses native Ollama API)
+    if (this.config.provider === 'nvidia') {
+      yield* this._openAISDKStream(request);
+      return;
+    }
+    
     switch (this.config.provider) {
       case 'anthropic': yield* this._anthropicStream(request); break;
       case 'ollama': yield* this._ollamaStream(request); break;
+      case 'ollama-cloud': yield* this._ollamaStream(request); break; // Cloud models use native Ollama API
       default: yield* this._openAICompatStream(request); break;
+    }
+  }
+
+  // ── OpenAI SDK Methods (for NVIDIA NIM and Ollama Cloud) ────────
+
+  private async _openAISDKChat(req: ChatRequest): Promise<ChatResponse> {
+    if (!this.openaiClient) {
+      throw new Error('OpenAI client not initialized for ' + this.config.provider);
+    }
+
+    const isStreaming = !!req.onStreamChunk;
+    
+    // Map messages to OpenAI format
+    const messages: any[] = req.messages.flatMap(m => {
+      let content: string | any[] = m.content;
+
+      // Nvidia NIM/OpenAI strict validation
+      if (this.config.provider === 'nvidia') {
+        // Flatten assistant/system messages to prevent format errors
+        if (m.role === 'assistant' || m.role === 'system') {
+          content = typeof m.content === 'string'
+            ? m.content
+            : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
+        }
+        // Tool responses CANNOT contain image_url blocks in strict OpenAI schemas
+        else if (m.role === 'tool' && Array.isArray(m.content)) {
+          const hasImages = m.content.some(c => c.type === 'image_url');
+          if (hasImages) {
+            const textContent = m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
+            const imageChunks = m.content.filter(c => c.type === 'image_url');
+
+            const toolMsg: any = {
+              role: 'tool',
+              content: textContent || 'Action complete.',
+              tool_call_id: m.tool_call_id || 'unknown'
+            };
+
+            const bridgeAssistantMsg: any = {
+              role: 'assistant',
+              content: 'Action completed. Please provide the visual result of this action.'
+            };
+
+            const userMsg: any = {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Screenshot provided from the system:' },
+                ...imageChunks
+              ]
+            };
+
+            return [toolMsg, bridgeAssistantMsg, userMsg];
+          }
+        }
+      }
+
+      // Build message based on role
+      if (m.role === 'system') {
+        return [{ role: 'system', content: content as string }];
+      } else if (m.role === 'user') {
+        return [{ role: 'user', content }];
+      } else if (m.role === 'assistant') {
+        const msg: any = {
+          role: 'assistant',
+          content: content as string
+        };
+        if (m.tool_calls) {
+          msg.tool_calls = m.tool_calls.map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments)
+            }
+          }));
+        }
+        return [msg];
+      } else if (m.role === 'tool') {
+        return [{
+          role: 'tool',
+          content: typeof content === 'string' ? content : JSON.stringify(content),
+          tool_call_id: m.tool_call_id || 'unknown'
+        }];
+      }
+      return [];
+    });
+
+    // Build request options
+    const options: any = {
+      model: req.model ?? this.config.model,
+      messages,
+      temperature: req.temperature ?? this.config.temperature,
+      max_tokens: req.maxTokens ?? this.config.maxTokens,
+      stream: isStreaming
+    };
+
+    // Add NVIDIA-specific parameters
+    if (this.config.provider === 'nvidia') {
+      const modelName = req.model ?? this.config.model;
+      if (modelName?.includes('qwen')) {
+        options.chat_template_kwargs = { enable_thinking: true };
+        options.temperature = req.temperature ?? 0.6;
+        options.top_p = 0.95;
+      } else if (modelName?.includes('glm')) {
+        options.chat_template_kwargs = { enable_thinking: true, clear_thinking: false };
+      } else if (modelName?.includes('kimi')) {
+        options.chat_template_kwargs = { thinking: true };
+      } else if (modelName?.includes('mistral')) {
+        options.reasoning_effort = 'high';
+        options.max_tokens = req.maxTokens ?? 16384;
+        options.temperature = req.temperature ?? 0.10;
+        options.top_p = 1.0;
+      } else if (modelName?.includes('gemma')) {
+        options.chat_template_kwargs = { enable_thinking: true };
+        options.max_tokens = req.maxTokens ?? 16384;
+        options.temperature = req.temperature ?? 1.0;
+        options.top_p = 0.95;
+      }
+    }
+
+    // Add tools if provided
+    if (req.tools?.length) {
+      options.tools = req.tools.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters
+        }
+      }));
+      options.tool_choice = 'auto';
+    }
+
+    // Add JSON response format
+    if (req.responseFormat === 'json') {
+      if (this.config.provider === 'nvidia' && req.guidedJson) {
+        options.nvext = { guided_json: req.guidedJson };
+      } else {
+        options.response_format = { type: 'json_object' };
+      }
+    }
+
+    try {
+      DebugEmitter.emit('log', 'OpenAI SDK Call', {
+        provider: this.config.provider,
+        model: options.model,
+        messageCount: messages.length
+      });
+
+      if (isStreaming) {
+        // Streaming mode - cast through unknown to handle type mismatch
+        const stream = await this.openaiClient.chat.completions.create({
+          ...options,
+          stream: true
+        }) as unknown as AsyncIterable<any>;
+
+        let fullContent = '';
+        const toolCallsMap: Record<number, { id: string; name: string; arguments: string }> = {};
+        let finishReason: any = 'stop';
+        let responseId = `${this.config.provider}-${Date.now()}`;
+
+        for await (const chunk of stream) {
+          if (chunk.id) responseId = chunk.id;
+          const delta = chunk.choices?.[0]?.delta;
+
+          if (delta?.content) {
+            fullContent += delta.content;
+            req.onStreamChunk!(delta.content);
+          }
+
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.index !== undefined) {
+                if (!toolCallsMap[tc.index]) {
+                  toolCallsMap[tc.index] = { id: '', name: '', arguments: '' };
+                }
+                const entry = toolCallsMap[tc.index];
+                if (tc.id) entry.id = tc.id;
+                if (tc.function?.name) entry.name += tc.function.name;
+                if (tc.function?.arguments) entry.arguments += tc.function.arguments;
+              }
+            }
+          }
+
+          if (chunk.choices?.[0]?.finish_reason) {
+            finishReason = chunk.choices[0].finish_reason;
+          }
+        }
+
+        const toolCalls = Object.values(toolCallsMap).map(tc => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments ? JSON.parse(tc.arguments) : {}
+        }));
+
+        return {
+          id: responseId,
+          content: fullContent,
+          model: this.config.model,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          finishReason: finishReason === 'tool_calls' || toolCalls.length > 0 ? 'tool_calls' : 'stop'
+        };
+      } else {
+        // Non-streaming mode
+        const response = await this.openaiClient.chat.completions.create(options) as any;
+        const choice = response.choices?.[0];
+        const toolCalls = choice?.message?.tool_calls?.map((tc: any) => ({
+          id: tc.id,
+          name: tc.function?.name || tc.name,
+          arguments: JSON.parse(tc.function?.arguments || tc.arguments || '{}')
+        }));
+
+        return {
+          id: response.id,
+          content: choice?.message?.content ?? '',
+          model: response.model,
+          toolCalls,
+          usage: response.usage ? {
+            promptTokens: response.usage.prompt_tokens,
+            completionTokens: response.usage.completion_tokens,
+            totalTokens: response.usage.total_tokens
+          } : undefined,
+          finishReason: choice?.finish_reason === 'tool_calls' ? 'tool_calls' :
+            (choice?.finish_reason as ChatResponse['finishReason']) ?? 'stop'
+        };
+      }
+    } catch (err) {
+      console.error(`[${this.config.provider}] OpenAI SDK Error:`, err);
+      throw err;
+    }
+  }
+
+  private async *_openAISDKStream(req: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.openaiClient) {
+      throw new Error('OpenAI client not initialized for ' + this.config.provider);
+    }
+
+    // Map messages (same logic as _openAISDKChat)
+    const messages: any[] = req.messages.flatMap(m => {
+      let content: string | any[] = m.content;
+
+      if (this.config.provider === 'nvidia') {
+        if (m.role === 'assistant' || m.role === 'system') {
+          content = typeof m.content === 'string'
+            ? m.content
+            : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
+        }
+      }
+
+      if (m.role === 'system') {
+        return [{ role: 'system', content: content as string }];
+      } else if (m.role === 'user') {
+        return [{ role: 'user', content }];
+      } else if (m.role === 'assistant') {
+        const msg: any = {
+          role: 'assistant',
+          content: content as string
+        };
+        if (m.tool_calls) {
+          msg.tool_calls = m.tool_calls.map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments)
+            }
+          }));
+        }
+        return [msg];
+      } else if (m.role === 'tool') {
+        return [{
+          role: 'tool',
+          content: typeof content === 'string' ? content : JSON.stringify(content),
+          tool_call_id: m.tool_call_id || 'unknown'
+        }];
+      }
+      return [];
+    });
+
+    const options: any = {
+      model: req.model ?? this.config.model,
+      messages,
+      temperature: req.temperature ?? this.config.temperature,
+      max_tokens: req.maxTokens ?? this.config.maxTokens,
+      stream: true
+    };
+
+    if (req.tools?.length) {
+      options.tools = req.tools.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters
+        }
+      }));
+      options.tool_choice = 'auto';
+    }
+
+    if (req.responseFormat === 'json') {
+      if (this.config.provider === 'nvidia' && req.guidedJson) {
+        options.nvext = { guided_json: req.guidedJson };
+      } else {
+        options.response_format = { type: 'json_object' };
+      }
+    }
+
+    try {
+      const stream = await this.openaiClient.chat.completions.create(options) as unknown as AsyncIterable<any>;
+      let id = `${this.config.provider}-${Date.now()}`;
+
+      for await (const chunk of stream) {
+        if (chunk.id) id = chunk.id;
+        const delta = chunk.choices?.[0]?.delta;
+
+        yield {
+          id,
+          delta: delta?.content ?? '',
+          toolCalls: delta?.tool_calls,
+          done: false,
+          model: chunk.model
+        };
+
+        if (chunk.choices?.[0]?.finish_reason) {
+          yield { id, delta: '', done: true };
+          return;
+        }
+      }
+    } catch (err) {
+      console.error(`[${this.config.provider}] OpenAI SDK Stream Error:`, err);
+      throw err;
     }
   }
 
@@ -207,37 +642,69 @@ export class AIClient {
 
   private async _fetchWithRetry(url: string, options: RequestInit, maxRetries = 6): Promise<Response> {
     let lastError: Error | null = null;
-    let delay = 2000; // Start with 2s for 429s
+    let delay = 1000; // Start with 1s instead of 2s for faster initial retry
 
     for (let i = 0; i <= maxRetries; i++) {
       try {
         if (url.includes('nvidia') || i > 0) {
           console.log(`[AIClient] Fetching: ${url} (Attempt ${i + 1}/${maxRetries + 1})`);
         }
-        const res = await fetch(url, options);
-        if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-          if (i < maxRetries) {
-            const jitter = Math.random() * 500;
-            const waitTime = delay + jitter;
-            console.warn(`[AIClient] Received ${res.status}. ${res.status === 429 ? 'Rate limit hit — backing off.' : 'Server error.'} Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
-            await new Promise(r => setTimeout(r, waitTime));
-            delay *= 2;
-            continue;
+        
+        // Create a new AbortController for each attempt with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout per request
+        
+        const enhancedOptions: RequestInit = {
+          ...options,
+          signal: controller.signal,
+          // Add keep-alive and proper headers for connection reuse
+          headers: {
+            ...options.headers,
+            'Connection': 'keep-alive',
+            'Keep-Alive': 'timeout=30, max=100',
+            'User-Agent': 'EverFern/1.0'
+          },
+          // Add keepalive flag for Node.js fetch
+          keepalive: true
+        };
+        
+        try {
+          const res = await fetch(url, enhancedOptions);
+          clearTimeout(timeoutId);
+          
+          if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+            if (i < maxRetries) {
+              const jitter = Math.random() * 500;
+              const waitTime = delay + jitter;
+              console.warn(`[AIClient] Received ${res.status}. ${res.status === 429 ? 'Rate limit hit — backing off.' : 'Server error.'} Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
+              await new Promise(r => setTimeout(r, waitTime));
+              delay *= 2;
+              continue;
+            }
           }
+          return res;
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          throw fetchErr;
         }
-        return res;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
+        
+        // Check if it's an abort error (timeout)
+        if (lastError.name === 'AbortError') {
+          console.warn(`[AIClient] Request timeout after 30s. Retrying...`);
+        } else {
+          console.warn(`[AIClient] Network error: ${lastError.message}. Retrying in ${delay}ms...`);
+        }
+        
         if (i < maxRetries) {
-          const waitTime = delay;
-          console.warn(`[AIClient] Network error: ${lastError.message}. Retrying in ${waitTime}ms...`);
-          await new Promise(r => setTimeout(r, waitTime));
-          delay *= 2;
+          await new Promise(r => setTimeout(r, delay));
+          delay = Math.min(delay * 2, 16000); // Cap at 16s max delay
           continue;
         }
       }
     }
-    throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} retries`);
+    throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries + 1} attempts`);
   }
 
   // ── OpenAI-Compatible (OpenAI, DeepSeek, LM Studio, EverFern) ───
@@ -250,6 +717,17 @@ export class AIClient {
       h['X-OpenRouter-Title'] = 'EverFern';
     }
     return h;
+  }
+
+  // ── Ollama Headers (Local and Cloud) ────────────────────────────
+
+  private get _ollamaHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    // Ollama Cloud requires Authorization header, local Ollama does not
+    if (this.config.provider === 'ollama-cloud' && this.config.apiKey) {
+      headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+    }
+    return headers;
   }
 
   private async _openAICompatChat(req: ChatRequest): Promise<ChatResponse> {
@@ -1064,7 +1542,7 @@ export class AIClient {
 
     const res = await fetch(`${this.config.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: this._oaiHeaders,
+      headers: this._ollamaHeaders,
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -1137,7 +1615,7 @@ export class AIClient {
   private async *_ollamaStream(req: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
     const res = await fetch(`${this.config.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: this._oaiHeaders,
+      headers: this._ollamaHeaders,
       body: JSON.stringify({
         model: req.model ?? this.config.model,
         messages: this._mapOllamaMessages(req.messages),
@@ -1179,10 +1657,40 @@ export class AIClient {
 
   private async _ollamaListModels(): Promise<string[]> {
     try {
-      const res = await fetch(`${this.config.baseUrl}/api/tags`, { headers: this._oaiHeaders });
+      const res = await fetch(`${this.config.baseUrl}/api/tags`, { headers: this._ollamaHeaders });
       if (!res.ok) return [];
       const data = await res.json();
       return (data.models || []).map((m: any) => m.name as string);
     } catch { return []; }
   }
+}
+
+// ── Factory Functions for Client Pooling ────────────────────────────
+
+/**
+ * Get a pooled AI client instance for better performance
+ */
+export function getPooledAIClient(config: AIClientConfig): AIClient {
+  return globalClientPool.get(config);
+}
+
+/**
+ * Release a pooled AI client back to the pool
+ */
+export function releasePooledAIClient(client: AIClient, config: AIClientConfig): void {
+  globalClientPool.release(client, config);
+}
+
+/**
+ * Create a client with automatic pooling management
+ */
+export function createManagedAIClient(config: AIClientConfig): {
+  client: AIClient;
+  release: () => void;
+} {
+  const client = getPooledAIClient(config);
+  return {
+    client,
+    release: () => releasePooledAIClient(client, config)
+  };
 }

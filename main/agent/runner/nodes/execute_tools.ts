@@ -13,6 +13,142 @@ import { captureScreen } from '../../tools/computer-use';
 import { interrupt } from '@langchain/langgraph';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
+import type { AIClient } from '../../../lib/ai-client';
+
+/**
+ * Determine if an error should trigger automatic retry with correction
+ */
+function shouldRetryWithCorrection(error: any, toolName: string): boolean {
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  
+  // Critical errors that benefit from automatic retry
+  const criticalErrors = [
+    'Cannot read properties of undefined',
+    'TypeError',
+    'ReferenceError', 
+    'Invalid arguments',
+    'Tool not found',
+    'Validation failed'
+  ];
+  
+  // Check if error message contains any critical error patterns
+  const isCriticalError = criticalErrors.some(pattern => 
+    errorMsg.toLowerCase().includes(pattern.toLowerCase())
+  );
+  
+  // Always retry for ask_user_question tool (our fixed tool)
+  const isFixedTool = toolName === 'ask_user_question';
+  
+  return isCriticalError || isFixedTool;
+}
+
+/**
+ * AI-based approval detection
+ * Replaces keyword-based approval checking with semantic analysis
+ */
+async function isApprovalResponse(feedback: string, client?: AIClient): Promise<boolean> {
+  if (!client) {
+    // Fallback: keyword-based check
+    return feedback.toLowerCase().includes('approve');
+  }
+
+  try {
+    const prompt = `Determine if this user feedback represents approval or rejection.
+
+Feedback: "${feedback}"
+
+Approval indicators:
+- "approve", "yes", "ok", "proceed", "go ahead"
+- Affirmative responses
+- Permission granted
+
+Rejection indicators:
+- "reject", "no", "deny", "cancel", "stop"
+- Negative responses
+- Permission denied
+
+Respond with JSON:
+{
+  "isApproval": true/false,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}`;
+
+    const response = await client.chat({
+      messages: [{ role: 'user', content: prompt }],
+      responseFormat: 'json',
+      temperature: 0.1,
+      maxTokens: 150
+    });
+
+    let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    // Remove markdown code blocks if present
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const analysis = JSON.parse(content);
+
+    return analysis.isApproval && analysis.confidence > 0.7;
+  } catch (err) {
+    console.warn('[ExecuteTools] AI approval detection failed:', err);
+    return feedback.toLowerCase().includes('approve');
+  }
+}
+
+/**
+ * AI-based command completion detection
+ * Replaces keyword-based prompt detection with semantic analysis
+ */
+async function isCommandComplete(output: string, client?: AIClient): Promise<boolean> {
+  if (!client) {
+    // Fallback: keyword-based check
+    const lastLines = output.split('\n').slice(-3).join('\n');
+    return lastLines.includes('> ') || lastLines.includes('$ ') || 
+           output.includes('Status: DONE') || output.includes('Exit code:');
+  }
+
+  try {
+    const lastLines = output.split('\n').slice(-5).join('\n');
+    const prompt = `Determine if this command output indicates completion (has shell prompt or exit status).
+
+Last lines of output:
+${lastLines}
+
+Complete indicators:
+- Shell prompts (>, $, #)
+- Exit codes or status messages
+- "DONE", "completed", "finished"
+
+Incomplete indicators:
+- Still running
+- Waiting for input
+- No prompt or status
+
+Respond with JSON:
+{
+  "isComplete": true/false,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}`;
+
+    const response = await client.chat({
+      messages: [{ role: 'user', content: prompt }],
+      responseFormat: 'json',
+      temperature: 0.1,
+      maxTokens: 150
+    });
+
+    let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    // Remove markdown code blocks if present
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const analysis = JSON.parse(content);
+
+    return analysis.isComplete && analysis.confidence > 0.7;
+  } catch (err) {
+    console.warn('[ExecuteTools] AI completion detection failed:', err);
+    const lastLines = output.split('\n').slice(-3).join('\n');
+    return lastLines.includes('> ') || lastLines.includes('$ ') || 
+           output.includes('Status: DONE') || output.includes('Exit code:');
+  }
+}
 
 export const createExecuteToolsNode = (
   runner: any,
@@ -20,10 +156,17 @@ export const createExecuteToolsNode = (
   config: AgentRunnerConfig,
   eventQueue?: StreamEvent[],
   conversationId?: string,
-  missionTracker?: MissionTracker
+  missionTracker?: MissionTracker,
+  shouldAbort?: () => boolean,
+  aiClient?: AIClient
 ) => {
   const integrator = createMissionIntegrator(missionTracker);
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
+    // Check for abort signal
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     const nodeIntegrator = createMissionIntegrator(missionTracker);
     nodeIntegrator.startNode('execute_tools', `Executing ${state.pendingToolCalls?.length || 0} tool calls`);
     
@@ -81,6 +224,10 @@ export const createExecuteToolsNode = (
     for (let g = 0; g < parallelGroups.length; g++) {
       const group = parallelGroups[g];
       runner.telemetry.info(`Executing group ${g + 1}/${parallelGroups.length} (${group.length} concurrent operations)`);
+      
+      // Log what tools are in this group
+      const toolNames = group.map(a => a.name).join(', ');
+      runner.telemetry.info(`Group ${g + 1} tools: ${toolNames}`);
 
       const groupTools = group.map(a => ({
         name: a.name,
@@ -135,6 +282,11 @@ export const createExecuteToolsNode = (
         const correctedToolCall = tc;
 
         runner.telemetry.action(correctedToolCall.name, correctedToolCall.arguments);
+        
+        // Log detailed tool information
+        const argsSummary = JSON.stringify(correctedToolCall.arguments).substring(0, 150);
+        runner.telemetry.info(`Starting ${correctedToolCall.name} with args: ${argsSummary}${argsSummary.length >= 150 ? '...' : ''}`);
+        
         eventQueue?.push({ type: 'tool_start', toolName: correctedToolCall.name, toolArgs: correctedToolCall.arguments as Record<string, unknown> });
 
         const startMs = Date.now();
@@ -147,6 +299,7 @@ export const createExecuteToolsNode = (
         }
 
         // ── Security & Policy Check ───────────────────────────────────────────
+        runner.telemetry.info(`Checking policy for ${correctedToolCall.name}...`);
         const toolPolicy = getDefaultToolPolicyPipeline();
         const policyResult = await toolPolicy.check({
           toolName: correctedToolCall.name,
@@ -171,12 +324,16 @@ export const createExecuteToolsNode = (
             toolCall: correctedToolCall
           });
           
-          if (typeof feedback === 'string' && feedback.toLowerCase().includes('approve')) {
+          const approved = await isApprovalResponse(String(feedback), aiClient);
+          
+          if (approved) {
              runner.telemetry.info(`Tool ${correctedToolCall.name} approved by user.`);
              result = null; // proceed to execution
           } else {
              result = { success: false, output: `Tool rejected by user: ${feedback}`, error: 'owner_approval_required' };
           }
+        } else {
+          runner.telemetry.info(`Policy check passed for ${correctedToolCall.name} (${policyResult})`);
         }
 
         if (!tool && !result) {
@@ -206,6 +363,7 @@ export const createExecuteToolsNode = (
               recordToolCall(loopHistory, correctedToolCall.name, correctedToolCall.arguments as Record<string, unknown>);
               try {
                 if (!tool) throw new Error(`Tool definition for "${correctedToolCall.name}" disappeared unexpectedly.`);
+                runner.telemetry.info(`Executing ${correctedToolCall.name}...`);
                 result = await tool.execute(correctedToolCall.arguments, (update) => {
                   eventQueue?.push({ type: 'tool_update', toolName: correctedToolCall.name, update });
                 });
@@ -214,20 +372,54 @@ export const createExecuteToolsNode = (
               } catch (err) {
                 const errMsg = err instanceof Error ? err.message : String(err);
                 runner.telemetry.warn(`Operation ${correctedToolCall.name} execution failed: ${errMsg}`);
-                result = { success: false, output: `Error: ${errMsg}`, error: String(err) };
-                recordToolOutcome(loopHistory, correctedToolCall.name, correctedToolCall.arguments as Record<string, unknown>, undefined, err);
+                
+                // Attempt automatic retry with argument correction for critical errors
+                let retrySuccessful = false;
+                if (shouldRetryWithCorrection(err, correctedToolCall.name)) {
+                  runner.telemetry.info(`🔄 Critical error detected, attempting automatic retry with corrected arguments...`);
+                  
+                  try {
+                    // For ask_user_question tool, apply the fix we implemented
+                    if (correctedToolCall.name === 'ask_user_question' && tool) {
+                      runner.telemetry.info(`🔄 Applying ask_user_question argument correction...`);
+                      // The tool itself now handles both formats, so just retry
+                      result = await tool.execute(correctedToolCall.arguments, (update) => {
+                        eventQueue?.push({ type: 'tool_update', toolName: correctedToolCall.name, update });
+                      });
+                      retrySuccessful = result.success;
+                      runner.telemetry.info(`🔄 Retry ${retrySuccessful ? 'successful' : 'failed'} for ${correctedToolCall.name}`);
+                    }
+                  } catch (retryErr) {
+                    runner.telemetry.warn(`🔄 Retry failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`);
+                  }
+                }
+                
+                if (!retrySuccessful) {
+                  result = { success: false, output: `Error: ${errMsg}`, error: String(err) };
+                  recordToolOutcome(loopHistory, correctedToolCall.name, correctedToolCall.arguments as Record<string, unknown>, undefined, err);
+                } else {
+                  recordToolOutcome(loopHistory, correctedToolCall.name, correctedToolCall.arguments as Record<string, unknown>, result, undefined);
+                }
               }
             }
           }
         }
 
         const durationMs = Date.now() - startMs;
+        runner.telemetry.info(`Tool ${correctedToolCall.name} completed in ${durationMs}ms`);
+        
         const record: ToolCallRecord = {
           toolName: correctedToolCall.name,
           args: correctedToolCall.arguments as Record<string, unknown>,
           result,
           timestamp: new Date().toISOString(),
         };
+
+        // Debug logging for ask_user_question
+        if (correctedToolCall.name === 'ask_user_question') {
+          console.log('[ExecuteTools] ask_user_question result:', JSON.stringify(result, null, 2));
+          console.log('[ExecuteTools] Pushing tool_call event with record:', JSON.stringify(record, null, 2));
+        }
 
         eventQueue?.push({ type: 'tool_call', toolCall: record });
 
@@ -283,10 +475,11 @@ export const createExecuteToolsNode = (
     for (const rec of newRecords) {
         if ((rec.toolName === 'run_command' || rec.toolName === 'command_status') && rec.result?.success) {
             const out = typeof rec.result.output === 'string' ? rec.result.output : JSON.stringify(rec.result.output);
-            const lastLines = out.split('\n').slice(-3).join('\n');
-            const hasPrompt = lastLines.includes('> ') || lastLines.includes('$ ') || out.includes('Status: DONE') || out.includes('Exit code:');
             
-            if (!hasPrompt) {
+            // Use AI to determine if command is complete
+            const isComplete = await isCommandComplete(out, aiClient);
+            
+            if (!isComplete) {
                 nextPendingTools.push({
                     id: 'poll_' + Math.random().toString(36).slice(2, 6),
                     name: 'command_status',

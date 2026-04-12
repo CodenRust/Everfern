@@ -934,6 +934,7 @@ ipcMain.handle('acp:stream', async (event, request: {
     },
     checkPermission: () => sessionPermissionGranted, // Security: Ask once per chat request
     vlm: config?.vlm,
+    shouldAbort: () => streamAborted,
   };
 
   const runner    = new AgentRunner(client, runnerConfig);
@@ -1040,6 +1041,10 @@ ipcMain.handle('acp:stream', async (event, request: {
       } else if (streamEvent.type === 'tool_start') {
         safeSend('acp:tool-start', { toolName: streamEvent.toolName, toolArgs: streamEvent.toolArgs });
       } else if (streamEvent.type === 'tool_call') {
+        // Debug: Log the tool call structure before sending
+        if (streamEvent.toolCall?.toolName === 'ask_user_question') {
+          console.log('[IPC] Sending ask_user_question tool call:', JSON.stringify(streamEvent.toolCall, null, 2));
+        }
         safeSend('acp:tool-call', streamEvent.toolCall);
         // Store tool call in messages
         if (streamEvent.toolCall) {
@@ -1080,15 +1085,23 @@ ipcMain.handle('acp:stream', async (event, request: {
       } else if (streamEvent.type === 'task_analyzed') {
         safeSend('acp:task-analyzed', { analysis: streamEvent.analysis });
       } else if (streamEvent.type === 'parallel_group_start') {
-        safeSend('acp:parallel-group-start', { groupIndex: streamEvent.groupIndex, toolNames: streamEvent.toolNames });
+        safeSend('acp:parallel-group-start', { groupIndex: streamEvent.groupIndex, stepCount: streamEvent.stepCount });
       } else if (streamEvent.type === 'parallel_group_end') {
         safeSend('acp:parallel-group-end', { groupIndex: streamEvent.groupIndex, durationMs: streamEvent.durationMs });
+      } else if (streamEvent.type === 'hitl_request') {
+        console.log('[Main] HITL request received, sending to frontend:', streamEvent.request);
+        safeSend('acp:hitl-request', streamEvent.request);
+        console.log('[Main] HITL request sent to frontend via IPC');
       } else if (streamEvent.type === 'mission_step_update') {
         safeSend('acp:mission-step-update', { step: streamEvent.step, timeline: streamEvent.timeline });
       } else if (streamEvent.type === 'mission_phase_change') {
         safeSend('acp:mission-phase-change', { phase: streamEvent.phase, timeline: streamEvent.timeline });
       } else if (streamEvent.type === 'mission_complete') {
-        safeSend('acp:mission-complete', { timeline: streamEvent.timeline, steps: streamEvent.steps });
+        safeSend('acp:mission-complete', { 
+          timeline: streamEvent.timeline, 
+          steps: streamEvent.steps,
+          thinkingDuration: streamEvent.thinkingDuration 
+        });
       } else if (streamEvent.type === 'done') {
         safeSend('acp:stream-chunk', { delta: '', done: true });
       } else if (streamEvent.type === 'usage') {

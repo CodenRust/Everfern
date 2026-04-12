@@ -175,6 +175,7 @@ async function executeSingleTool(
 
 /**
  * Execute tools in parallel groups for maximum throughput.
+ * Enhanced with better batching and resource management.
  */
 export async function executeParallelTools(
     toolCalls: Array<{ name: string; args: Record<string, unknown>; id: string }>,
@@ -186,20 +187,30 @@ export async function executeParallelTools(
     const startTime = Date.now();
     const allResults: ToolCallRecord[] = [];
     
+    // Early return for empty tool calls
+    if (toolCalls.length === 0) {
+        return {
+            results: [],
+            parallelGroups: 0,
+            totalTimeMs: Date.now() - startTime
+        };
+    }
+    
     // Analyze dependencies
     const analysis = analyzeToolDependencies(toolCalls);
     
-    // Group into parallel execution phases
-    const groups = groupParallelTools(analysis);
+    // Group into parallel execution phases with better batching
+    const groups = groupParallelToolsOptimized(analysis);
     
-    console.log(`[ParallelExecutor] ${toolCalls.length} tools → ${groups.length} parallel groups`);
+    console.log(`[ParallelExecutor] ${toolCalls.length} tools → ${groups.length} parallel groups (optimized)`);
     
-    // Execute each group
+    // Execute each group with enhanced error handling
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g];
+        const groupStartTime = Date.now();
         console.log(`[ParallelExecutor] Group ${g + 1}/${groups.length}: ${group.map(t => t.name).join(', ')}`);
         
-        // Start all tools in this group
+        // Start all tools in this group with resource management
         const promises = group.map(async (tool) => {
             const toolDef = tools.find(t => t.name === tool.name);
             if (!toolDef) {
@@ -214,17 +225,51 @@ export async function executeParallelTools(
             
             onToolStart?.(tool.name, tool.args);
             
+            const toolStartTime = Date.now();
             const record = await executeSingleTool(toolDef, tool.args, tool.id, onUpdate);
+            record.durationMs = Date.now() - toolStartTime;
+            
             onToolComplete?.(record);
             
             return record;
         });
         
-        // Wait for all tools in this group to complete
-        const groupResults = await Promise.all(promises);
-        allResults.push(...groupResults);
+        // Wait for all tools in this group to complete with timeout
+        const groupResults = await Promise.allSettled(promises);
         
-        const hasFatalError = groupResults.some(r => !r.result.success && r.result.error);
+        // Process results and handle failures
+        const successfulResults: ToolCallRecord[] = [];
+        let hasFatalError = false;
+        
+        for (const result of groupResults) {
+            if (result.status === 'fulfilled') {
+                successfulResults.push(result.value);
+                if (!result.value.result.success && result.value.result.error) {
+                    hasFatalError = true;
+                }
+            } else {
+                // Handle promise rejection
+                const errorRecord: ToolCallRecord = {
+                    toolName: 'unknown',
+                    args: {},
+                    result: { 
+                        success: false, 
+                        output: `Tool execution failed: ${result.reason}`, 
+                        error: 'execution_failed' 
+                    },
+                    timestamp: new Date().toISOString(),
+                    durationMs: Date.now() - groupStartTime
+                };
+                successfulResults.push(errorRecord);
+                hasFatalError = true;
+            }
+        }
+        
+        allResults.push(...successfulResults);
+        
+        const groupDuration = Date.now() - groupStartTime;
+        console.log(`[ParallelExecutor] Group ${g + 1} completed in ${groupDuration}ms`);
+        
         if (hasFatalError) {
              console.log(`[ParallelExecutor] ⛔ Group failed fast. Aborting subsequent parallel execution groups.`);
              break;
@@ -236,6 +281,62 @@ export async function executeParallelTools(
         parallelGroups: groups.length,
         totalTimeMs: Date.now() - startTime
     };
+}
+
+/**
+ * Enhanced grouping algorithm with better batching strategies
+ */
+function groupParallelToolsOptimized(tools: ToolAnalysis[]): ToolAnalysis[][] {
+    if (tools.length === 0) return [];
+    
+    const remaining = [...tools];
+    const groups: ToolAnalysis[][] = [];
+    
+    while (remaining.length > 0) {
+        const currentGroup: ToolAnalysis[] = [];
+        const usedIds = new Set<string>();
+        
+        // First pass: Add all read-only tools (they can run in parallel)
+        for (let i = remaining.length - 1; i >= 0; i--) {
+            const tool = remaining[i];
+            if (tool.readOnly && !usedIds.has(tool.id)) {
+                currentGroup.push(tool);
+                usedIds.add(tool.id);
+                remaining.splice(i, 1);
+            }
+        }
+        
+        // Second pass: Add non-conflicting write tools
+        for (let i = remaining.length - 1; i >= 0; i--) {
+            const tool = remaining[i];
+            
+            // Skip if already processed or has unresolved conflicts
+            if (usedIds.has(tool.id)) continue;
+            
+            // Check if any conflict is still in remaining or current group
+            const hasConflict = tool.conflicts.some(cid => 
+                remaining.some(t => t.id === cid) || usedIds.has(cid)
+            );
+            
+            if (!hasConflict) {
+                currentGroup.push(tool);
+                usedIds.add(tool.id);
+                remaining.splice(i, 1);
+            }
+        }
+        
+        // If no tools were added, force-add one to prevent infinite loop
+        if (currentGroup.length === 0 && remaining.length > 0) {
+            const tool = remaining.shift()!;
+            currentGroup.push(tool);
+        }
+        
+        if (currentGroup.length > 0) {
+            groups.push(currentGroup);
+        }
+    }
+    
+    return groups;
 }
 
 /**

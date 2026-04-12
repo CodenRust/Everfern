@@ -477,14 +477,20 @@ function parseTextToToolCalls(textContent, definedTools) {
         }
     }
     console.log(`[TextToTool] 📄 Scrubbed content length: ${scrubbedContent.length} chars`);
-    // ── ONE TOOL PER TURN ────────────────────────────────────────────────────
-    // Following the ReAct pattern (like OpenClaw): execute ONE tool, feed result
-    // back to the model, let it decide the next step. This prevents race conditions
-    // like running a script before it's been written.
+    // ── SMART TOOL EXECUTION STRATEGY ────────────────────────────────────────────
+    // Use ReAct pattern (one tool per turn) for risky operations to prevent race conditions
+    // Allow parallel execution for safe, independent tools for better performance
     if (toolCalls.length > 1) {
-        console.log(`[TextToTool] 🔀 Limiting ${toolCalls.length} tool calls to first one only (ReAct pattern)`);
-        const firstCall = toolCalls[0];
-        return { toolCalls: [firstCall], scrubbedContent, parseError: parseErrorStr };
+        const riskyTools = new Set(['run_command', 'bash', 'write', 'edit', 'delete', 'apply_patch', 'system_files']);
+        const hasRiskyTool = toolCalls.some(tc => riskyTools.has(tc.name));
+        if (hasRiskyTool) {
+            console.log(`[TextToTool] 🔀 Limiting ${toolCalls.length} tool calls to first one only (ReAct pattern - risky operation detected)`);
+            const firstCall = toolCalls[0];
+            return { toolCalls: [firstCall], scrubbedContent, parseError: parseErrorStr };
+        }
+        else {
+            console.log(`[TextToTool] ⚡ Allowing ${toolCalls.length} parallel tool calls (all safe operations)`);
+        }
     }
     return { toolCalls, scrubbedContent, parseError: parseErrorStr };
 }

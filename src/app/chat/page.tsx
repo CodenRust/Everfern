@@ -37,8 +37,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { CheckIcon as CheckSolidIcon } from "@heroicons/react/24/solid";
 import { AgentTimeline } from "../../components/AgentTimeline";
-import MissionTimelineComponent from "../../components/MissionTimeline";
-import type { MissionTimeline as MissionTimelineType, MissionStep as MissionStepType } from "../../components/MissionTimeline";
+// import MissionTimelineComponent from "../../components/MissionTimeline";
+// import type { MissionTimeline as MissionTimelineType, MissionStep as MissionStepType } from "../../components/MissionTimeline";
 import StreamView from "../../components/StreamView";
 import WindowControls from "../components/WindowControls";
 import Sidebar from "../components/Sidebar";
@@ -48,6 +48,8 @@ import ArtifactsList from './ArtifactsList';
 import PlanViewerPanel from './PlanViewerPanel';
 
 import SitePreview from './SitePreview';
+import { formatDuration } from '../../lib/formatDuration';
+import { useAutoCollapse } from '../../hooks/use-auto-collapse';
 import SettingsPage from './SettingsPage';
 import DirectoryModal from '../components/DirectoryModal';
 import FileArtifact from './FileArtifact';
@@ -55,6 +57,8 @@ import VoiceAssistantUI from './VoiceAssistantUI';
 import { DiffViewer } from '@/components/diff-viewer';
 import { SurfaceCanvas } from './SurfaceCanvas';
 import type { SurfaceData } from './SurfaceCanvas';
+import { LoadingBreadcrumb, Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 
 // ── Provider Logos ──────────────────────────────────────────────────────────
@@ -314,6 +318,7 @@ interface Message {
     role: "user" | "assistant";
     content: string;
     thought?: string;
+    thinkingDuration?: number; // Duration in milliseconds
     timestamp: Date;
     toolCalls?: ToolCallDisplay[];
     attachments?: FileAttachment[];
@@ -587,6 +592,19 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
     const isError = tc.status === 'error';
     const isTerminal = tc.toolName === 'run_command' || tc.toolName === 'bash' || tc.toolName === 'run_terminal';
     const cmdStr = (tc.args?.command || tc.args?.CommandLine || tc.args?.commandLine) as string | undefined;
+    
+    // Enhanced debugging for terminal tools
+    if (isTerminal) {
+        console.log(`[ToolCallRow] Terminal tool ${tc.toolName}:`, {
+            args: tc.args,
+            cmdStr,
+            output: tc.output,
+            status: tc.status,
+            hasArgs: !!tc.args,
+            hasOutput: !!tc.output
+        });
+    }
+    
     const isLs = isTerminal && typeof cmdStr === 'string' && cmdStr.trim().startsWith('ls');
     const isRead = tc.toolName === 'read_file' || tc.toolName === 'read' || tc.toolName === 'view_file' || tc.toolName === 'cat';
     const isFind = tc.toolName === 'find_files' || tc.toolName === 'find' || tc.toolName === 'search_docs' || tc.toolName === 'web_search' || tc.toolName === 'search' || tc.toolName === 'grep';
@@ -677,14 +695,31 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                 {/* Title */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, overflow: 'hidden' }}>
                     <span style={{ display: 'flex', alignItems: 'center', color: '#6b7280' }}>{iconToDisplay}</span>
-                    <span style={{
-                        fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        fontFamily: "'Matter', sans-serif", fontWeight: 500,
-                        color: isError ? '#ef4444' : '#111111',
-                        letterSpacing: '-0.01em'
-                    }}>
-                        {tc.displayName || tc.label || tc.toolName}
-                    </span>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                        <span style={{
+                            fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            fontFamily: "'Matter', sans-serif", fontWeight: 500,
+                            color: isError ? '#ef4444' : '#111111',
+                            letterSpacing: '-0.01em',
+                            display: 'block'
+                        }}>
+                            {tc.displayName || tc.label || tc.toolName}
+                        </span>
+                        {/* Show command preview for terminal tools */}
+                        {isTerminal && cmdStr && (
+                            <div style={{
+                                fontSize: 12,
+                                color: '#6b7280',
+                                fontFamily: "'JetBrains Mono', monospace",
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginTop: 2
+                            }}>
+                                $ {cmdStr.length > 60 ? cmdStr.substring(0, 57) + '...' : cmdStr}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Chevron */}
@@ -695,6 +730,20 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                     >
                         <ChevronUpIcon width={14} height={14} strokeWidth={2.5} />
                     </motion.span>
+                )}
+                
+                {/* Output indicator for terminal tools */}
+                {isTerminal && hasOutput && !expanded && (
+                    <div style={{
+                        fontSize: 11,
+                        color: '#10b981',
+                        backgroundColor: '#dcfce7',
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        fontWeight: 500
+                    }}>
+                        output
+                    </div>
                 )}
             </div>
 
@@ -779,6 +828,20 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                             }}>
                                 {isTerminal ? (
                                     <div style={{ whiteSpace: 'pre-wrap' }}>
+                                        {/* Show the command that was executed */}
+                                        {cmdStr && (
+                                            <div style={{ 
+                                                marginBottom: 12, 
+                                                paddingBottom: 8, 
+                                                borderBottom: '1px solid #2d2d3a',
+                                                color: '#94a3b8',
+                                                fontSize: 12
+                                            }}>
+                                                <span style={{ color: '#64748b' }}>$ </span>
+                                                <span style={{ color: '#e2e8f0' }}>{cmdStr}</span>
+                                            </div>
+                                        )}
+                                        {/* Show the output */}
                                         {displayOutput.slice(0, 2000)}
                                         {displayOutput.length > 2000 && <span style={{ color: '#9ca3af' }}>{'\n'}... ({displayOutput.length - 2000} more chars)</span>}
                                     </div>
@@ -790,109 +853,6 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                     </motion.div>
                 )}
             </AnimatePresence>
-        </motion.div>
-    );
-};
-
-// ── Reasoning Block: Collapsible thinking process ─────────────────────────────
-const ReasoningBlock = ({ thought, isLive }: { thought: string; isLive?: boolean }) => {
-    const [expanded, setExpanded] = useState(true);
-    return (
-        <div style={{ marginBottom: 20 }}>
-            <div
-                onClick={() => setExpanded(!expanded)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: expanded ? 8 : 0, cursor: 'pointer', padding: '2px 0' }}
-            >
-                <div style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {isLive ? (
-                        <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                            {[0, 0.15, 0.3].map((delay, i) => (
-                                <motion.span
-                                    key={i}
-                                    animate={{ opacity: [0.3, 1, 0.3] }}
-                                    transition={{ repeat: Infinity, duration: 1.2, delay, ease: 'easeInOut' }}
-                                    style={{ display: 'block', width: 4, height: 4, borderRadius: '50%', backgroundColor: '#9ca3af' }}
-                                />
-                            ))}
-                        </span>
-                    ) : (
-                        <AcademicCapIcon width={16} height={16} color="#9ca3af" />
-                    )}
-                </div>
-                <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500, fontFamily: "'Matter', sans-serif", flex: 1 }}>
-                    {isLive ? 'Thinking...' : 'Reasoning'}
-                </span>
-                <motion.span
-                    animate={{ rotate: expanded ? 0 : 90 }}
-                    style={{ display: 'flex', flexShrink: 0, color: '#9ca3af' }}
-                >
-                    <ChevronUpIcon width={14} height={14} strokeWidth={2.5} />
-                </motion.span>
-            </div>
-            <AnimatePresence>
-                {expanded && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        style={{ overflow: 'hidden' }}
-                    >
-                        <div style={{ fontSize: 13.5, color: '#4b5563', whiteSpace: 'pre-wrap', lineHeight: 1.7, paddingLeft: 26, paddingBottom: 4 }}>
-                            {thought}
-                            {isLive && (
-                                <motion.span
-                                    animate={{ opacity: [1, 0] }}
-                                    transition={{ repeat: Infinity, duration: 0.5 }}
-                                    style={{ display: 'inline-block', width: 2, height: '1em', backgroundColor: '#9ca3af', marginLeft: 2, verticalAlign: 'text-bottom' }}
-                                />
-                            )}
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
-};
-
-// ── ToolTimeline: Replaces AgentTimeline ────────────────────────────────────
-const ToolTimeline = ({ toolCalls, thought, isLive }: { toolCalls: ToolCallDisplay[]; thought?: string; isLive?: boolean }) => {
-    const nonWriteTools = toolCalls.filter(tc =>
-        tc.toolName !== 'write' && tc.toolName !== 'write_to_file' && tc.toolName !== 'write_file'
-    );
-    const anyRunning = toolCalls.some(t => t.status === 'running') || isLive;
-    const hasMeaningfulContent = nonWriteTools.length > 0 || !!thought?.trim();
-
-    if (!hasMeaningfulContent) return null;
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: "spring", stiffness: 350, damping: 25 }}
-            style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #f3f4f6',
-                borderRadius: 16,
-                padding: '24px',
-                boxShadow: '0 2px 12px rgba(0, 0, 0, 0.03)',
-                marginBottom: 12,
-                position: 'relative'
-            }}
-        >
-            {/* Reasoning block */}
-            {thought && thought.trim() && (
-                <ReasoningBlock thought={thought} isLive={isLive} />
-            )}
-
-            {/* Tool calls as a connected branch */}
-            {nonWriteTools.length > 0 && (
-                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 0 }}>
-                    {nonWriteTools.map((tc, idx) => (
-                        <ToolCallRow key={tc.id || idx} tc={tc} isLast={idx === nonWriteTools.length - 1} />
-                    ))}
-                </div>
-            )}
         </motion.div>
     );
 };
@@ -1161,8 +1121,18 @@ const PlanApprovalBanner = () => (
 );
 // ── Reasoning Branch Component ─────────────────────────────────────────────────
 // Replace the existing ReasoningBranch with this version.
-const ReasoningBranch = ({ thought, isLive }: { thought?: string; isLive?: boolean }) => {
-    const [expanded, setExpanded] = useState(false); // collapsed by default like Claude
+const ReasoningBranch = ({ 
+    thought, 
+    isLive, 
+    duration, 
+    autoCollapse = true 
+}: { 
+    thought?: string; 
+    isLive?: boolean; 
+    duration?: number; 
+    autoCollapse?: boolean;
+}) => {
+    const [expanded, setExpanded] = useAutoCollapse(isLive || false, autoCollapse, duration);
 
     if (!thought?.trim()) return null;
 
@@ -1175,7 +1145,7 @@ const ReasoningBranch = ({ thought, isLive }: { thought?: string; isLive?: boole
         >
             {/* Toggle row */}
             <motion.button
-                onClick={() => setExpanded(e => !e)}
+                onClick={() => setExpanded(!expanded)}
                 whileHover={{ opacity: 0.8 }}
                 style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -1184,17 +1154,8 @@ const ReasoningBranch = ({ thought, isLive }: { thought?: string; isLive?: boole
                 }}
             >
                 {isLive ? (
-                    // Animated dots — identical rhythm to Claude
-                    <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                        {[0, 0.15, 0.3].map((delay, i) => (
-                            <motion.span
-                                key={i}
-                                animate={{ opacity: [0.3, 1, 0.3] }}
-                                transition={{ repeat: Infinity, duration: 1.2, delay, ease: 'easeInOut' }}
-                                style={{ display: 'block', width: 5, height: 5, borderRadius: '50%', backgroundColor: '#9ca3af' }}
-                            />
-                        ))}
-                    </span>
+                    // Use animated Loader from animated-loading-svg-text-shimmer
+                    <Loader size={14} strokeWidth={2} className="text-zinc-500" />
                 ) : (
                     // Static icon when done — the chat bubble from the created SVG style
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1203,7 +1164,7 @@ const ReasoningBranch = ({ thought, isLive }: { thought?: string; isLive?: boole
                 )}
 
                 <span style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>
-                    {isLive ? 'Thinking…' : 'Thought for a moment'}
+                    {isLive ? 'Thinking…' : `Thought for ${formatDuration(duration)}`}
                 </span>
 
                 <motion.span
@@ -1901,6 +1862,270 @@ const RateLimitContinueButton = ({ content, onContinue }: { content: string; onC
     );
 };
 
+// ── HITL Approval Form Component ────────────────────────────────────────────
+const HitlApprovalForm = ({ 
+    request, 
+    onApprove, 
+    onReject 
+}: {
+    request: {
+        question: string;
+        details: {
+            tools: any[];
+            summary: string;
+            reasoning: string;
+        };
+        options: string[];
+    };
+    onApprove: () => void;
+    onReject: () => void;
+}) => {
+    return (
+        <div style={{ 
+            backgroundColor: '#fff3cd', 
+            border: '1px solid #ffeaa7', 
+            borderRadius: 12, 
+            padding: 20, 
+            margin: '16px 0' 
+        }}>
+            <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 8, 
+                marginBottom: 16,
+                color: '#856404',
+                fontSize: 14,
+                fontWeight: 600
+            }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                Human approval required
+            </div>
+            
+            <h3 style={{ 
+                margin: '0 0 12px 0', 
+                fontSize: 16, 
+                fontWeight: 600, 
+                color: '#1f2937' 
+            }}>
+                {request.question}
+            </h3>
+            
+            <div style={{ 
+                backgroundColor: '#f8f9fa', 
+                border: '1px solid #e9ecef', 
+                borderRadius: 8, 
+                padding: 12, 
+                marginBottom: 16,
+                fontSize: 13,
+                color: '#495057'
+            }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Operation Details:</div>
+                <div style={{ marginBottom: 4 }}><strong>Tools:</strong> {request.details.summary}</div>
+                <div><strong>Reason:</strong> {request.details.reasoning}</div>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button
+                    onClick={onReject}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: 8,
+                        border: '1px solid #dc3545',
+                        backgroundColor: '#ffffff',
+                        color: '#dc3545',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = '#dc3545';
+                        e.currentTarget.style.color = '#ffffff';
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = '#ffffff';
+                        e.currentTarget.style.color = '#dc3545';
+                    }}
+                >
+                    Reject
+                </button>
+                <button
+                    onClick={onApprove}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: 8,
+                        border: 'none',
+                        backgroundColor: '#28a745',
+                        color: '#ffffff',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = '#218838';
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = '#28a745';
+                    }}
+                >
+                    Approve
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// ── User Question Form Component ─────────────────────────────────────────────
+const UserQuestionForm = ({ 
+    question, 
+    options, 
+    multiSelect, 
+    selectedValues, 
+    onSelectionChange, 
+    onSubmit 
+}: {
+    question: string;
+    options: Array<{ label: string; value: string; isRecommended?: boolean }>;
+    multiSelect: boolean;
+    selectedValues: string[];
+    onSelectionChange: (values: string[]) => void;
+    onSubmit: () => void;
+}) => {
+    const handleOptionClick = (value: string) => {
+        if (multiSelect) {
+            const newValues = selectedValues.includes(value)
+                ? selectedValues.filter(v => v !== value)
+                : [...selectedValues, value];
+            onSelectionChange(newValues);
+        } else {
+            onSelectionChange([value]);
+        }
+    };
+
+    return (
+        <div style={{ 
+            backgroundColor: '#f8f9fa', 
+            border: '1px solid #e9ecef', 
+            borderRadius: 12, 
+            padding: 20, 
+            margin: '16px 0' 
+        }}>
+            <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 8, 
+                marginBottom: 16,
+                color: '#6366f1',
+                fontSize: 14,
+                fontWeight: 600
+            }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9,9h6v6H9z"/>
+                </svg>
+                Waiting for your input
+            </div>
+            
+            <h3 style={{ 
+                margin: '0 0 16px 0', 
+                fontSize: 16, 
+                fontWeight: 600, 
+                color: '#1f2937' 
+            }}>
+                {question}
+            </h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                {options.map((option, idx) => (
+                    <button
+                        key={idx}
+                        onClick={() => handleOptionClick(option.value)}
+                        style={{
+                            padding: '12px 16px',
+                            borderRadius: 8,
+                            border: selectedValues.includes(option.value) 
+                                ? '2px solid #6366f1' 
+                                : '1px solid #d1d5db',
+                            backgroundColor: selectedValues.includes(option.value) 
+                                ? '#f0f9ff' 
+                                : '#ffffff',
+                            color: selectedValues.includes(option.value) 
+                                ? '#1e40af' 
+                                : '#374151',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            fontSize: 14,
+                            fontWeight: option.isRecommended ? 600 : 400,
+                            transition: 'all 0.2s',
+                            position: 'relative'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{
+                                width: 16,
+                                height: 16,
+                                borderRadius: multiSelect ? 4 : '50%',
+                                border: selectedValues.includes(option.value) 
+                                    ? '2px solid #6366f1' 
+                                    : '2px solid #d1d5db',
+                                backgroundColor: selectedValues.includes(option.value) 
+                                    ? '#6366f1' 
+                                    : 'transparent',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                {selectedValues.includes(option.value) && (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                        <polyline points="20,6 9,17 4,12"/>
+                                    </svg>
+                                )}
+                            </div>
+                            <span>{option.label}</span>
+                            {option.isRecommended && (
+                                <span style={{
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    color: '#059669',
+                                    backgroundColor: '#d1fae5',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    marginLeft: 'auto'
+                                }}>
+                                    RECOMMENDED
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                ))}
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                    onClick={onSubmit}
+                    disabled={selectedValues.length === 0}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: 8,
+                        border: 'none',
+                        backgroundColor: selectedValues.length > 0 ? '#6366f1' : '#d1d5db',
+                        color: selectedValues.length > 0 ? '#ffffff' : '#9ca3af',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: selectedValues.length > 0 ? 'pointer' : 'not-allowed',
+                        transition: 'all 0.2s'
+                    }}
+                >
+                    Submit {multiSelect && selectedValues.length > 1 ? `(${selectedValues.length} selected)` : ''}
+                </button>
+            </div>
+        </div>
+    );
+};
+
 // ── Main ChatPage ─────────────────────────────────────────────────────────────
 export default function ChatPage() {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -1986,8 +2211,41 @@ export default function ChatPage() {
     const [liveToolCalls, setLiveToolCalls] = useState<ToolCallDisplay[]>([]);
     const [streamingContent, setStreamingContent] = useState("");
     const [streamingThought, setStreamingThought] = useState("");
+    
+    // User question form state
+    const [activeUserQuestion, setActiveUserQuestion] = useState<{
+        question: string;
+        options: Array<{ label: string; value: string; isRecommended?: boolean }>;
+        multiSelect: boolean;
+    } | null>(null);
+    const [questionFormValues, setQuestionFormValues] = useState<string[]>([]);
+    
+    // Debug: Track activeUserQuestion changes
+    useEffect(() => {
+        console.log('[Frontend] activeUserQuestion state changed:', activeUserQuestion);
+    }, [activeUserQuestion]);
+    
+    // Current node tracking for better status display
+    const [currentNode, setCurrentNode] = useState<string>("");
+    
+    // Get user-friendly node names
+    const getNodeDisplayName = (nodeName: string): string => {
+        const nodeNames: Record<string, string> = {
+            'intent_classifier': 'Understanding your request',
+            'global_planner': 'Planning approach',
+            'brain': 'Using brain',
+            'action_validation': 'Validating actions',
+            'hitl_approval': 'Waiting for approval',
+            'multi_tool_orchestrator': 'Executing tools',
+            'execute_tools': 'Running tools',
+            'VALIDATION': 'Validating approach',
+            'EXECUTE_TOOLS': 'Running tools',
+            'BRAIN': 'Using brain'
+        };
+        return nodeNames[nodeName] || 'Working';
+    };
     const [modelCallInfo, setModelCallInfo] = useState<{ model: string; toolsCount: number } | null>(null);
-    const [missionTimeline, setMissionTimeline] = useState<MissionTimelineType | null>(null);
+    // const [missionTimeline, setMissionTimeline] = useState<MissionTimelineType | null>(null);
     const [missionComplete, setMissionComplete] = useState(false);
 
     // Settings
@@ -2013,6 +2271,18 @@ export default function ChatPage() {
     // Permission state
     const [showPermissionModal, setShowPermissionModal] = useState(false);
     const [permissionsGranted, setPermissionsGranted] = useState(false);
+    
+    // HITL Approval state
+    const [showHitlApproval, setShowHitlApproval] = useState(false);
+    const [hitlRequest, setHitlRequest] = useState<{
+        question: string;
+        details: {
+            tools: any[];
+            summary: string;
+            reasoning: string;
+        };
+        options: string[];
+    } | null>(null);
 
     // Plan card state
     const [activePlan, setActivePlan] = useState<{ content: string; chatId: string } | null>(null);
@@ -2331,6 +2601,11 @@ export default function ChatPage() {
         setLiveToolCalls([]);
         setStreamingContent("");
         setStreamingThought("");
+        
+        // Clear any active user question when starting a new request
+        setActiveUserQuestion(null);
+        setQuestionFormValues([]);
+        setCurrentNode("");
         hasReceivedUsageData.current = false;
         isMessageCommittedRef.current = false;
         isHandlingPlanRef.current = false;
@@ -2356,21 +2631,122 @@ export default function ChatPage() {
                 setShowPermissionModal(true);
             });
             acpApi.onToolStart(({ toolName, toolArgs }: { toolName: string; toolArgs: Record<string, unknown> }) => {
+                if (toolName === 'ask_user_question') {
+                    console.log('[Frontend] Received ask_user_question tool_start:', JSON.stringify({ toolName, toolArgs }, null, 2));
+                }
                 const display = resolveToolDisplay(toolName, toolArgs);
                 const newTc: ToolCallDisplay = { id: crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
                 liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                 setLiveToolCalls([...liveToolCallsRef.current]);
+                
+                // Handle ask_user_question tool start - extract question from args
+                if (toolName === 'ask_user_question') {
+                    // Try to extract question from tool arguments
+                    if (toolArgs.questions && Array.isArray(toolArgs.questions)) {
+                        const question = toolArgs.questions[0];
+                        console.log('[Frontend] Setting activeUserQuestion from questions array:', question);
+                        setActiveUserQuestion({
+                            question: question.question,
+                            options: question.options?.map((opt: any) => ({
+                                label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                            })) || [],
+                            multiSelect: question.multiSelect || false
+                        });
+                        setQuestionFormValues([]);
+                    } else if (toolArgs.question) {
+                        // Handle single question format
+                        console.log('[Frontend] Setting activeUserQuestion from single question:', toolArgs.question);
+                        setActiveUserQuestion({
+                            question: toolArgs.question as string,
+                            options: (toolArgs.options as any[])?.map((opt: any) => ({
+                                label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                            })) || [],
+                            multiSelect: (toolArgs.multiSelect as boolean) || false
+                        });
+                        setQuestionFormValues([]);
+                    } else {
+                        console.log('[Frontend] ask_user_question tool_start but no question found in toolArgs');
+                    }
+                }
             });
             acpApi.onToolCall((record: any) => {
+                // Debug: Log the tool call structure
+                if (record.toolName === 'ask_user_question') {
+                    console.log('[Frontend] Received ask_user_question tool call:', JSON.stringify(record, null, 2));
+                }
                 const existingIdx = liveToolCallsRef.current.findIndex(t => t.toolName === record.toolName && t.status === 'running');
                 if (existingIdx >= 0) {
                     const updated = [...liveToolCallsRef.current];
                     updated[existingIdx] = { ...updated[existingIdx], status: 'done' as const, output: typeof record.result === 'string' ? record.result : JSON.stringify(record.result) };
                     liveToolCallsRef.current = updated;
                     setLiveToolCalls(updated);
+                    
+                    // Handle ask_user_question tool specially
+                    if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
+                        console.log('[Frontend] ask_user_question tool_call has data, processing...');
+                        const data = record.result.data;
+                        console.log('[Frontend] Extracted data:', JSON.stringify(data, null, 2));
+                        
+                        if (data.questions && data.questions.length > 0) {
+                            const question = data.questions[0]; // Use first question
+                            console.log('[Frontend] Setting activeUserQuestion from tool_call data.questions[0]:', question);
+                            const formData = {
+                                question: question.question,
+                                options: question.options?.map((opt: any) => ({
+                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                                })) || [],
+                                multiSelect: question.multiSelect || false
+                            };
+                            console.log('[Frontend] Form data to set:', JSON.stringify(formData, null, 2));
+                            setActiveUserQuestion(formData);
+                            setQuestionFormValues([]);
+                            console.log('[Frontend] activeUserQuestion state updated');
+                            
+                            // Mark that we have an active user question so mission_complete doesn't remove listeners
+                            (window as any).__activeUserQuestion = true;
+                            console.log('[Frontend] Set __activeUserQuestion flag to true');
+                        } else if (data.question) {
+                            // Handle single question format (fallback)
+                            console.log('[Frontend] Setting activeUserQuestion from tool_call data.question (fallback)');
+                            setActiveUserQuestion({
+                                question: data.question,
+                                options: data.options?.map((opt: any) => ({
+                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                                })) || [],
+                                multiSelect: data.multiSelect || false
+                            });
+                            setQuestionFormValues([]);
+                            
+                            // Mark that we have an active user question
+                            (window as any).__activeUserQuestion = true;
+                            console.log('[Frontend] Set __activeUserQuestion flag to true');
+                        } else {
+                            console.log('[Frontend] ask_user_question tool_call data has no questions or question field');
+                        }
+                    } else if (record.toolName === 'ask_user_question') {
+                        console.log('[Frontend] ask_user_question tool_call but missing data:', {
+                            hasResult: !!record.result,
+                            resultSuccess: record.result?.success,
+                            hasData: !!record.result?.data
+                        });
+                    }
                 }
             });
-            acpApi.onThought(({ content }: { content: string }) => { streamingThoughtRef.current += content; setStreamingThought(streamingThoughtRef.current); });
+            acpApi.onThought(({ content }: { content: string }) => { 
+                // Filter out fun startup messages and keep only actual thoughts
+                if (!['🎬 Let\'s do this!'].includes(content)) {
+                    streamingThoughtRef.current += content; 
+                    setStreamingThought(streamingThoughtRef.current);
+                }
+            });
             acpApi.onUsage(({ totalTokens }: { promptTokens: number; completionTokens: number; totalTokens: number }) => { hasReceivedUsageData.current = true; setContextTokens({ used: totalTokens, max: 128000 }); });
             acpApi.onSurfaceAction((data: any) => {
                 if (data.action === 'create' || data.action === 'update') {
@@ -2396,49 +2772,119 @@ export default function ChatPage() {
                 }
             });
 
-            // Listen to mission timeline updates
+            // Listen to mission timeline updates - DISABLED per user request
+            /*
             acpApi.onMissionStepUpdate(({ step, timeline }: { step: any; timeline: MissionTimelineType }) => {
                 setMissionTimeline(timeline);
+                // Update current node based on the latest step
+                if (step && step.name) {
+                    setCurrentNode(step.name);
+                }
             });
+            */
 
+            /*
             acpApi.onMissionPhaseChange(({ phase, timeline }: { phase: string; timeline: MissionTimelineType }) => {
                 setMissionTimeline(timeline);
+                // Update current node based on phase
+                setCurrentNode(phase);
             });
+            */
 
-            acpApi.onMissionComplete(({ timeline, steps }: { timeline: MissionTimelineType; steps: any[] }) => {
+            /*
+            acpApi.onMissionComplete(({ timeline, steps, thinkingDuration }: { timeline: MissionTimelineType; steps: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
                 setMissionTimeline(timeline);
                 setMissionComplete(true);
                 acpApi.removeStreamListeners();
                 isMessageCommittedRef.current = true;
+            */
+            
+            // Simplified mission complete handler without timeline
+            acpApi.onMissionComplete(({ thinkingDuration }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
+                console.log('[Frontend] ⚠️ Mission complete received');
+                console.log('[Frontend] Current state - showHitlApproval:', showHitlApproval, '__activeHitl:', (window as any).__activeHitl, 'activeUserQuestion:', activeUserQuestion);
+                setMissionComplete(true);
+                
+                // Delay listener removal to allow pending events (like HITL requests) to be processed first
+                setTimeout(() => {
+                    // Only remove listeners if no HITL or user question is active
+                    const hasActiveHitl = (window as any).__activeHitl || showHitlApproval || activeUserQuestion || (window as any).__activeUserQuestion;
+                    console.log('[Frontend] Checking if should remove listeners - hasActiveHitl:', hasActiveHitl);
+                    if (!hasActiveHitl) {
+                        console.log('[Frontend] Removing stream listeners after mission complete');
+                        acpApi.removeStreamListeners();
+                    } else {
+                        console.log('[Frontend] ⏸️ Keeping stream listeners active due to HITL/UserQuestion');
+                        // Check again in 1 second in case the HITL/question gets resolved
+                        setTimeout(() => {
+                            const stillActive = (window as any).__activeHitl || showHitlApproval || activeUserQuestion || (window as any).__activeUserQuestion;
+                            console.log('[Frontend] Delayed check - stillActive:', stillActive);
+                            if (!stillActive) {
+                                console.log('[Frontend] Delayed removal of stream listeners');
+                                acpApi.removeStreamListeners();
+                            }
+                        }, 1000);
+                    }
+                }, 200); // Increased delay to 200ms
+                
+                isMessageCommittedRef.current = true;
 
-                const finalContent = streamingContentRef.current || "Done.";
+                const finalContent = streamingContentRef.current || "";
                 const finalThought = streamingThoughtRef.current;
                 const finalToolCalls = liveToolCallsRef.current.map(t =>
                     t.status === 'running' ? { ...t, status: 'done' as const } : t
                 );
-                const assistantMsg: Message = {
-                    id: crypto.randomUUID(),
-                    role: "assistant",
-                    content: finalContent,
-                    thought: finalThought,
-                    timestamp: new Date(),
-                    toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
-                };
+                
+                // Extract duration in milliseconds from thinkingDuration
+                const durationMs = thinkingDuration?.duration;
+                
+                // Only create assistant message if there's actual content or tool calls
+                if (finalContent || finalThought || finalToolCalls.length > 0) {
+                    const assistantMsg: Message = {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content: finalContent,
+                        thought: finalThought,
+                        thinkingDuration: durationMs,
+                        timestamp: new Date(),
+                        toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                    };
 
-                setStreamingContent("");
-                setStreamingThought("");
-                setLiveToolCalls([]);
-                setIsLoading(false);
-                setMessages(prev => {
-                    // Prevent duplicate message if the last message is identical
-                    if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
-                        console.warn('[Chat] Duplicate plan message prevented');
-                        return prev;
-                    }
-                    const final = [...prev, assistantMsg];
-                    saveConversation(final);
-                    return final;
-                });
+                    setStreamingContent("");
+                    setStreamingThought("");
+                    setLiveToolCalls([]);
+                    setIsLoading(false);
+                    setMessages(prev => {
+                        // Prevent duplicate message if the last message is identical
+                        if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                            console.warn('[Chat] Duplicate plan message prevented');
+                            return prev;
+                        }
+                        const final = [...prev, assistantMsg];
+                        saveConversation(final);
+                        return final;
+                    });
+                } else {
+                    // No content at all - just clean up
+                    setStreamingContent("");
+                    setStreamingThought("");
+                    setLiveToolCalls([]);
+                    setIsLoading(false);
+                }
+            });
+
+            // Listen for HITL approval requests
+            console.log('[HITL] Setting up HITL request listener, onHitlRequest available:', !!acpApi.onHitlRequest);
+            acpApi.onHitlRequest?.((request: any) => {
+                console.log('[HITL] ✅ Approval request received in frontend:', request);
+                console.log('[HITL] Current state - showHitlApproval:', showHitlApproval, '__activeHitl:', (window as any).__activeHitl);
+                setHitlRequest(request);
+                setShowHitlApproval(true);
+                setCurrentNode('hitl_approval');
+                
+                // Mark that we have an active HITL so mission_complete doesn't remove listeners
+                (window as any).__activeHitl = true;
+                console.log('[HITL] Set __activeHitl flag to true');
             });
 
             // Fallback: if no mission_complete event within reasonable time, mark as done
@@ -2449,15 +2895,18 @@ export default function ChatPage() {
                     acpApi.removeStreamListeners();
                     isMessageCommittedRef.current = true;
 
-                    const finalContent = streamingContentRef.current || "Done.";
+                    const finalContent = streamingContentRef.current || "";
                     const finalThought = streamingThoughtRef.current;
                     const finalToolCalls = liveToolCallsRef.current.map(t =>
                         t.status === 'running' ? { ...t, status: 'done' as const } : t
                     );
-                    const assistantMsg: Message = {
-                        id: crypto.randomUUID(),
-                        role: "assistant",
-                        content: finalContent,
+                    
+                    // Only create assistant message if there's actual content or tool calls
+                    if (finalContent || finalThought || finalToolCalls.length > 0) {
+                        const assistantMsg: Message = {
+                            id: crypto.randomUUID(),
+                            role: "assistant",
+                            content: finalContent,
                         thought: finalThought,
                         timestamp: new Date(),
                         toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
@@ -2477,6 +2926,13 @@ export default function ChatPage() {
                         saveConversation(final);
                         return final;
                     });
+                    } else {
+                        // No content at all - just clean up
+                        setStreamingContent("");
+                        setStreamingThought("");
+                        setLiveToolCalls([]);
+                        setIsLoading(false);
+                    }
                 }
             }, 120000); // 2 minute fallback
 
@@ -2496,7 +2952,7 @@ export default function ChatPage() {
         if (msgs.length === 0) return;
         const id = activeConversationId || crypto.randomUUID();
         if (!activeConversationId) setActiveConversationId(id);
-        const conversation = { id, title: msgs[0].content.slice(0, 60) + (msgs[0].content.length > 60 ? "..." : ""), messages: msgs.map(m => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, toolCalls: m.toolCalls ? m.toolCalls.map(({ icon, ...rest }) => rest) : undefined })), provider: config?.provider || "everfern", createdAt: msgs[0].timestamp.toISOString(), updatedAt: new Date().toISOString() };
+        const conversation = { id, title: msgs[0].content.slice(0, 60) + (msgs[0].content.length > 60 ? "..." : ""), messages: msgs.map(m => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, thinkingDuration: m.thinkingDuration, toolCalls: m.toolCalls ? m.toolCalls.map(({ icon, ...rest }) => rest) : undefined })), provider: config?.provider || "everfern", createdAt: msgs[0].timestamp.toISOString(), updatedAt: new Date().toISOString() };
         if ((window as any).electronAPI?.history?.save) await (window as any).electronAPI.history.save(conversation);
     }, [activeConversationId, config?.provider]);
 
@@ -2649,7 +3105,13 @@ export default function ChatPage() {
                         setLiveToolCalls(updatedToolCalls);
                     }
                 });
-                api.onThought(({ content }: { content: string }) => { streamingThoughtRef.current += content; setStreamingThought(streamingThoughtRef.current); });
+                api.onThought(({ content }: { content: string }) => { 
+                    // Filter out fun startup messages, keep only actual thoughts
+                    if (!['🎬 Let\'s do this!'].includes(content)) {
+                        streamingThoughtRef.current += content; 
+                        setStreamingThought(streamingThoughtRef.current);
+                    }
+                });
                 api.onUsage(({ promptTokens, completionTokens, totalTokens }: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
                     console.log(`[Token Usage] Prompt: ${promptTokens}, Completion: ${completionTokens}, Total: ${totalTokens}`);
                     hasReceivedUsageData.current = true;
@@ -2708,38 +3170,50 @@ export default function ChatPage() {
                         api.removeStreamListeners();
                         isMessageCommittedRef.current = true;
 
-                        const finalContent = accumulated || "Done.";
+                        const finalContent = accumulated || "";
                         const finalThought = streamingThoughtRef.current;
                         const finalToolCalls = liveToolCallsRef.current.map(t =>
                             t.status === 'running' ? { ...t, status: 'done' as const } : t
                         );
-                        const assistantMsg: Message = {
-                            id: crypto.randomUUID(),
-                            role: "assistant",
-                            content: finalContent,
-                            thought: finalThought,
-                            timestamp: new Date(),
-                            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
-                        };
+                        
+                        // Only create assistant message if there's actual content or tool calls
+                        if (finalContent || finalThought || finalToolCalls.length > 0) {
+                            const assistantMsg: Message = {
+                                id: crypto.randomUUID(),
+                                role: "assistant",
+                                content: finalContent,
+                                thought: finalThought,
+                                timestamp: new Date(),
+                                toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                            };
 
-                        setStreamingContent("");
-                        setStreamingThought("");
-                        setLiveToolCalls([]);
-                        setIsLoading(false);
-                        setIsComputerUseActive(false);
-                        setMessages(prev => {
-                            // Prevent duplicate message if the last message is identical
-                            if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
-                                console.warn('[Chat] Duplicate message prevented:', assistantMsg.content.substring(0, 50));
-                                return prev;
-                            }
-                            const final = [...prev, assistantMsg];
-                            saveConversation(final);
-                            return final;
-                        });
+                            setStreamingContent("");
+                            setStreamingThought("");
+                            setLiveToolCalls([]);
+                            setIsLoading(false);
+                            setIsComputerUseActive(false);
+                            setMessages(prev => {
+                                // Prevent duplicate message if the last message is identical
+                                if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                                    console.warn('[Chat] Duplicate message prevented:', assistantMsg.content.substring(0, 50));
+                                    return prev;
+                                }
+                                const final = [...prev, assistantMsg];
+                                saveConversation(final);
+                                return final;
+                            });
 
-                        if (voiceOutputEnabled && voiceProvider === "elevenlabs" && voiceElevenlabsKey)
-                            handlePlayVoiceResponse(assistantMsg.content);
+                            if (voiceOutputEnabled && voiceProvider === "elevenlabs" && voiceElevenlabsKey)
+                                handlePlayVoiceResponse(assistantMsg.content);
+                        } else {
+                            // No content at all - just clean up
+                            setStreamingContent("");
+                            setStreamingThought("");
+                            setLiveToolCalls([]);
+                            setIsLoading(false);
+                            setIsComputerUseActive(false);
+                        }
+
                         if (activeConversationId) {
                             checkForPlan(activeConversationId);
                             checkForSites(activeConversationId);
@@ -2786,6 +3260,45 @@ export default function ChatPage() {
         })();
     }, [inputValue, attachments, folderContexts, isLoading, messages, saveConversation, selectedModel, availableModels, activeConversationId, checkForPlan]);
 
+    const handleQuestionSubmit = useCallback(() => {
+        if (!activeUserQuestion || questionFormValues.length === 0) return;
+        
+        const selectedOptions = questionFormValues.join(', ');
+        const responseText = `Selected: ${selectedOptions}`;
+        
+        // Clear the question form
+        setActiveUserQuestion(null);
+        setQuestionFormValues([]);
+        
+        // Clear the active user question flag
+        (window as any).__activeUserQuestion = false;
+        console.log('[Frontend] Cleared __activeUserQuestion flag');
+        
+        // Send the response as a regular message
+        handleSend(responseText);
+    }, [activeUserQuestion, questionFormValues, handleSend]);
+
+    const handleHitlApproval = useCallback((approved: boolean) => {
+        if (!hitlRequest) return;
+        
+        console.log('[HITL] User decision:', approved ? 'approved' : 'rejected');
+        
+        // Clear the HITL approval UI
+        setShowHitlApproval(false);
+        setHitlRequest(null);
+        setCurrentNode("");
+        
+        // Clear the active HITL flag
+        (window as any).__activeHitl = false;
+        
+        // Send the approval response as a message
+        const responseText = approved 
+            ? `[HITL_APPROVED] I have reviewed and approved the requested operation. Please proceed.`
+            : `[HITL_REJECTED] I have reviewed and rejected the requested operation. Please do not proceed.`;
+        
+        handleSend(responseText);
+    }, [hitlRequest, handleSend]);
+
     const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
     }, [handleSend]);
@@ -2798,7 +3311,7 @@ export default function ChatPage() {
                 const conv = await (window as any).electronAPI.history.load(id);
                 if (conv?.messages) {
                     setActiveConversationId(id);
-                    setMessages(conv.messages.map((m: any) => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, toolCalls: m.toolCalls, attachments: m.attachments || [], timestamp: new Date(conv.updatedAt) })));
+                    setMessages(conv.messages.map((m: any) => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, thinkingDuration: m.thinkingDuration, toolCalls: m.toolCalls, attachments: m.attachments || [], timestamp: new Date(conv.updatedAt) })));
                     setCurrentPlan(null);
                     setContextItems([]);
                     setExecutionPlan(null);
@@ -3009,7 +3522,7 @@ export default function ChatPage() {
                     <StopIcon width={16} height={16} />
                 </button>
             ) : (
-                <button type="button" onClick={handleSend} disabled={!inputValue.trim() && attachments.length === 0 && folderContexts.length === 0} title="Send"
+                <button type="button" onClick={handleSend} disabled={!!activeUserQuestion || !!showHitlApproval || (!inputValue.trim() && attachments.length === 0 && folderContexts.length === 0)} title="Send"
                     style={{ width: 32, height: 32, borderRadius: 10, background: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "#201e24" : "#f4f4f4", border: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "none" : "1px solid #e8e6d9", color: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "#ffffff" : "#a1a1aa", cursor: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s" }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -3319,11 +3832,33 @@ export default function ChatPage() {
 
                                             {/* ── Empty state composer ── */}
                                             <div style={{ width: "100%", maxWidth: 740 }}>
+                                                {/* User Question Form */}
+                                                {activeUserQuestion && (
+                                                    <UserQuestionForm
+                                                        question={activeUserQuestion.question}
+                                                        options={activeUserQuestion.options}
+                                                        multiSelect={activeUserQuestion.multiSelect}
+                                                        selectedValues={questionFormValues}
+                                                        onSelectionChange={setQuestionFormValues}
+                                                        onSubmit={handleQuestionSubmit}
+                                                    />
+                                                )}
+                                                
+                                                {/* HITL Approval Form */}
+                                                {showHitlApproval && hitlRequest && (
+                                                    <HitlApprovalForm
+                                                        request={hitlRequest}
+                                                        onApprove={() => handleHitlApproval(true)}
+                                                        onReject={() => handleHitlApproval(false)}
+                                                    />
+                                                )}
+                                                
                                                 <div style={{ backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#f4f4f4", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: 16, display: "flex", flexDirection: "column", minHeight: 120, transition: "all 0.3s ease" }}>
                                                     {renderAttachmentStrip()}
-                                                    <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder="How can I help you today?" rows={1}
+                                                    <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestion ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
+                                                        disabled={!!activeUserQuestion || !!showHitlApproval}
                                                         className="placeholder-[#a5a3a0]"
-                                                        style={{ width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: "#111111", lineHeight: 1.5, padding: "20px 24px", minHeight: 70, maxHeight: 240 }} />
+                                                        style={{ width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestion || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "20px 24px", minHeight: 70, maxHeight: 240 }} />
                                                     <div style={{ flex: 1 }} />
                                                     <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", padding: "10px 24px 16px" }}>
                                                         {renderComposerLeftActions()}
@@ -3429,16 +3964,25 @@ export default function ChatPage() {
                                                         </div>
                                                     ) : (
                                                         <>
-                                                            <ToolTimeline
+                                                            <AgentTimeline
                                                                 toolCalls={msg.toolCalls?.filter(tc => tc.toolName !== 'write' && tc.toolName !== 'write_to_file' && tc.toolName !== 'write_file') || []}
                                                                 thought={msg.thought}
                                                                 isLive={false}
                                                             />
                                                             {(() => {
                                                                 const { cleanContent, artifacts } = extractFileArtifacts(msg.content || '');
+                                                                const hasContent = cleanContent && cleanContent.trim().length > 0;
+                                                                const hasToolCalls = msg.toolCalls && msg.toolCalls.length > 0;
+                                                                
                                                                 return (
                                                                     <>
-                                                                        <StreamingMarkdown content={cleanContent} isLive={false} isLatest={idx === messages.length - 1} />
+                                                                        {hasContent ? (
+                                                                            <StreamingMarkdown content={cleanContent} isLive={false} isLatest={idx === messages.length - 1} />
+                                                                        ) : hasToolCalls ? (
+                                                                            <div style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic', padding: '8px 0' }}>
+                                                                                Executing actions...
+                                                                            </div>
+                                                                        ) : null}
                                                                         {artifacts.map((art, i) => (
                                                                             <FileArtifact key={i} path={art.path} description={art.description} chatId={activeConversationId || ""} />
                                                                         ))}
@@ -3473,7 +4017,7 @@ export default function ChatPage() {
                                                 Fern
                                             </div>
                                             <div style={{ width: "100%" }}>
-                                                <ToolTimeline
+                                                <AgentTimeline
                                                     toolCalls={liveToolCalls}
                                                     thought={streamingThought}
                                                     isLive={true}
@@ -3493,22 +4037,28 @@ export default function ChatPage() {
                                                         </>
                                                     );
                                                 })()}
-                                                {!streamingContent && liveToolCalls.length === 0 && !streamingThought && (
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                                                        <motion.div
-                                                            animate={{ opacity: [0.3, 1, 0.3] }}
-                                                            transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                                                            style={{ display: 'flex', gap: 4 }}
-                                                        >
-                                                            {[0, 1, 2].map(i => (
-                                                                <motion.div
-                                                                    key={i}
-                                                                    animate={{ scale: [1, 1.3, 1] }}
-                                                                    transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
-                                                                    style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#9ca3af' }}
-                                                                />
-                                                            ))}
-                                                        </motion.div>
+                                                {!streamingContent && liveToolCalls.length === 0 && !streamingThought && !activeUserQuestion && !showHitlApproval && (
+                                                    <LoadingBreadcrumb text={getNodeDisplayName(currentNode)} />
+                                                )}
+                                                {(activeUserQuestion || showHitlApproval) && (
+                                                    <div style={{ 
+                                                        display: 'flex', 
+                                                        alignItems: 'center', 
+                                                        gap: 8, 
+                                                        padding: '16px 20px',
+                                                        backgroundColor: '#f0f9ff',
+                                                        border: '1px solid #bfdbfe',
+                                                        borderRadius: 8,
+                                                        margin: '16px 20px',
+                                                        color: '#1e40af',
+                                                        fontSize: 14,
+                                                        fontWeight: 600
+                                                    }}>
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <circle cx="12" cy="12" r="10"/>
+                                                            <path d="M9,9h6v6H9z"/>
+                                                        </svg>
+                                                        Waiting for your input
                                                     </div>
                                                 )}
                                             </div>
@@ -3516,8 +4066,8 @@ export default function ChatPage() {
                                     )}
                                     <div ref={messagesEndRef} />
 
-                                    {/* Mission Timeline Display */}
-                                    {missionTimeline && isLoading && (
+                                    {/* Mission Timeline Display - DISABLED per user request */}
+                                    {/* {missionTimeline && isLoading && (
                                         <motion.div
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}
@@ -3525,12 +4075,15 @@ export default function ChatPage() {
                                             transition={{ duration: 0.3 }}
                                             className="mx-auto w-full max-w-2xl px-6 py-4"
                                         >
-                                            <MissionTimelineComponent
-                                                timeline={missionTimeline}
-                                                isRunning={isLoading && !missionComplete}
-                                            />
+                                            <ErrorBoundary componentName="MissionTimeline">
+                                                <MissionTimelineComponent
+                                                    timeline={missionTimeline}
+                                                    isRunning={isLoading && !missionComplete}
+                                                    autoCollapse={true}
+                                                />
+                                            </ErrorBoundary>
                                         </motion.div>
-                                    )}
+                                    )} */}
                                 </div>
                             </div>
 
@@ -3569,10 +4122,36 @@ export default function ChatPage() {
 
                                     <div style={{ width: "96%", maxWidth: 840, margin: "0 auto 8px auto", display: "flex", flexDirection: "column" }}>
                                         <div style={{ width: "100%", backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#ffffff", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: (isComputerUseActive || showPermissionModal) ? "0 0 16px 16px" : 16, position: "relative", zIndex: 2, display: "flex", flexDirection: "column", minHeight: 100, transition: "all 0.3s ease" }}>
+                                            {/* User Question Form */}
+                                            {activeUserQuestion && (
+                                                <div style={{ padding: '16px 20px 0' }}>
+                                                    <UserQuestionForm
+                                                        question={activeUserQuestion.question}
+                                                        options={activeUserQuestion.options}
+                                                        multiSelect={activeUserQuestion.multiSelect}
+                                                        selectedValues={questionFormValues}
+                                                        onSelectionChange={setQuestionFormValues}
+                                                        onSubmit={handleQuestionSubmit}
+                                                    />
+                                                </div>
+                                            )}
+                                            
+                                            {/* HITL Approval Form */}
+                                            {showHitlApproval && hitlRequest && (
+                                                <div style={{ padding: '16px 20px 0' }}>
+                                                    <HitlApprovalForm
+                                                        request={hitlRequest}
+                                                        onApprove={() => handleHitlApproval(true)}
+                                                        onReject={() => handleHitlApproval(false)}
+                                                    />
+                                                </div>
+                                            )}
+                                            
                                             {renderAttachmentStrip()}
                                             <div style={{ display: "flex", alignItems: "flex-end", gap: 12, paddingRight: 12 }}>
-                                                <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder="How can I help you today?" rows={1}
-                                                    style={{ flex: 1, width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: "#111111", lineHeight: 1.5, padding: "16px 20px", minHeight: 50, maxHeight: 240 }} />
+                                                <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestion ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
+                                                    disabled={!!activeUserQuestion || !!showHitlApproval}
+                                                    style={{ flex: 1, width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestion || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "16px 20px", minHeight: 50, maxHeight: 240 }} />
                                             </div>
 
                                             {/* Voice recording status */}

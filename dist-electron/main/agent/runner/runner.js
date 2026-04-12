@@ -41,11 +41,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AgentRunner = void 0;
 const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
+const ai_client_1 = require("../../lib/ai-client");
 const system_prompt_1 = require("./system-prompt");
 const graph_1 = require("./graph");
 const skills_loader_1 = require("./skills-loader");
 const tools_manager_1 = require("./tools_manager");
 const telemetry_logger_1 = require("../helpers/telemetry-logger");
+const state_manager_1 = require("./state-manager");
 const pi_tools_1 = require("../tools/pi-tools");
 // Lifecycle/Infra
 const agent_events_1 = require("../infra/agent-events");
@@ -65,16 +67,59 @@ class AgentRunner {
     constructor(client, config = {}) {
         this.client = client;
         this.config = { ...DEFAULT_CONFIG, ...config };
-        this.skills = (0, skills_loader_1.loadSkills)();
+        this.skills = []; // Initialize empty, will be loaded asynchronously
         this.tools = (0, tools_manager_1.getBaseTools)(this);
         this.initializePiTools();
+        this.initializeSkills(); // Load skills asynchronously
         this.telemetry = new telemetry_logger_1.TelemetryLogger();
+    }
+    /**
+     * Initialize skills asynchronously to avoid blocking the event loop
+     */
+    async initializeSkills() {
+        try {
+            this.skills = await (0, skills_loader_1.loadSkillsAsync)();
+        }
+        catch (error) {
+            console.error('[AgentRunner] Failed to load skills asynchronously:', error);
+            this.skills = []; // Fallback to empty array
+        }
     }
     async initializePiTools() {
         const piTools = await (0, pi_tools_1.getPiCodingTools)();
         if (!this.tools.find(t => t.name === piTools[0].name)) {
             this.tools.push(...piTools, this.createSpawnAgentTool());
         }
+    }
+    /**
+     * Get or create a pooled AI client for better performance
+     * This ensures we reuse connections instead of creating new clients
+     */
+    getClient(config) {
+        if (!config) {
+            return this.client;
+        }
+        // Use pooled client for better performance
+        return (0, ai_client_1.getPooledAIClient)({
+            provider: (config.provider || this.client.provider),
+            model: config.model || this.client.model,
+            apiKey: config.apiKey || this.client.apiKey,
+            baseUrl: config.baseUrl
+        });
+    }
+    /**
+     * Release a pooled client back to the pool
+     */
+    releaseClient(client, config) {
+        if (client === this.client) {
+            return; // Don't release the main client
+        }
+        (0, ai_client_1.releasePooledAIClient)(client, {
+            provider: (config.provider || this.client.provider),
+            model: config.model || this.client.model,
+            apiKey: config.apiKey || this.client.apiKey,
+            baseUrl: config.baseUrl
+        });
     }
     createSpawnAgentTool() {
         return {
@@ -188,9 +233,38 @@ class AgentRunner {
         const sessionKey = `session:${convId}`;
         (0, sessions_1.sessionCreated)(sessionKey);
         (0, agent_events_1.emitLifecycle)(sessionKey, 'session_started', { convId, model: this.client.model });
+        // Check if this is a HITL approval/rejection response
+        const textInput = typeof userInput === 'string' ? userInput : JSON.stringify(userInput);
+        if (textInput.includes('[HITL_APPROVED]') || textInput.includes('[HITL_REJECTED]')) {
+            const approved = textInput.includes('[HITL_APPROVED]');
+            console.log(`[Runner] HITL response detected: ${approved ? 'APPROVED' : 'REJECTED'}`);
+            // Try to find the request ID from state manager
+            const state = state_manager_1.stateManager.getState(convId);
+            const interruptData = state_manager_1.stateManager.getInterruptData(convId);
+            if (interruptData && interruptData.id) {
+                const { saveHitlResponse } = await Promise.resolve().then(() => __importStar(require('../../store/hitl')));
+                const responseId = crypto.randomUUID();
+                const timestamp = new Date().toISOString();
+                saveHitlResponse({
+                    id: responseId,
+                    requestId: interruptData.id,
+                    conversationId: convId,
+                    timestamp,
+                    approved,
+                    response: textInput,
+                });
+                console.log(`[Runner] HITL response saved: ${responseId} (${approved ? 'approved' : 'rejected'})`);
+            }
+            else {
+                console.warn('[Runner] Could not find HITL request ID to save response');
+            }
+        }
         // Initialize mission tracker for timeline tracking
         const { createMissionTracker } = await Promise.resolve().then(() => __importStar(require('./mission-tracker')));
         const missionTracker = createMissionTracker(convId);
+        // Initialize duration tracker for thinking time tracking
+        const { DurationTracker } = await Promise.resolve().then(() => __importStar(require('./duration-tracker')));
+        const durationTracker = new DurationTracker();
         // Add initial mission steps
         missionTracker.addStep({
             id: 'step:triage',
@@ -214,7 +288,6 @@ class AgentRunner {
             });
         });
         // Check Context Window before proceeding
-        const textInput = typeof userInput === 'string' ? userInput : JSON.stringify(userInput);
         const { ContextWindowGuard } = await Promise.resolve().then(() => __importStar(require('./context-window-guard')));
         const guard = new ContextWindowGuard(this.client.model);
         const status = guard.check(history);
@@ -227,25 +300,50 @@ class AgentRunner {
         const piTools = await (0, pi_tools_1.getPiCodingTools)();
         if (!this.tools.find(t => t.name === piTools[0].name))
             this.tools.push(...piTools);
-        this.telemetry.updateSpinner('Compiling system messages...');
+        this.telemetry.updateSpinner('Pre-loading system prompt...');
         const platform = os.platform();
-        const { messages: initialMessages } = (0, system_prompt_1.buildSystemMessages)(history, userInput, platform, conversationId, []);
-        this.telemetry.updateSpinner('Building execution graph...');
+        // Ensure skills are loaded before building system prompt
+        if (this.skills.length === 0) {
+            console.log('[AgentRunner] Skills not yet loaded, loading now...');
+            this.skills = await (0, skills_loader_1.loadSkillsAsync)();
+        }
+        // Pre-load system prompt asynchronously with pre-loaded skills to avoid loading them twice
+        const preloadedPrompt = await (0, system_prompt_1.getSlimSystemPromptAsync)(platform, conversationId, [], this.skills);
+        // Create eventQueue early so we can push status updates
         const eventQueue = [];
-        const graph = (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, missionTracker);
-        this.telemetry.updateSpinner('Invoking agent node pipeline...');
+        // Skip boring internal messages - frontend shows LoadingBreadcrumb instead
+        // These console logs are for debugging only
+        this.telemetry.updateSpinner('Compiling system messages...');
+        console.log('[AgentRunner] 🔄 Building system messages...');
+        const { messages: initialMessages } = (0, system_prompt_1.buildSystemMessages)(history, userInput, platform, conversationId, [], preloadedPrompt);
+        console.log('[AgentRunner] ✅ System messages built');
+        await new Promise(resolve => setImmediate(resolve));
+        this.telemetry.updateSpinner('Building execution graph...');
+        console.log('[AgentRunner] 🔄 Building execution graph...');
+        // Build graph asynchronously to avoid blocking the event loop
+        const graph = await Promise.resolve().then(() => (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, missionTracker, this.config.shouldAbort));
+        console.log('[AgentRunner] ✅ Graph built successfully');
+        await new Promise(resolve => setImmediate(resolve));
+        this.telemetry.updateSpinner('Starting agent...');
+        console.log('[AgentRunner] 🚀 Starting agent execution...');
+        // Emit a fun status message
+        yield { type: 'thought', content: '🎬 Let\'s do this!' };
         let graphDone = false;
         (async () => {
             try {
+                console.log('[AgentRunner] 🔄 Getting graph state...');
                 const threadConfig = { configurable: { thread_id: convId }, recursionLimit: 100 };
                 const currentState = await graph.getState(threadConfig);
+                console.log('[AgentRunner] ✅ Graph state retrieved');
                 const { Command } = await Promise.resolve().then(() => __importStar(require('@langchain/langgraph')));
                 if (currentState && currentState.next && currentState.next.length > 0) {
+                    console.log('[AgentRunner] 🔄 Resuming interrupted session...');
                     this.telemetry.info(`Resuming session ${convId} from interrupted state...`);
                     missionTracker.startStep('step:triage');
                     await graph.invoke(new Command({ resume: textInput }), threadConfig);
                 }
                 else {
+                    console.log('[AgentRunner] 🔄 Starting new graph invocation...');
                     missionTracker.startStep('step:triage');
                     await graph.invoke({
                         messages: initialMessages,
@@ -260,7 +358,9 @@ class AgentRunner {
                         currentStepId: 'step:triage',
                     }, threadConfig);
                 }
-                missionTracker.complete();
+                console.log('[AgentRunner] ✅ Graph invocation completed');
+                // Don't mark mission as complete yet - wait until all events are drained
+                // This ensures HITL events are properly yielded before mission completion
             }
             catch (err) {
                 console.error('[AgentRunner] Graph Error:', err);
@@ -285,21 +385,41 @@ class AgentRunner {
             }
         })();
         // Drain all events and wait for mission completion
-        while (!graphDone || eventQueue.length > 0 || !missionTracker.getTimeline().isComplete) {
+        // Keep draining while: graph is still running OR there are events in queue
+        // Don't check missionTracker.isComplete here - it prevents HITL events from being yielded
+        while (!graphDone || eventQueue.length > 0) {
             if (eventQueue.length > 0) {
-                yield eventQueue.shift();
+                const event = eventQueue.shift();
+                // Debug logging for HITL events
+                if (event.type === 'hitl_request') {
+                    console.log('[Runner] Processing hitl_request event:', event);
+                }
+                // Track when first thought event occurs
+                if (event.type === 'thought') {
+                    durationTracker.onThoughtStart();
+                }
+                yield event;
             }
             else {
                 await new Promise(r => setTimeout(r, 10));
             }
         }
+        // Now mark mission as complete after all events have been drained
+        if (!missionTracker.getTimeline().isComplete && !missionTracker.getTimeline().error) {
+            missionTracker.complete();
+        }
         this.telemetry.terminate(true);
-        // Emit final mission completion event
+        // Calculate thinking duration
+        const thinkingDuration = durationTracker.onMissionComplete();
+        // Emit final mission completion event with thinking duration
         yield {
             type: 'mission_complete',
             timeline: missionTracker.getTimeline(),
             steps: missionTracker.getSteps(),
+            thinkingDuration,
         };
+        // Reset duration tracker for next mission
+        durationTracker.reset();
         yield { type: 'done' };
     }
 }

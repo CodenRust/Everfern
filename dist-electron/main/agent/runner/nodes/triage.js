@@ -3,9 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createTriageNode = void 0;
 const triage_1 = require("../triage");
 const mission_integrator_1 = require("../mission-integrator");
-const createTriageNode = (runner, eventQueue, missionTracker) => {
+const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
+        // Check for abort signal
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         integrator.startNode('triage', 'Analyzing user intent and decomposing task');
         try {
             runner.telemetry.transition('triage');

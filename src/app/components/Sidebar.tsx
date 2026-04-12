@@ -133,7 +133,7 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, onSele
 
             {/* Brand Area - EverFern Branding */}
             <div style={{
-                height: 44,
+                height: 64,
                 display: "flex",
                 alignItems: "center",
                 padding: "0 16px",
@@ -142,7 +142,7 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, onSele
                 backgroundColor: "#f5f4f0"
             } as any}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="EverFern" width={28} height={28} style={{ filter: 'invert(1)' }} />
+                    <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="EverFern" width={48} height={48} />
                     {isOpen && (
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.03em", color: "#201e24", fontFamily: 'var(--font-sans)' }}>EverFern</span>

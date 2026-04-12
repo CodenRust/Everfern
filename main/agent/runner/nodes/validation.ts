@@ -2,19 +2,78 @@ import { GraphStateType } from '../state';
 import { AgentRunner } from '../runner';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
+import type { AIClient } from '../../../lib/ai-client';
 
 const MAX_ITERATIONS = 50;
 
 /**
+ * AI-based tool risk assessment
+ * Replaces keyword-based risk detection with semantic analysis
+ */
+async function assessToolRisk(toolCalls: any[], client?: AIClient): Promise<boolean> {
+  if (!toolCalls || toolCalls.length === 0) return false;
+  if (!client) {
+    // Fallback: conservative approach - assume high risk if no AI available
+    return toolCalls.length > 0;
+  }
+
+  try {
+    const toolSummary = toolCalls.map(tc => `${tc.name}(${JSON.stringify(tc.arguments).slice(0, 100)})`).join(', ');
+    
+    const prompt = `Analyze these tool calls and determine if they pose high risk (destructive operations, system modifications, data loss potential).
+
+Tool calls: ${toolSummary}
+
+Consider high risk:
+- Command execution that could modify system state
+- File deletion or overwriting
+- Database modifications
+- Network operations that could expose data
+- Any operation that could cause data loss
+
+Consider low risk:
+- Read-only operations
+- File creation in safe locations
+- Non-destructive queries
+- Information retrieval
+
+Respond with JSON:
+{
+  "isHighRisk": true/false,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}`;
+
+    const response = await client.chat({
+      messages: [{ role: 'user', content: prompt }],
+      responseFormat: 'json',
+      temperature: 0.1,
+      maxTokens: 200
+    });
+
+    let responseContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    // Remove markdown code blocks if present
+    responseContent = responseContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const analysis = JSON.parse(responseContent);
+
+    return analysis.isHighRisk && analysis.confidence > 0.7;
+  } catch (err) {
+    console.warn('[Validation] AI risk assessment failed:', err);
+    // Fallback: conservative approach
+    return true;
+  }
+}
+
+/**
  * Evaluates whether the task objective has been achieved and the mission should complete.
  * 
- * This function implements completion validation heuristics to prevent premature task completion.
- * It checks multiple signals to determine if the agent should continue iterating or finalize.
+ * Uses AI-based semantic analysis instead of keyword matching to determine completion.
  * 
  * @param state - Current graph state
+ * @param client - AI client for semantic analysis
  * @returns true if task should complete (route to END), false if should continue iterating
  */
-function shouldCompleteTask(state: GraphStateType): boolean {
+async function shouldCompleteTask(state: GraphStateType, client?: any): Promise<boolean> {
   // 1. Force completion at max iterations to prevent infinite loops
   if (state.iterations >= MAX_ITERATIONS) {
     return true;
@@ -34,30 +93,59 @@ function shouldCompleteTask(state: GraphStateType): boolean {
     return false;
   }
 
-  // 4. Analyze last assistant message for completion indicators
+  // 4. Use AI to analyze last assistant message for completion
   const messages = state.messages || [];
-  const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
+  const lastAssistantMessage = [...messages].reverse().find(m => {
+    // Handle both LangChain BaseMessage and plain message objects
+    const role = (m as any).role || (m as any)._getType?.();
+    return role === 'assistant' || role === 'ai';
+  });
   
-  if (lastAssistantMessage && typeof lastAssistantMessage.content === 'string') {
-    const content = lastAssistantMessage.content.toLowerCase();
+  if (lastAssistantMessage && client) {
+    const content = typeof lastAssistantMessage.content === 'string' 
+      ? lastAssistantMessage.content 
+      : (lastAssistantMessage.content as any)?.text || '';
     
-    // Check for explicit completion indicators
-    const completionIndicators = [
-      'task completed',
-      'task is complete',
-      'finished the task',
-      'all done',
-      'successfully completed',
-      'here is the final result',
-      'here is the result'
-    ];
-    
-    const hasCompletionIndicator = completionIndicators.some(indicator => 
-      content.includes(indicator)
-    );
-    
-    if (hasCompletionIndicator) {
-      return true;
+    if (content && content.length > 10) {
+      try {
+        // Use AI to determine if the task is complete
+        const analysisPrompt = `Analyze this assistant message and determine if it indicates task completion.
+
+Message: "${content.substring(0, 500)}"
+
+Does this message indicate that the task is complete? Consider:
+- Explicit completion statements
+- Final results being presented
+- Task objectives being met
+- No indication of pending work
+
+Respond with JSON:
+{
+  "isComplete": true/false,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}`;
+
+        const response = await client.chat({
+          messages: [{ role: 'user', content: analysisPrompt }],
+          responseFormat: 'json',
+          temperature: 0.1,
+          maxTokens: 200
+        });
+
+        let responseContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+        // Remove markdown code blocks if present
+        responseContent = responseContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const analysis = JSON.parse(responseContent);
+
+        // Only consider complete if AI is confident (>0.7)
+        if (analysis.isComplete && analysis.confidence > 0.7) {
+          return true;
+        }
+      } catch (err) {
+        // If AI analysis fails, fall back to conservative approach
+        console.warn('[Validation] AI completion analysis failed:', err);
+      }
     }
   }
 
@@ -73,10 +161,8 @@ export const createValidationNode = (runner: AgentRunner, missionTracker?: Missi
     try {
       runner.telemetry.transition('validation');
       
-      // Simple heuristic: Any command execution or file writing is high risk.
-      const isHighRisk = (state.pendingToolCalls || []).some(call => 
-        ['run_command', 'bash', 'write', 'edit', 'delete'].includes(call.name)
-      );
+      // Use AI to assess tool risk instead of keyword matching
+      const isHighRisk = await assessToolRisk(state.pendingToolCalls || [], runner.client);
 
       // Evaluate whether task should complete or continue iterating
       const taskShouldComplete = shouldCompleteTask(state);

@@ -61,10 +61,20 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.on('acp:model-call-info', (_e, data) => cb(data));
         },
         onToolStart: (cb) => {
-            electron_1.ipcRenderer.on('acp:tool-start', (_e, record) => cb(record));
+            electron_1.ipcRenderer.on('acp:tool-start', (_e, record) => {
+                if (record.toolName === 'ask_user_question') {
+                    console.log('[Preload] Received ask_user_question tool-start:', JSON.stringify(record, null, 2));
+                }
+                cb(record);
+            });
         },
         onToolCall: (cb) => {
-            electron_1.ipcRenderer.on('acp:tool-call', (_e, record) => cb(record));
+            electron_1.ipcRenderer.on('acp:tool-call', (_e, record) => {
+                if (record.toolName === 'ask_user_question') {
+                    console.log('[Preload] Received ask_user_question tool-call:', JSON.stringify(record, null, 2));
+                }
+                cb(record);
+            });
         },
         onToolUpdate: (cb) => {
             electron_1.ipcRenderer.on('acp:tool-update', (_e, data) => cb(data));
@@ -97,7 +107,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         getPermissionSoundUrl: () => '/sounds/permission.mp3',
         playSound: (soundPath) => electron_1.ipcRenderer.invoke('audio:play-sound', soundPath),
         validateNvidiaModel: (modelId, apiKey) => electron_1.ipcRenderer.invoke('acp:validate-nvidia-model', modelId, apiKey),
-        // Mission Timeline Events (OpenClaw style)
+        // Mission Timeline Events 
         onMissionStepUpdate: (cb) => {
             electron_1.ipcRenderer.on('acp:mission-step-update', (_e, data) => cb(data));
         },
@@ -106,6 +116,13 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         },
         onMissionComplete: (cb) => {
             electron_1.ipcRenderer.on('acp:mission-complete', (_e, data) => cb(data));
+        },
+        onHitlRequest: (cb) => {
+            console.log('[Preload] 🔧 Setting up HITL request listener');
+            electron_1.ipcRenderer.on('acp:hitl-request', (_e, data) => {
+                console.log('[Preload] ✅ HITL request received from main process:', data);
+                cb(data);
+            });
         },
         removeStreamListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:stream-chunk');
@@ -124,6 +141,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:mission-step-update');
             electron_1.ipcRenderer.removeAllListeners('acp:mission-phase-change');
             electron_1.ipcRenderer.removeAllListeners('acp:mission-complete');
+            electron_1.ipcRenderer.removeAllListeners('acp:hitl-request');
         },
     },
     // ── Chat History ───────────────────────────────────────────────

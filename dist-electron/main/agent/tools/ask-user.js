@@ -33,17 +33,60 @@ exports.askUserTool = {
         required: ['questions']
     },
     async execute(args, onUpdate) {
-        const questions = args.questions;
+        // Handle both formats: { questions: [...] } or { question: "...", options: [...] }
+        let questions;
+        if (args.questions && Array.isArray(args.questions)) {
+            // Correct format: questions array
+            questions = args.questions;
+        }
+        else if (args.question && args.options) {
+            // Incorrect format: single question object - wrap it in an array
+            questions = [{
+                    question: args.question,
+                    options: args.options,
+                    multiSelect: args.multiSelect
+                }];
+        }
+        else {
+            // Invalid format
+            return {
+                success: false,
+                output: 'Invalid arguments: expected either "questions" array or "question" with "options"',
+                error: 'Invalid tool arguments'
+            };
+        }
         const preview = args.previewMarkdown;
         const formatted = questions.map(q => {
-            const opts = q.options.join(' / ');
+            const opts = q.options?.join(' / ') || 'No options provided';
             return `❓ **${q.question}**\n   Choices: ${opts}`;
         }).join('\n\n');
         onUpdate?.(`🤔 Presenting ${questions.length} clarifying questions to the user...`);
+        // Normalize options to ensure they're properly serializable
+        const normalizedQuestions = questions.map(q => ({
+            question: String(q.question || ''),
+            options: (Array.isArray(q.options) ? q.options : []).map((opt) => {
+                if (typeof opt === 'string') {
+                    return { label: opt, value: opt };
+                }
+                else if (typeof opt === 'object' && opt !== null) {
+                    return {
+                        label: String(opt.label || opt.value || opt),
+                        value: String(opt.value || opt.label || opt),
+                        isRecommended: Boolean(opt.isRecommended || opt.recommended || false)
+                    };
+                }
+                return { label: String(opt), value: String(opt) };
+            }),
+            multiSelect: Boolean(q.multiSelect || false)
+        }));
         return {
             success: true,
             output: `Questions presented to the user:\n\n${formatted}\n\n${preview ? `**Preview Context:**\n${preview}\n\n` : ''}Wait for the user's selection.`,
-            data: { questions, preview, type: 'ask_user' }
+            data: {
+                questions: normalizedQuestions,
+                preview: preview || '',
+                type: 'ask_user'
+            }
         };
     }
 };

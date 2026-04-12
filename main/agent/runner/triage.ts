@@ -1,10 +1,83 @@
 import { IntentType, IntentClassification } from './state';
-import { analyzeTask } from './task-decomposer';
 import type { AIClient } from '../../lib/ai-client';
 
 // Intent classification will be handled by AI agent - no hardcoded signals needed
 
 import { normalizeMessages } from './services/message-utils';
+
+// ── Intent Classification Cache ──────────────────────────────────────
+
+interface CachedIntentEntry {
+  classification: IntentClassification;
+  timestamp: number;
+  inputHash: string;
+}
+
+class IntentCache {
+  private cache = new Map<string, CachedIntentEntry>();
+  private maxSize = 1000;
+  private maxAge = 300000; // 5 minutes
+
+  private hashInput(input: string, historyLength: number | undefined): string {
+    const safeHistoryLength = historyLength || 0;
+    // Create a simple hash of input + history context
+    const context = `${input}:${safeHistoryLength}`;
+    let hash = 0;
+    for (let i = 0; i < context.length; i++) {
+      const char = context.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(36);
+  }
+
+  get(input: string, historyLength: number | undefined): IntentClassification | null {
+    const key = this.hashInput(input, historyLength);
+    const entry = this.cache.get(key);
+    
+    if (!entry) return null;
+    
+    // Check if entry is still valid
+    if (Date.now() - entry.timestamp > this.maxAge) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return entry.classification;
+  }
+
+  set(input: string, historyLength: number | undefined, classification: IntentClassification): void {
+    const key = this.hashInput(input, historyLength);
+    
+    // Clean up old entries if cache is full
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey) {
+        this.cache.delete(oldestKey);
+      }
+    }
+    
+    this.cache.set(key, {
+      classification,
+      timestamp: Date.now(),
+      inputHash: key
+    });
+  }
+
+  cleanup(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (now - entry.timestamp > this.maxAge) {
+        this.cache.delete(key);
+      }
+    }
+  }
+}
+
+const intentCache = new IntentCache();
+
+// Cleanup cache every 2 minutes
+setInterval(() => intentCache.cleanup(), 120000);
 
 /**
  * Helper Functions for Context Awareness
@@ -66,9 +139,9 @@ function hasFileAttachment(message: any): boolean {
 }
 
 /**
- * Check if a message has explicit intent keywords
+ * Check if a message has any substantive content (not just a greeting)
  */
-function hasExplicitIntentKeywords(message: any): boolean {
+function hasSubstantiveContent(message: any): boolean {
   if (!message || !message.content) return false;
   
   let content = '';
@@ -83,23 +156,8 @@ function hasExplicitIntentKeywords(message: any): boolean {
     content = message.content.text;
   }
   
-  const normalized = content.toLowerCase();
-  
-  // Check for strong intent signals
-  const intentKeywords = [
-    // Analyze intent
-    'analyze', 'analyse', 'analysis', 'visualize', 'chart', 'graph', 'dashboard', 'insights',
-    // Fix intent
-    'fix', 'debug', 'repair', 'resolve', 'troubleshoot', 'error', 'bug', 'broken',
-    // Coding intent
-    'write code', 'create function', 'implement', 'refactor', 'programming',
-    // Build intent
-    'create app', 'build project', 'scaffold', 'generate',
-    // Research intent
-    'search', 'research', 'investigate', 'find information'
-  ];
-  
-  return intentKeywords.some(keyword => normalized.includes(keyword));
+  // Consider it substantive if it's longer than a typical greeting
+  return content.trim().length > 20;
 }
 
 /**
@@ -119,7 +177,7 @@ function extractPreviousIntent(history: any[]): IntentType | null {
   const previousUserMsg = userMessages[userMessages.length - 1];
   if (!previousUserMsg) return null;
   
-  // Check for file attachments first
+  // Check for file attachments first - strong signal for intent
   if (hasFileAttachment(previousUserMsg)) {
     let content = '';
     if (Array.isArray(previousUserMsg.content)) {
@@ -129,7 +187,7 @@ function extractPreviousIntent(history: any[]): IntentType | null {
         .map((item: any) => typeof item === 'string' ? item : item.text || '')
         .join(' ');
       
-      // Check file types
+      // Check file types for intent hints
       const files = previousUserMsg.content.filter((item: any) => item.type === 'file');
       for (const file of files) {
         const fileName = file.name || file.path || '';
@@ -142,56 +200,15 @@ function extractPreviousIntent(history: any[]): IntentType | null {
       }
     }
     
-    // If we have file attachment but no specific type detected, check text content
-    if (content) {
-      const normalized = content.toLowerCase();
-      if (normalized.includes('analyze') || normalized.includes('review') || normalized.includes('check')) {
-        return 'analyze';
-      }
-    }
-    
     // Default for file uploads
     return 'analyze';
   }
   
-  // Check for explicit intent keywords in previous message
-  if (hasExplicitIntentKeywords(previousUserMsg)) {
-    let content = '';
-    if (Array.isArray(previousUserMsg.content)) {
-      content = previousUserMsg.content
-        .filter((item: any) => item.type === 'text' || typeof item === 'string')
-        .map((item: any) => typeof item === 'string' ? item : item.text || '')
-        .join(' ');
-    } else if (typeof previousUserMsg.content === 'string') {
-      content = previousUserMsg.content;
-    }
-    
-    const normalized = content.toLowerCase();
-    
-    // Analyze intent
-    if (/\b(analyze|analyse|analysis|visualize|chart|graph|dashboard|insights|csv|data|dataset)\b/i.test(normalized)) {
-      return 'analyze';
-    }
-    
-    // Fix intent
-    if (/\b(fix|debug|repair|resolve|troubleshoot|error|bug|broken|crash|issue|problem)\b/i.test(normalized)) {
-      return 'fix';
-    }
-    
-    // Coding intent
-    if (/\b(write code|create function|implement|refactor|programming|code|function|class)\b/i.test(normalized)) {
-      return 'coding';
-    }
-    
-    // Build intent
-    if (/\b(create app|build project|scaffold|generate|build|create|make)\b/i.test(normalized)) {
-      return 'build';
-    }
-    
-    // Research intent
-    if (/\b(search|research|investigate|find information|lookup)\b/i.test(normalized)) {
-      return 'research';
-    }
+  // Check if previous message has substantive content
+  if (hasSubstantiveContent(previousUserMsg)) {
+    // Let AI handle the classification - don't use keywords
+    // Return null to indicate we should use AI classification
+    return null;
   }
   
   return null;
@@ -199,6 +216,8 @@ function extractPreviousIntent(history: any[]): IntentType | null {
 
 /**
  * AI-powered intent classification agent
+ * This is a proper LangGraph-style agent that uses AI to classify user intent
+ * without relying on hardcoded keyword matching
  */
 export async function classifyIntentAI(
   client: AIClient, 
@@ -206,51 +225,69 @@ export async function classifyIntentAI(
   history: any[] = []
 ): Promise<IntentClassification> {
   const normalizedHistory = normalizeMessages(history);
-  const lastMessages = normalizedHistory.slice(-3).map(m => `[${m.role.toUpperCase()}]: ${typeof m.content === 'string' ? m.content : 'Complex Content'}`).join('\n');
+  const lastMessages = normalizedHistory.slice(-5).map(m => {
+    const role = m.role.toUpperCase();
+    let content = '';
+    if (typeof m.content === 'string') {
+      content = m.content.slice(0, 200); // Limit content length for context
+    } else if (Array.isArray(m.content)) {
+      const textParts = m.content.filter((item: any) => item.type === 'text' || typeof item === 'string');
+      content = textParts.map((item: any) => typeof item === 'string' ? item : item.text || '').join(' ').slice(0, 200);
+      
+      // Detect file attachments
+      const hasFiles = m.content.some((item: any) => item.type === 'file' || item.type === 'image_url');
+      if (hasFiles) {
+        content += ' [FILE ATTACHED]';
+      }
+    }
+    return `[${role}]: ${content}`;
+  }).join('\n');
   
-  const prompt = `You are an intelligent Intent Classification Agent. Analyze the user's input and classify it into the most appropriate category based on context and content.
+  const prompt = `You are an intelligent Intent Classification Agent for an AI coding assistant. Your job is to analyze user input and classify it into the most appropriate category based on semantic meaning, context, and conversation history.
 
 AVAILABLE INTENTS:
-- coding: Writing, refactoring, debugging code/scripts, implementing features
-- research: Web searching, information gathering, investigating topics
-- task: General operations (file management, commands, system tasks)
-- question: Direct informational questions requiring factual answers
-- conversation: Greetings, social interaction, polite exchanges
-- build: Creating new projects, scaffolding applications, generating structures
-- fix: Fixing bugs, resolving errors, troubleshooting issues
-- analyze: Data analysis, visualization, processing datasets/files
-- automate: Setting up workflows, schedules, recurring processes
+- coding: Writing, refactoring, debugging code/scripts, implementing features, code review
+- research: Web searching, information gathering, investigating topics, looking up documentation
+- task: General operations (file management, shell commands, system tasks, file operations)
+- question: Direct informational questions requiring factual answers (what, how, why questions)
+- conversation: Greetings, social interaction, polite exchanges, acknowledgments
+- build: Creating new projects, scaffolding applications, generating project structures
+- fix: Fixing bugs, resolving errors, troubleshooting issues, debugging problems
+- analyze: Data analysis, visualization, processing datasets/files, reviewing data
+- automate: Setting up workflows, schedules, recurring processes, automation scripts
 
-CRITICAL - Context Inheritance Rules:
-1. If the user input is a short affirmative (yes, ok, proceed, continue, sure, go ahead, etc.)
-2. AND there's a recent file upload or clear intent in conversation history
-3. THEN inherit the previous intent rather than classifying as 'conversation'
+CLASSIFICATION STRATEGY:
+1. **Context Inheritance**: If the user input is a short affirmative response (yes, ok, proceed, continue, sure, go ahead, looks good, etc.) AND there's a clear previous intent in the conversation history, inherit that intent rather than classifying as 'conversation'.
 
-Context Inheritance Examples:
-- Previous: User uploads CSV file + "analyze this data"
-  Current: "yes" → Classification: "analyze" (inherit from file context)
-- Previous: "fix the authentication bug" 
-  Current: "ok proceed" → Classification: "fix" (inherit from request)
-- Previous: User uploads code.ts + "review this"
-  Current: "continue" → Classification: "coding" (inherit from code context)
+2. **File Context**: If recent messages contain file attachments:
+   - CSV/Excel/JSON/data files → likely 'analyze'
+   - Code files (.ts, .js, .py, etc.) → likely 'coding'
+   - Configuration files → likely 'task' or 'build'
 
-CONVERSATION HISTORY:
+3. **Semantic Analysis**: Focus on the semantic meaning and user's goal, not just keyword matching. Consider:
+   - What is the user trying to accomplish?
+   - What action or outcome do they want?
+   - What domain does this fall into?
+
+4. **Conversation Flow**: Consider the conversation flow and previous exchanges to understand context.
+
+CONVERSATION HISTORY (last 5 messages):
 ${lastMessages || 'None'}
 
-Analyze the user input considering:
-1. File attachments in recent messages (CSV/data files → analyze, code files → coding)
-2. Explicit requests in previous messages
-3. Short affirmatives should inherit context when available
-4. Standalone messages should be classified independently
+CURRENT USER INPUT: "${userInput}"
 
-RESPONSE FORMAT (JSON only):
+Analyze the input semantically and provide your classification in JSON format:
 {
   "intent": "coding|research|task|question|conversation|build|fix|analyze|automate",
   "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation including context inheritance if applicable"
+  "reasoning": "Brief explanation of why you chose this intent, including context inheritance if applicable"
 }
 
-USER INPUT: "${userInput}"`;
+IMPORTANT: 
+- Use semantic understanding, not keyword matching
+- Consider conversation context and file attachments
+- For short affirmatives, check if you should inherit the previous intent
+- Be confident in your classification (aim for 0.8+ confidence when clear)`;
 
   const timeoutPromise = new Promise<never>((_, reject) => 
     setTimeout(() => reject(new Error('Intent classification timed out')), 30000)
@@ -258,13 +295,18 @@ USER INPUT: "${userInput}"`;
 
   try {
     const aiPromise = client.chat({
-      messages: [{ role: 'system', content: prompt }],
+      messages: [{ role: 'user', content: prompt }],
       responseFormat: 'json',
-      temperature: 0.1
+      temperature: 0.1,
+      maxTokens: 500
     });
 
     const response = await Promise.race([aiPromise, timeoutPromise]) as any;
-    const data = typeof response.content === 'string' ? JSON.parse(response.content) : response.content;
+    
+    let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    // Remove markdown code blocks if present
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const data = JSON.parse(content);
     
     return {
       intent: (data.intent || 'task') as IntentType,
@@ -279,88 +321,93 @@ USER INPUT: "${userInput}"`;
 
 /**
  * Fallback intent classification (when AI fails)
+ * Uses minimal heuristics - should rarely be used
+ * ALWAYS prefer AI classification over this fallback
  */
 export function classifyIntentFallback(userInput: string, history: any[] = []): IntentClassification {
   const normalized = userInput.toLowerCase().trim();
 
-  // Check for context inheritance first
+  // Check for context inheritance first (for short affirmatives)
   if (isShortAffirmative(normalized) && history.length > 0) {
     const previousIntent = extractPreviousIntent(history);
     if (previousIntent) {
       return {
         intent: previousIntent,
-        confidence: 0.90,
-        reasoning: `Fallback: Short affirmative - inherited ${previousIntent} from previous message`
+        confidence: 0.85,
+        reasoning: `Fallback: Short affirmative - inherited ${previousIntent} from previous context`
       };
     }
   }
 
-  // Basic pattern matching for common cases
-  if (/^(hi|hello|hey|thanks|thank you|bye|goodbye)\b/i.test(normalized)) {
-    return { intent: 'conversation', confidence: 0.9, reasoning: 'Fallback: Greeting detected' };
-  }
-  
-  if (/\b(analyze|analysis|chart|graph|csv|data|dataset|visualize)\b/i.test(normalized)) {
-    return { intent: 'analyze', confidence: 0.8, reasoning: 'Fallback: Analysis keywords detected' };
-  }
-  
-  if (/\b(fix|debug|error|bug|broken|crash|issue|problem)\b/i.test(normalized)) {
-    return { intent: 'fix', confidence: 0.8, reasoning: 'Fallback: Fix keywords detected' };
-  }
-  
-  if (/\b(code|function|class|implement|programming|script)\b/i.test(normalized)) {
-    return { intent: 'coding', confidence: 0.8, reasoning: 'Fallback: Coding keywords detected' };
-  }
-  
-  if (/\b(create|build|generate|scaffold|new project|new app)\b/i.test(normalized)) {
-    return { intent: 'build', confidence: 0.8, reasoning: 'Fallback: Build keywords detected' };
-  }
-  
-  if (/^(what|how|why|when|where|who|which)\b/i.test(normalized)) {
-    return { intent: 'question', confidence: 0.8, reasoning: 'Fallback: Question pattern detected' };
-  }
-  
-  if (/\b(search|research|find|lookup|investigate)\b/i.test(normalized)) {
-    return { intent: 'research', confidence: 0.8, reasoning: 'Fallback: Research keywords detected' };
-  }
-  
-  if (/\b(automate|schedule|workflow|pipeline|recurring)\b/i.test(normalized)) {
-    return { intent: 'automate', confidence: 0.8, reasoning: 'Fallback: Automation keywords detected' };
+  // Absolute minimal fallback - only for when AI is completely unavailable
+  // Default to conversation for very short inputs (likely greetings)
+  if (normalized.length < 15) {
+    return { 
+      intent: 'conversation', 
+      confidence: 0.6, 
+      reasoning: 'Fallback: Short input without AI classification' 
+    };
   }
 
-  // Default to task for general operations
+  // Default to task for anything else - AI should handle proper classification
   return { 
     intent: 'task', 
-    confidence: 0.6, 
-    reasoning: 'Fallback: Default classification for general operations' 
+    confidence: 0.4, 
+    reasoning: 'Fallback: AI classification unavailable - defaulting to task' 
   };
 }
 
 /**
- * Main intent classification function - AI-first approach
+ * Main intent classification function - AI-first approach with caching
+ * ALWAYS uses AI for classification when available
  */
 export async function classifyIntent(userInput: string, client?: AIClient, history: any[] = []): Promise<IntentClassification> {
   const normalized = userInput.toLowerCase().trim();
   
-  // Quick context inheritance check for short affirmatives
+  // Check cache first for performance
+  const cached = intentCache.get(userInput, history?.length);
+  if (cached) {
+    console.log('[IntentClassifier] Cache hit - using cached classification');
+    return cached;
+  }
+  
+  // Quick context inheritance check for short affirmatives ONLY
+  // This is the ONLY non-AI classification we allow
   if (isShortAffirmative(normalized) && history.length > 0) {
     const previousIntent = extractPreviousIntent(history);
     if (previousIntent) {
-      return {
+      const result = {
         intent: previousIntent,
         confidence: 0.95,
         reasoning: `Context inheritance: Short affirmative inheriting ${previousIntent} from previous message`
       };
+      
+      // Cache the result
+      intentCache.set(userInput, history?.length, result);
+      return result;
     }
   }
   
-  // Use AI agent for intent classification when available
+  // ALWAYS use AI agent for intent classification when available
   if (client) {
-    return classifyIntentAI(client, userInput, history);
+    try {
+      const result = await classifyIntentAI(client, userInput, history);
+      // Cache successful AI classifications
+      if (result.confidence > 0.7) {
+        intentCache.set(userInput, history?.length, result);
+      }
+      return result;
+    } catch (err) {
+      console.error(`[IntentClassifier] AI classification failed: ${err}. Using minimal fallback.`);
+      // Only use fallback if AI completely fails
+      return classifyIntentFallback(userInput, history);
+    }
   }
   
-  // Fallback when no AI client available
-  return classifyIntentFallback(userInput, history);
+  // Fallback when no AI client available (should be rare)
+  console.warn('[IntentClassifier] No AI client available - using minimal fallback');
+  const result = classifyIntentFallback(userInput, history);
+  return result;
 }
 
 /**

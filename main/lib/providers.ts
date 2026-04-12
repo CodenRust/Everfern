@@ -154,7 +154,7 @@ export const PROVIDER_REGISTRY: Record<ProviderType, ProviderMeta> = {
     isLocal: false,
     defaultModel: 'llama3.3',
     engine: 'online',
-    baseUrl: 'https://cloud.ollama.ai/v1',
+    baseUrl: 'https://ollama.com',
   },
   lmstudio: {
     type: 'lmstudio',

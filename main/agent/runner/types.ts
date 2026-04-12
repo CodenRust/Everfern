@@ -58,6 +58,8 @@ export interface ToolCallRecord {
   args: Record<string, unknown>;
   result: ToolResult;
   timestamp: string;
+  /** Optional duration in milliseconds for performance tracking */
+  durationMs?: number;
 }
 
 export interface AgentState {
@@ -117,4 +119,6 @@ export interface AgentRunnerConfig {
     baseUrl?: string;
     apiKey?: string;
   };
+  /** Callback to check if execution should be aborted (user clicked stop) */
+  shouldAbort?: () => boolean;
 }

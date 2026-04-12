@@ -40,10 +40,122 @@ const ai_client_1 = require("../../../lib/ai-client");
 const text_to_tool_1 = require("../../parsers/text-to-tool");
 const mission_integrator_1 = require("../mission-integrator");
 const message_utils_1 = require("../services/message-utils");
-const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, maxVerifyRetries = 3, missionTracker) => {
+/**
+ * AI-based prompt slimming decision
+ * Replaces keyword-based intent checking with semantic analysis
+ */
+async function shouldUseSlimmedPrompt(intent, messages, client) {
+    if (!client) {
+        // Fallback: use keyword-based check
+        return intent === 'conversation' || intent === 'question';
+    }
+    // Quick check: only slim if system prompt exists and contains EverFern
+    if (messages.length === 0 || messages[0].role !== 'system')
+        return false;
+    const systemPrompt = messages[0].content;
+    if (!systemPrompt.includes('EverFern System Prompt'))
+        return false;
+    try {
+        const prompt = `Determine if this conversation intent warrants a slimmed-down system prompt (for simple conversations/questions vs complex tasks).
+
+Intent: "${intent}"
+
+Slim prompt appropriate for:
+- Simple conversations and greetings
+- Direct factual questions
+- Casual interactions
+
+Full prompt needed for:
+- Coding tasks
+- Complex problem-solving
+- Multi-step operations
+- File/system modifications
+
+Respond with JSON:
+{
+  "shouldSlim": true/false,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}`;
+        const response = await client.chat({
+            messages: [{ role: 'user', content: prompt }],
+            responseFormat: 'json',
+            temperature: 0.1,
+            maxTokens: 150
+        });
+        let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+        // Remove markdown code blocks if present
+        content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const analysis = JSON.parse(content);
+        return analysis.shouldSlim && analysis.confidence > 0.7;
+    }
+    catch (err) {
+        console.warn('[CallModel] AI prompt slimming decision failed:', err);
+        return intent === 'conversation' || intent === 'question';
+    }
+}
+/**
+ * AI-based model nudging decision
+ * Replaces regex pattern matching with semantic analysis
+ */
+async function shouldNudgeModel(parseError, intent, textContent, client) {
+    // Always nudge on parse errors
+    if (parseError)
+        return true;
+    if (!client) {
+        // Fallback: conservative approach - don't nudge
+        return false;
+    }
+    try {
+        const prompt = `Analyze this AI assistant response and determine if it's narrating an action instead of executing it.
+
+Intent: "${intent}"
+Response: "${textContent.substring(0, 300)}"
+
+The assistant should USE TOOLS to execute actions, not just describe them.
+
+Narrating actions (BAD - needs nudge):
+- "I'll create a file..."
+- "Let me write some code..."
+- "I'm going to run a command..."
+- "Proceeding to build..."
+
+Executing actions (GOOD - no nudge):
+- Actually calling tools
+- Providing direct answers
+- Asking clarifying questions
+
+Respond with JSON:
+{
+  "isNarrating": true/false,
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}`;
+        const response = await client.chat({
+            messages: [{ role: 'user', content: prompt }],
+            responseFormat: 'json',
+            temperature: 0.1,
+            maxTokens: 200
+        });
+        let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+        // Remove markdown code blocks if present
+        content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const analysis = JSON.parse(content);
+        return analysis.isNarrating && analysis.confidence > 0.7;
+    }
+    catch (err) {
+        console.warn('[CallModel] AI nudge decision failed:', err);
+        return false;
+    }
+}
+const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, maxVerifyRetries = 3, missionTracker, shouldAbort) => {
     let verifyIntentRetries = 0;
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
+        // Check for abort signal
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         integrator.startNode('call_model', 'Calling AI model');
         try {
             runner.telemetry.transition('call_model');
@@ -73,21 +185,21 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             let thoughtBuffer = '';
             let isThinking = false;
             let streamedText = '';
-            // Optima: Context Pruning & Normalization
+            // Optima: Context Pruning & Normalization with enhanced performance
             const normalizedMessages = (0, message_utils_1.normalizeMessages)(state.messages);
-            // Dynamic System Prompt Slimming for Conversations
+            // Get current intent for AI-based decisions
             const currentIntent = state.currentIntent || 'unknown';
-            const isReadOnly = ['conversation', 'question'].includes(currentIntent);
-            if (isReadOnly && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
+            // Use AI to determine if system prompt slimming is appropriate
+            const shouldSlimPrompt = await shouldUseSlimmedPrompt(currentIntent, normalizedMessages, client);
+            if (shouldSlimPrompt && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
                 const originalPrompt = normalizedMessages[0].content;
-                if (originalPrompt.includes('EverFern System Prompt')) {
-                    normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant. 
+                normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant. 
 Keep your responses friendly and direct. 
 The user is engaging in a simple conversation or asking a direct question. 
 You do not need to use complex execution plans or tools for this interaction.`;
-                    runner.telemetry.info('Optima: Using slimmed system prompt for read-only intent.');
-                }
+                runner.telemetry.info('Optima: Using slimmed system prompt for read-only intent.');
             }
+            // Enhanced message pruning with better image handling
             const prunedMessages = normalizedMessages.map((m, idx) => {
                 if (m.role === "user") {
                     if (typeof m.content === 'string')
@@ -95,8 +207,10 @@ You do not need to use complex execution plans or tools for this interaction.`;
                     const hasImage = Array.isArray(m.content) && m.content.some((c) => c.type === 'image_url');
                     if (!hasImage)
                         return m;
+                    // More aggressive image pruning for performance
                     const futureImages = normalizedMessages.slice(idx + 1).filter((fm) => Array.isArray(fm.content) && fm.content.some((fc) => fc.type === 'image_url')).length;
-                    if (futureImages >= 2) {
+                    // Keep only the most recent 2 images to save tokens
+                    if (futureImages >= 1 || idx < normalizedMessages.length - 3) {
                         return {
                             ...m,
                             content: m.content.map((c) => c.type === 'image_url' ? { type: 'text', text: '[Screenshot Omitted to Save Tokens]' } : c)
@@ -105,8 +219,13 @@ You do not need to use complex execution plans or tools for this interaction.`;
                 }
                 return m;
             });
+            // Limit message history for performance (keep last 20 messages)
+            const maxMessages = 20;
+            const limitedMessages = prunedMessages.length > maxMessages
+                ? [prunedMessages[0], ...prunedMessages.slice(-maxMessages + 1)] // Keep system prompt + last N messages
+                : prunedMessages;
             const request = {
-                messages: prunedMessages,
+                messages: limitedMessages,
                 tools: toolDefs,
                 onStreamChunk: (chunk) => {
                     thoughtBuffer += chunk;
@@ -183,23 +302,15 @@ You do not need to use complex execution plans or tools for this interaction.`;
                     response.finishReason = 'tool_calls';
                 }
                 else {
-                    const lowerScrubbed = textContent.toLowerCase();
-                    const actionIntents = ['coding', 'task', 'build', 'fix', 'automate'];
-                    const isActionIntent = actionIntents.includes(currentIntent);
-                    const narratingAction = /i('ll| will| have| am)? (going to |about to |now )?(create|write|run|execute|build|make|generate|update|edit|fix|check|analyze|process)/i.test(textContent) ||
-                        /proceeding (to|with)/i.test(textContent) ||
-                        /let me (create|write|run|build|make|generate|update|edit|fix)/i.test(textContent) ||
-                        /next,? (i|we)('ll| will)?/i.test(textContent) ||
-                        /now (i|we)('ll| will)?/i.test(textContent) ||
-                        textContent.includes('[ TASK:');
-                    const shouldNudge = parserResult.parseError || (isActionIntent && narratingAction && !textContent.includes('SYSTEM REMINDER:'));
+                    // Use AI to determine if we should nudge the model
+                    const shouldNudge = await shouldNudgeModel(parserResult.parseError, currentIntent, textContent, client);
                     if (shouldNudge && verifyIntentRetries < maxVerifyRetries) {
                         verifyIntentRetries++;
                         let message = `SYSTEM REMINDER: You did not format your tool call correctly or failed to call a tool. If you are completing a task, you MUST use a tool (write, run_command, edit, etc).`;
                         if (parserResult.parseError) {
                             message = `SYSTEM REMINDER: Your tool call failed to parse. ${parserResult.parseError}. Please output valid JSON.`;
                         }
-                        else if (narratingAction) {
+                        else {
                             message = `SYSTEM REMINDER: You said you'd "${textContent.substring(0, 50).trim()}..." — DO IT NOW. Ensure your tool call is valid JSON or correctly formatted.`;
                         }
                         state.messages.push({ role: 'system', content: message });
