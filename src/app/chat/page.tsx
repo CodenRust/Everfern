@@ -2222,7 +2222,9 @@ export default function ChatPage() {
     
     // Debug: Track activeUserQuestion changes
     useEffect(() => {
-        console.log('[Frontend] activeUserQuestion state changed:', activeUserQuestion);
+        console.log('[Frontend] 🔄 activeUserQuestion state changed:', activeUserQuestion);
+        console.log('[Frontend] 🔄 __activeUserQuestion flag:', (window as any).__activeUserQuestion);
+        console.log('[Frontend] 🔄 Stack trace:', new Error().stack);
     }, [activeUserQuestion]);
     
     // Current node tracking for better status display
@@ -2676,7 +2678,8 @@ export default function ChatPage() {
             acpApi.onToolCall((record: any) => {
                 // Debug: Log the tool call structure
                 if (record.toolName === 'ask_user_question') {
-                    console.log('[Frontend] Received ask_user_question tool call:', JSON.stringify(record, null, 2));
+                    console.log('[Frontend] 📥 Received ask_user_question tool call at', new Date().toISOString());
+                    console.log('[Frontend] Tool call structure:', JSON.stringify(record, null, 2));
                 }
                 const existingIdx = liveToolCallsRef.current.findIndex(t => t.toolName === record.toolName && t.status === 'running');
                 if (existingIdx >= 0) {
@@ -2687,13 +2690,31 @@ export default function ChatPage() {
                     
                     // Handle ask_user_question tool specially
                     if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
+                        // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
+                        (window as any).__activeUserQuestion = true;
+                        console.log('[Frontend] ⚡ Set __activeUserQuestion flag EARLY (before data extraction)');
+                        
                         console.log('[Frontend] ask_user_question tool_call has data, processing...');
                         const data = record.result.data;
-                        console.log('[Frontend] Extracted data:', JSON.stringify(data, null, 2));
+                        console.log('[Frontend] Extracted data structure:', {
+                            hasQuestions: !!data.questions,
+                            questionsLength: data.questions?.length,
+                            hasQuestion: !!data.question,
+                            dataKeys: Object.keys(data || {})
+                        });
                         
-                        if (data.questions && data.questions.length > 0) {
-                            const question = data.questions[0]; // Use first question
-                            console.log('[Frontend] Setting activeUserQuestion from tool_call data.questions[0]:', question);
+                        // Try data.questions[0] first (primary path)
+                        if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+                            const question = data.questions[0];
+                            console.log('[Frontend] ✅ Using data.questions[0]:', question);
+                            
+                            // Validate question structure
+                            if (!question.question) {
+                                console.error('[Frontend] ❌ Invalid question structure: missing question field');
+                                (window as any).__activeUserQuestion = false;
+                                return;
+                            }
+                            
                             const formData = {
                                 question: question.question,
                                 options: question.options?.map((opt: any) => ({
@@ -2703,39 +2724,44 @@ export default function ChatPage() {
                                 })) || [],
                                 multiSelect: question.multiSelect || false
                             };
-                            console.log('[Frontend] Form data to set:', JSON.stringify(formData, null, 2));
+                            console.log('[Frontend] 📝 Form data prepared:', JSON.stringify(formData, null, 2));
+                            console.log('[Frontend] 🎯 About to call setActiveUserQuestion with formData');
                             setActiveUserQuestion(formData);
+                            console.log('[Frontend] 🎯 setActiveUserQuestion called - React will update state asynchronously');
                             setQuestionFormValues([]);
-                            console.log('[Frontend] activeUserQuestion state updated');
+                            console.log('[Frontend] ✅ activeUserQuestion state update requested successfully');
+                        } 
+                        // Fallback to data.question (secondary path)
+                        else if (data.question) {
+                            console.log('[Frontend] ✅ Using data.question (fallback path):', data.question);
                             
-                            // Mark that we have an active user question so mission_complete doesn't remove listeners
-                            (window as any).__activeUserQuestion = true;
-                            console.log('[Frontend] Set __activeUserQuestion flag to true');
-                        } else if (data.question) {
-                            // Handle single question format (fallback)
-                            console.log('[Frontend] Setting activeUserQuestion from tool_call data.question (fallback)');
-                            setActiveUserQuestion({
-                                question: data.question,
+                            const formData = {
+                                question: typeof data.question === 'string' ? data.question : data.question.question,
                                 options: data.options?.map((opt: any) => ({
                                     label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
                                     value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
                                     isRecommended: typeof opt === 'object' ? opt.isRecommended : false
                                 })) || [],
                                 multiSelect: data.multiSelect || false
-                            });
+                            };
+                            console.log('[Frontend] 📝 Form data prepared (fallback):', JSON.stringify(formData, null, 2));
+                            setActiveUserQuestion(formData);
                             setQuestionFormValues([]);
-                            
-                            // Mark that we have an active user question
-                            (window as any).__activeUserQuestion = true;
-                            console.log('[Frontend] Set __activeUserQuestion flag to true');
-                        } else {
-                            console.log('[Frontend] ask_user_question tool_call data has no questions or question field');
+                            console.log('[Frontend] ✅ activeUserQuestion state updated successfully (fallback)');
+                        } 
+                        // No valid question data found
+                        else {
+                            console.error('[Frontend] ❌ No valid question data found in tool_call');
+                            console.error('[Frontend] Data structure received:', JSON.stringify(data, null, 2));
+                            // Clear flag if no valid question data
+                            (window as any).__activeUserQuestion = false;
                         }
                     } else if (record.toolName === 'ask_user_question') {
-                        console.log('[Frontend] ask_user_question tool_call but missing data:', {
+                        console.error('[Frontend] ❌ ask_user_question tool_call missing required data:', {
                             hasResult: !!record.result,
                             resultSuccess: record.result?.success,
-                            hasData: !!record.result?.data
+                            hasData: !!record.result?.data,
+                            dataType: typeof record.result?.data
                         });
                     }
                 }
@@ -2801,31 +2827,59 @@ export default function ChatPage() {
             
             // Simplified mission complete handler without timeline
             acpApi.onMissionComplete(({ thinkingDuration }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
-                console.log('[Frontend] ⚠️ Mission complete received');
-                console.log('[Frontend] Current state - showHitlApproval:', showHitlApproval, '__activeHitl:', (window as any).__activeHitl, 'activeUserQuestion:', activeUserQuestion);
+                const receiveTime = Date.now();
+                console.log('[Frontend] ⚠️ Mission complete received at', new Date().toISOString());
+                console.log('[Frontend] Current state - showHitlApproval:', showHitlApproval, '__activeHitl:', (window as any).__activeHitl, 'activeUserQuestion:', activeUserQuestion, '__activeUserQuestion:', (window as any).__activeUserQuestion);
                 setMissionComplete(true);
                 
-                // Delay listener removal to allow pending events (like HITL requests) to be processed first
+                // Delay listener removal to allow pending events (like HITL requests and user questions) to be processed first
+                console.log('[Frontend] ⏱️ Starting 500ms delay before checking listeners...');
                 setTimeout(() => {
+                    const checkTime = Date.now();
+                    const elapsedMs = checkTime - receiveTime;
+                    console.log('[Frontend] ⏱️ Delay complete after', elapsedMs, 'ms. Checking if should remove listeners...');
+                    
                     // Only remove listeners if no HITL or user question is active
-                    const hasActiveHitl = (window as any).__activeHitl || showHitlApproval || activeUserQuestion || (window as any).__activeUserQuestion;
-                    console.log('[Frontend] Checking if should remove listeners - hasActiveHitl:', hasActiveHitl);
-                    if (!hasActiveHitl) {
-                        console.log('[Frontend] Removing stream listeners after mission complete');
+                    const hasActiveHitl = (window as any).__activeHitl || showHitlApproval;
+                    const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestion;
+                    const hasAnyActive = hasActiveHitl || hasActiveUserQuestion;
+                    
+                    console.log('[Frontend] 🔍 Active checks:', {
+                        hasActiveHitl,
+                        hasActiveUserQuestion,
+                        hasAnyActive,
+                        __activeHitl: (window as any).__activeHitl,
+                        __activeUserQuestion: (window as any).__activeUserQuestion,
+                        showHitlApproval,
+                        activeUserQuestion: !!activeUserQuestion
+                    });
+                    
+                    if (!hasAnyActive) {
+                        console.log('[Frontend] ✅ No active HITL/UserQuestion - removing stream listeners');
                         acpApi.removeStreamListeners();
                     } else {
-                        console.log('[Frontend] ⏸️ Keeping stream listeners active due to HITL/UserQuestion');
+                        console.log('[Frontend] ⏸️ Keeping stream listeners active due to:', {
+                            hitl: hasActiveHitl,
+                            userQuestion: hasActiveUserQuestion
+                        });
                         // Check again in 1 second in case the HITL/question gets resolved
                         setTimeout(() => {
-                            const stillActive = (window as any).__activeHitl || showHitlApproval || activeUserQuestion || (window as any).__activeUserQuestion;
-                            console.log('[Frontend] Delayed check - stillActive:', stillActive);
+                            const stillActiveHitl = (window as any).__activeHitl || showHitlApproval;
+                            const stillActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestion;
+                            const stillActive = stillActiveHitl || stillActiveUserQuestion;
+                            console.log('[Frontend] 🔍 Delayed check (1s later) - stillActive:', stillActive, {
+                                hitl: stillActiveHitl,
+                                userQuestion: stillActiveUserQuestion
+                            });
                             if (!stillActive) {
-                                console.log('[Frontend] Delayed removal of stream listeners');
+                                console.log('[Frontend] ✅ Delayed removal of stream listeners');
                                 acpApi.removeStreamListeners();
+                            } else {
+                                console.log('[Frontend] ⏸️ Still active, keeping listeners');
                             }
                         }, 1000);
                     }
-                }, 200); // Increased delay to 200ms
+                }, 500); // Increased delay to 500ms for better race condition handling
                 
                 isMessageCommittedRef.current = true;
 
@@ -2837,6 +2891,17 @@ export default function ChatPage() {
                 
                 // Extract duration in milliseconds from thinkingDuration
                 const durationMs = thinkingDuration?.duration;
+                
+                // Check if there's an active user question - if so, DON'T commit the message yet
+                const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestion;
+                
+                if (hasActiveUserQuestion) {
+                    console.log('[Frontend] ⏸️ Active user question detected - NOT committing message yet');
+                    console.log('[Frontend] Will commit message after user responds');
+                    // Don't clear streaming state or commit message - keep it visible
+                    // The message will be committed when the user submits their response
+                    return;
+                }
                 
                 // Only create assistant message if there's actual content or tool calls
                 if (finalContent || finalThought || finalToolCalls.length > 0) {
@@ -3017,12 +3082,49 @@ export default function ChatPage() {
                     setShowPermissionModal(true);
                 });
                 api.onToolStart(({ toolName, toolArgs }: { toolName: string; toolArgs: Record<string, unknown> }) => {
+                    if (toolName === 'ask_user_question') {
+                        console.log('[Frontend] Received ask_user_question tool_start:', JSON.stringify({ toolName, toolArgs }, null, 2));
+                    }
                     if (toolName === 'computer_use') { setIsComputerUseActive(true); setComputerUseStep('Starting...'); }
                     const display = resolveToolDisplay(toolName, toolArgs);
                     const newTc: ToolCallDisplay = { id: crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
                     toolCallMap.current.set(toolName + '_running', newTc.id);
                     liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                     setLiveToolCalls(liveToolCallsRef.current);
+                    
+                    // Handle ask_user_question tool start - extract question from args
+                    if (toolName === 'ask_user_question') {
+                        // Try to extract question from tool arguments
+                        if (toolArgs.questions && Array.isArray(toolArgs.questions)) {
+                            const question = toolArgs.questions[0];
+                            console.log('[Frontend] Setting activeUserQuestion from questions array:', question);
+                            setActiveUserQuestion({
+                                question: question.question,
+                                options: question.options?.map((opt: any) => ({
+                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                                })) || [],
+                                multiSelect: question.multiSelect || false
+                            });
+                            setQuestionFormValues([]);
+                        } else if (toolArgs.question) {
+                            // Handle single question format
+                            console.log('[Frontend] Setting activeUserQuestion from single question:', toolArgs.question);
+                            setActiveUserQuestion({
+                                question: toolArgs.question as string,
+                                options: (toolArgs.options as any[])?.map((opt: any) => ({
+                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                                })) || [],
+                                multiSelect: (toolArgs.multiSelect as boolean) || false
+                            });
+                            setQuestionFormValues([]);
+                        } else {
+                            console.log('[Frontend] ask_user_question tool_start but no question found in toolArgs');
+                        }
+                    }
                 });
                 api.onViewSkill(({ name }: { name: string }) => {
                     const display = resolveToolDisplay('view_skill', { name });
@@ -3047,6 +3149,12 @@ export default function ChatPage() {
                 let accumulated = "";
 
                 api.onToolCall((record: any) => {
+                    // Debug: Log the tool call structure
+                    if (record.toolName === 'ask_user_question') {
+                        console.log('[Frontend] 📥 Received ask_user_question tool call at', new Date().toISOString());
+                        console.log('[Frontend] Tool call structure:', JSON.stringify(record, null, 2));
+                    }
+                    
                     if (record.toolName === 'computer_use') { setIsComputerUseActive(false); setComputerUseStep(''); }
                     if (record.toolName === 'create_plan' || record.toolName === 'update_plan_step') { if (record.result?.success && record.result?.data) setCurrentPlan(record.result.data); }
                     if (record.toolName === 'execution_plan') {
@@ -3103,6 +3211,83 @@ export default function ChatPage() {
                         toolCallMap.current.delete(key);
                         liveToolCallsRef.current = updatedToolCalls;
                         setLiveToolCalls(updatedToolCalls);
+                        
+                        // Handle ask_user_question tool specially
+                        if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
+                            // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
+                            (window as any).__activeUserQuestion = true;
+                            console.log('[Frontend] ⚡ Set __activeUserQuestion flag EARLY (before data extraction)');
+                            
+                            console.log('[Frontend] ask_user_question tool_call has data, processing...');
+                            const data = record.result.data;
+                            console.log('[Frontend] Extracted data structure:', {
+                                hasQuestions: !!data.questions,
+                                questionsLength: data.questions?.length,
+                                hasQuestion: !!data.question,
+                                dataKeys: Object.keys(data || {})
+                            });
+                            
+                            // Try data.questions[0] first (primary path)
+                            if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+                                const question = data.questions[0];
+                                console.log('[Frontend] ✅ Using data.questions[0]:', question);
+                                
+                                // Validate question structure
+                                if (!question.question) {
+                                    console.error('[Frontend] ❌ Invalid question structure: missing question field');
+                                    (window as any).__activeUserQuestion = false;
+                                    return;
+                                }
+                                
+                                const formData = {
+                                    question: question.question,
+                                    options: question.options?.map((opt: any) => ({
+                                        label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                        value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                        isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                                    })) || [],
+                                    multiSelect: question.multiSelect || false
+                                };
+                                console.log('[Frontend] 📝 Form data prepared:', JSON.stringify(formData, null, 2));
+                                console.log('[Frontend] 🎯 About to call setActiveUserQuestion with formData');
+                                setActiveUserQuestion(formData);
+                                console.log('[Frontend] 🎯 setActiveUserQuestion called - React will update state asynchronously');
+                                setQuestionFormValues([]);
+                                console.log('[Frontend] ✅ activeUserQuestion state update requested successfully');
+                            } 
+                            // Fallback to data.question (secondary path)
+                            else if (data.question) {
+                                console.log('[Frontend] ✅ Using data.question (fallback path):', data.question);
+                                
+                                const formData = {
+                                    question: typeof data.question === 'string' ? data.question : data.question.question,
+                                    options: data.options?.map((opt: any) => ({
+                                        label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
+                                        value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
+                                        isRecommended: typeof opt === 'object' ? opt.isRecommended : false
+                                    })) || [],
+                                    multiSelect: data.multiSelect || false
+                                };
+                                console.log('[Frontend] 📝 Form data prepared (fallback):', JSON.stringify(formData, null, 2));
+                                setActiveUserQuestion(formData);
+                                setQuestionFormValues([]);
+                                console.log('[Frontend] ✅ activeUserQuestion state updated successfully (fallback)');
+                            } 
+                            // No valid question data found
+                            else {
+                                console.error('[Frontend] ❌ No valid question data found in tool_call');
+                                console.error('[Frontend] Data structure received:', JSON.stringify(data, null, 2));
+                                // Clear flag if no valid question data
+                                (window as any).__activeUserQuestion = false;
+                            }
+                        } else if (record.toolName === 'ask_user_question') {
+                            console.error('[Frontend] ❌ ask_user_question tool_call missing required data:', {
+                                hasResult: !!record.result,
+                                resultSuccess: record.result?.success,
+                                hasData: !!record.result?.data,
+                                dataType: typeof record.result?.data
+                            });
+                        }
                     }
                 });
                 api.onThought(({ content }: { content: string }) => { 
@@ -3266,17 +3451,52 @@ export default function ChatPage() {
         const selectedOptions = questionFormValues.join(', ');
         const responseText = `Selected: ${selectedOptions}`;
         
+        console.log('[Frontend] 📤 User submitted question response:', responseText);
+        
+        // NOW commit the assistant message that was pending
+        const finalContent = streamingContentRef.current || "";
+        const finalThought = streamingThoughtRef.current;
+        const finalToolCalls = liveToolCallsRef.current.map(t =>
+            t.status === 'running' ? { ...t, status: 'done' as const } : t
+        );
+        
+        if (finalContent || finalThought || finalToolCalls.length > 0) {
+            console.log('[Frontend] 💾 Committing pending assistant message after user response');
+            const assistantMsg: Message = {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                content: finalContent,
+                thought: finalThought,
+                timestamp: new Date(),
+                toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+            };
+            
+            setMessages(prev => {
+                const final = [...prev, assistantMsg];
+                saveConversation(final);
+                return final;
+            });
+        }
+        
         // Clear the question form
         setActiveUserQuestion(null);
         setQuestionFormValues([]);
         
+        // Clear streaming state
+        setStreamingContent("");
+        setStreamingThought("");
+        setLiveToolCalls([]);
+        streamingContentRef.current = "";
+        streamingThoughtRef.current = "";
+        liveToolCallsRef.current = [];
+        
         // Clear the active user question flag
         (window as any).__activeUserQuestion = false;
-        console.log('[Frontend] Cleared __activeUserQuestion flag');
+        console.log('[Frontend] ✅ Cleared __activeUserQuestion flag after submission');
         
         // Send the response as a regular message
         handleSend(responseText);
-    }, [activeUserQuestion, questionFormValues, handleSend]);
+    }, [activeUserQuestion, questionFormValues, handleSend, saveConversation]);
 
     const handleHitlApproval = useCallback((approved: boolean) => {
         if (!hitlRequest) return;
