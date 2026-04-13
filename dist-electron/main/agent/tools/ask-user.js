@@ -57,7 +57,9 @@ exports.askUserTool = {
         }
         const preview = args.previewMarkdown;
         const formatted = questions.map(q => {
-            const opts = q.options?.join(' / ') || 'No options provided';
+            const opts = (Array.isArray(q.options) ? q.options : [])
+                .map((o) => typeof o === 'string' ? o : (o?.label || o?.value || String(o)))
+                .join(' / ') || 'No options provided';
             return `❓ **${q.question}**\n   Choices: ${opts}`;
         }).join('\n\n');
         onUpdate?.(`🤔 Presenting ${questions.length} clarifying questions to the user...`);

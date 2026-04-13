@@ -15,8 +15,8 @@ export const askUserTool: AgentTool = {
           type: 'object',
           properties: {
             question: { type: 'string', description: 'The question text.' },
-            options: { 
-              type: 'array', 
+            options: {
+              type: 'array',
               items: { type: 'string' },
               description: 'Possible answers for the user to pick from.'
             },
@@ -36,7 +36,7 @@ export const askUserTool: AgentTool = {
   async execute(args, onUpdate): Promise<ToolResult> {
     // Handle both formats: { questions: [...] } or { question: "...", options: [...] }
     let questions: any[];
-    
+
     if (args.questions && Array.isArray(args.questions)) {
       // Correct format: questions array
       questions = args.questions as any[];
@@ -55,11 +55,13 @@ export const askUserTool: AgentTool = {
         error: 'Invalid tool arguments'
       };
     }
-    
+
     const preview = args.previewMarkdown as string | undefined;
 
     const formatted = questions.map(q => {
-      const opts = q.options?.join(' / ') || 'No options provided';
+      const opts = (Array.isArray(q.options) ? q.options : [])
+        .map((o: any) => typeof o === 'string' ? o : (o?.label || o?.value || String(o)))
+        .join(' / ') || 'No options provided';
       return `❓ **${q.question}**\n   Choices: ${opts}`;
     }).join('\n\n');
 
@@ -86,10 +88,10 @@ export const askUserTool: AgentTool = {
     return {
       success: true,
       output: `Questions presented to the user:\n\n${formatted}\n\n${preview ? `**Preview Context:**\n${preview}\n\n` : ''}Wait for the user's selection.`,
-      data: { 
-        questions: normalizedQuestions, 
-        preview: preview || '', 
-        type: 'ask_user' 
+      data: {
+        questions: normalizedQuestions,
+        preview: preview || '',
+        type: 'ask_user'
       }
     };
   }

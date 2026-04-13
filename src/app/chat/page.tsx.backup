@@ -1,8 +1,11 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo, KeyboardEvent } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo, KeyboardEvent } from "react";
+
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
+import { resolveToolDisplay } from "./tool-labels";
+import { FileExplorerView } from "../components/FileExplorerView";
 import {
     PlusIcon,
     Cog6ToothIcon,
@@ -33,29 +36,31 @@ import {
     CommandLineIcon,
 } from "@heroicons/react/24/outline";
 import { CheckIcon as CheckSolidIcon } from "@heroicons/react/24/solid";
-
-// Components
 import { AgentTimeline } from "../../components/AgentTimeline";
+// import MissionTimelineComponent from "../../components/MissionTimeline";
+// import type { MissionTimeline as MissionTimelineType, MissionStep as MissionStepType } from "../../components/MissionTimeline";
 import StreamView from "../../components/StreamView";
 import WindowControls from "../components/WindowControls";
 import Sidebar from "../components/Sidebar";
 import PermissionDialog from "../components/PermissionDialog";
-import DirectoryModal from '../components/DirectoryModal';
-import { FileExplorerView } from "../components/FileExplorerView";
-import { LoadingBreadcrumb, Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-
-// Chat-specific components
-import ArtifactsPanel from './ArtifactsPanel';
+import ArtifactsPanel, { SyntaxHighlighter } from './ArtifactsPanel';
 import ArtifactsList from './ArtifactsList';
 import PlanViewerPanel from './PlanViewerPanel';
+
 import SitePreview from './SitePreview';
+import { formatDuration } from '../../lib/formatDuration';
+import { useAutoCollapse } from '../../hooks/use-auto-collapse';
 import SettingsPage from './SettingsPage';
+import DirectoryModal from '../components/DirectoryModal';
 import FileArtifact from './FileArtifact';
 import VoiceAssistantUI from './VoiceAssistantUI';
+import { DiffViewer } from '@/components/diff-viewer';
 import { SurfaceCanvas } from './SurfaceCanvas';
-
-// Extracted components
+import type { SurfaceData } from './SurfaceCanvas';
+import { LoadingBreadcrumb, Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import type { ToolCallDisplay, Message, FileAttachment, FolderContext, ModelOption } from './types';
+import { stripAnsi, extractFileArtifacts } from './utils/helpers';
 import {
     OpenAILogo,
     AnthropicLogo,
@@ -72,36 +77,1626 @@ import { WaveformIcon, FernStarburst } from './components/UIIcons';
 import { MarkdownRenderer, StreamingMarkdown } from './components/MarkdownComponents';
 import { ContextTokenRing, VoiceButton, RateLimitContinueButton } from './components/UIHelpers';
 import { ToolCallTag, ToolCallRow, WriteDiffCard } from './components/ToolCallComponents';
-import { ReportLink, ReportPane } from './components/ReportComponents';
-import { PlanReviewCard, AgentWorkspaceCards } from './components/PlanComponents';
-import { HitlApprovalForm, UserQuestionForm } from './components/FormComponents';
-import { PlanApprovalBanner } from './components/PlanApprovalBanner';
-import { ReasoningBranch, ReasoningPane, ProgressStepsIcon, ContextGridIcon, PaneSection } from './components/ReasoningComponents';
 
-// Utils and types
-import { resolveToolDisplay } from "./tool-labels";
-import { formatDuration } from '../../lib/formatDuration';
-import { useAutoCollapse } from '../../hooks/use-auto-collapse';
-import type { ToolCallDisplay, Message, FileAttachment, FolderContext, ModelOption } from './types';
-import type { SurfaceData } from './SurfaceCanvas';
-import { stripAnsi, extractFileArtifacts } from './utils/helpers';
+// ── ToolCallRow: Individual tool call in the ToolGroup ──────────────────────
+const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) => {
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ display: 'flex', gap: 0, position: 'relative' }}
+        >
+            {/* Timeline dot */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 28, flexShrink: 0, paddingTop: 12 }}>
+                <div style={{
+                    width: 20, height: 20, borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: looksLikeTerminal ? 'rgba(99,102,241,0.08)' : running ? 'rgba(0,0,0,0.03)' : errored ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)',
+                    border: looksLikeTerminal ? '1.5px solid rgba(99,102,241,0.2)' : running ? '1.5px solid rgba(0,0,0,0.1)' : errored ? '1.5px solid rgba(239,68,68,0.2)' : '1.5px solid rgba(34,197,94,0.2)',
+                }}>
+                    {running ? (
+                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ width: 8, height: 8, borderRadius: '50%', border: '1.5px solid transparent', borderTopColor: '#717171' }} />
+                    ) : errored ? (
+                        <XMarkIcon width={10} height={10} color="#ef4444" strokeWidth={3} />
+                    ) : looksLikeTerminal ? (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+                        </svg>
+                    ) : (
+                        <CheckIcon width={10} height={10} color="#22c55e" strokeWidth={3} />
+                    )}
+                </div>
+                {!isLast && <div style={{ width: 1, flex: 1, minHeight: 12, background: 'rgba(0,0,0,0.06)', marginTop: 4 }} />}
+            </div>
+
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: isLast ? 12 : 8, paddingRight: 12 }}>
+                {/* Description (thought/narration above tool) */}
+                {tc.description && (
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6, lineHeight: 1.5, fontStyle: 'italic' }}>
+                        {tc.description}
+                    </div>
+                )}
+                {/* Tool header row */}
+                <div
+                    onClick={() => !running && tc.output && setExpanded(e => !e)}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '7px 12px', borderRadius: 10,
+                        background: looksLikeTerminal ? 'rgba(15,23,42,0.04)' : '#f8f8f6',
+                        border: looksLikeTerminal ? '1px solid rgba(0,0,0,0.06)' : '1px solid #eceae4',
+                        cursor: (!running && tc.output) ? 'pointer' : 'default',
+                        transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!running && tc.output) { e.currentTarget.style.background = looksLikeTerminal ? 'rgba(15,23,42,0.07)' : '#f2f1ee'; e.currentTarget.style.borderColor = '#d4d1cc'; } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = looksLikeTerminal ? 'rgba(15,23,42,0.04)' : '#f8f8f6'; e.currentTarget.style.borderColor = '#eceae4'; }}
+                >
+                    <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{tc.icon}</span>
+                    <span style={{ fontSize: 12.5, color: '#4b5563', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: looksLikeTerminal ? "'JetBrains Mono', monospace" : 'inherit' }}>
+                        {tc.label}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        {tc.durationMs !== undefined && !running && (
+                            <span style={{ fontSize: 10.5, color: '#9ca3af', fontFamily: "'JetBrains Mono', monospace" }}>{(tc.durationMs / 1000).toFixed(1)}s</span>
+                        )}
+                        {!running && tc.output && tc.toolName !== 'create_plan' && tc.toolName !== 'update_plan_step' && (
+                            <ChevronDownIcon width={11} height={11} color="#9ca3af" style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                        )}
+                    </div>
+                </div>
+
+                {/* Terminal output - special rendering */}
+                <AnimatePresence>
+                    {expanded && looksLikeTerminal && tc.output && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            style={{ overflow: 'hidden', marginTop: 4 }}
+                        >
+                            <div style={{
+                                background: '#1e1e2e',
+                                borderRadius: 10,
+                                overflow: 'hidden',
+                                border: '1px solid rgba(99,102,241,0.15)'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'rgba(99,102,241,0.08)', borderBottom: '1px solid rgba(99,102,241,0.12)' }}>
+                                    <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ef4444' }} />
+                                    <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+                                    <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#22c55e' }} />
+                                    <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                                        {isTerminal ? (((tc.args?.CommandLine || tc.args?.command || tc.args?.commandLine || '') as string).split('\n')[0]?.slice(0, 50) || 'Terminal') : 'Terminal'}
+                                    </span>
+                                </div>
+                                <pre style={{
+                                    margin: 0, padding: '12px 14px', fontSize: 11.5,
+                                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                                    lineHeight: 1.7, color: '#e2e8f0', overflowX: 'auto',
+                                    whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto'
+                                }}>
+                                    {tc.output.split('\n').map((line, idx) => {
+                                        const isCmd = line.match(/^[\$›#] /) || line.match(/^.+@.+\$ /);
+                                        return (
+                                            <div key={idx} style={{ color: isCmd ? '#a5b4fc' : '#d1d5db' }}>
+                                                {isCmd && <span style={{ color: '#6366f1', marginRight: 8 }}>{'>'}</span>}
+                                                {line}
+                                            </div>
+                                        );
+                                    })}
+                                </pre>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+                <div
+                    onClick={() => !running && tc.output && setExpanded(e => !e)}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '6px 12px', borderRadius: 12,
+                        background: '#fcfcfb', border: '1px solid #e8e6d9',
+                        cursor: (!running && tc.output) ? 'pointer' : 'default',
+                        transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!running && tc.output) { e.currentTarget.style.background = '#f5f4f0'; e.currentTarget.style.borderColor = '#dcdad0'; } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = '#fcfcfb'; e.currentTarget.style.borderColor = '#e8e6d9'; }}
+                >
+                    <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0 }}>{tc.icon}</span>
+                    <span style={{ fontSize: 13, color: '#201e24', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {tc.label}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        {tc.durationMs !== undefined && !running && (
+                            <span style={{ fontSize: 11, color: '#8a8886' }}>{(tc.durationMs / 1000).toFixed(1)}s</span>
+                        )}
+                        {!running && tc.output && tc.toolName !== 'create_plan' && tc.toolName !== 'update_plan_step' && (
+                            <ChevronDownIcon width={12} height={12} color="#8a8886" style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                        )}
+                    </div>
+                </div>
+
+                {/* Standard expanded output (for non-terminal tools) */}
+                <AnimatePresence>
+                    {expanded && tc.output && !looksLikeTerminal && tc.toolName !== 'create_plan' && tc.toolName !== 'update_plan_step' && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            style={{ overflow: 'hidden', marginTop: 4 }}
+                        >
+                            <div style={{ backgroundColor: '#f5f4f0', borderRadius: 10, maxHeight: 400, overflowY: 'auto', border: '1px solid #eceae4', boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.02)' }}>
+                                {(tc.base64Image || tc.data?.screenshot) && (
+                                    <div style={{ padding: 10, borderBottom: '1px solid #eceae4' }}>
+                                        <img src={`data:image/jpeg;base64,${tc.base64Image || tc.data?.screenshot}`} alt="" style={{ width: '100%', borderRadius: 8, border: '1px solid #e8e6d9' }} />
+                                    </div>
+                                )}
+                                {tc.data?.preClickB64 && (
+                                    <div style={{ padding: 10, borderBottom: '1px solid #eceae4' }}>
+                                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6, textAlign: 'center', letterSpacing: '0.04em' }}>Click Target</div>
+                                        <div style={{ position: 'relative', width: '100%', borderRadius: 8, overflow: 'hidden', border: '1px solid #e8e6d9' }}>
+                                            <img src={`data:image/png;base64,${tc.data.preClickB64}`} alt="" style={{ width: '100%', display: 'block' }} />
+                                            {tc.data.x !== undefined && tc.data.y !== undefined && tc.data.w && tc.data.h && (
+                                                <div style={{ position: 'absolute', left: `${(tc.data.x / tc.data.w) * 100}%`, top: `${(tc.data.y / tc.data.h) * 100}%`, width: 18, height: 18, backgroundColor: 'rgba(239,68,68,0.4)', border: '2px solid #e5e5e5', borderRadius: '50%', transform: 'translate(-50%, -50%)', zIndex: 10, pointerEvents: 'none' }} />
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                {(tc.toolName === 'read' || tc.toolName === 'read_file' || tc.toolName === 'consult_skill' || tc.toolName === 'view_skill' || tc.toolName === 'skill_detected') || tc.output.includes('---') || tc.output.startsWith('#') ? (
+                                    <div style={{ padding: '10px 14px', backgroundColor: '#ffffff' }}>
+                                        <MarkdownRenderer content={tc.output} />
+                                    </div>
+                                ) : (
+                                    <pre style={{ margin: 0, padding: '10px 14px', fontSize: 11.5, fontFamily: "'JetBrains Mono', 'Fira Code', monospace", lineHeight: 1.7, color: '#6b7280', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                                        {tc.output}
+                                    </pre>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+        </motion.div>
+    );
+};
+
+// ── ToolCallRow: Individual tool call in the ToolGroup ──────────────────────
+const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) => {
+    const [expanded, setExpanded] = useState(false);
+    const isRunning = tc.status === 'running';
+    const isError = tc.status === 'error';
+    const isTerminal = tc.toolName === 'run_command' || tc.toolName === 'bash' || tc.toolName === 'run_terminal';
+    const cmdStr = (tc.args?.command || tc.args?.CommandLine || tc.args?.commandLine) as string | undefined;
+
+    // Enhanced debugging for terminal tools
+    if (isTerminal) {
+        console.log(`[ToolCallRow] Terminal tool ${tc.toolName}:`, {
+            args: tc.args,
+            cmdStr,
+            output: tc.output,
+            status: tc.status,
+            hasArgs: !!tc.args,
+            hasOutput: !!tc.output
+        });
+    }
+
+    const isLs = isTerminal && typeof cmdStr === 'string' && cmdStr.trim().startsWith('ls');
+    const isRead = tc.toolName === 'read_file' || tc.toolName === 'read' || tc.toolName === 'view_file' || tc.toolName === 'cat';
+    const isFind = tc.toolName === 'find_files' || tc.toolName === 'find' || tc.toolName === 'search_docs' || tc.toolName === 'web_search' || tc.toolName === 'search' || tc.toolName === 'grep';
+
+    let iconToDisplay = tc.icon;
+    if (!iconToDisplay || (React.isValidElement(iconToDisplay) && (iconToDisplay.type === Cog6ToothIcon || iconToDisplay.type === Cog8ToothIcon))) {
+        if (isLs) {
+            iconToDisplay = <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" width="16" height="16"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776" /></svg>;
+        } else if (isRead) {
+            iconToDisplay = <DocumentTextIcon width={16} height={16} />;
+        } else if (isFind) {
+            iconToDisplay = <MagnifyingGlassIcon width={16} height={16} />;
+        } else if (isTerminal) {
+            iconToDisplay = <CommandLineIcon width={16} height={16} />;
+        } else {
+            iconToDisplay = <Cog6ToothIcon width={16} height={16} />;
+        }
+    }
+
+    // Clean up terminal output boilerplate
+    let displayOutput = tc.output || '';
+    if (isTerminal && displayOutput) {
+        displayOutput = displayOutput
+            .replace(/in terminal \[.*?\] Session: .*?\n+/ig, '')
+            .replace(/\(Terminal session remains active\. You can run more commands in this session\.\)/ig, '')
+            .replace(/^>>.*?\n+/gm, '') // Remove the prompt echo lines if they start with >>
+            .trim();
+    }
+    const hasOutput = !!displayOutput && !isRunning;
+
+    // Parse potential search arguments to display as pills
+    const queries: string[] = Array.isArray(tc.args?.queries) ? tc.args.queries : (typeof tc.args?.query === 'string' ? [tc.args.query] : []);
+    const docs: string[] = Array.isArray(tc.args?.docs) ? tc.args.docs : [];
+    const isSearchTool = tc.toolName === 'web_search' || tc.toolName === 'search_docs' || tc.label?.toLowerCase().includes('search');
+    const hasSearchPills = isSearchTool && (queries.length > 0 || docs.length > 0);
+
+    // Ensure expanded by default for this specific search demo if it's not running
+    useEffect(() => {
+        if (hasSearchPills && hasOutput) setExpanded(true);
+    }, [hasSearchPills, hasOutput]);
+
+    const statusIcon = isRunning ? (
+        <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+            style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #e5e7eb', borderTopColor: '#10b981', flexShrink: 0, backgroundColor: '#ffffff' }}
+        />
+    ) : isError ? (
+        <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3">
+                <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+        </div>
+    ) : (
+        <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6L9 17l-5-5" />
+            </svg>
+        </div>
+    );
+
+    return (
+        <motion.div
+            layout="position"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            style={{ display: 'flex', flexDirection: 'column', position: 'relative', paddingBottom: isLast ? 0 : 24 }}
+        >
+            {/* Vertical branch line for this segment */}
+            {!isLast && (
+                <div style={{ position: 'absolute', left: 7, top: 20, bottom: -4, width: 2, backgroundColor: '#e5e7eb', zIndex: 0 }} />
+            )}
+
+            <div
+                onClick={() => hasOutput && setExpanded(!expanded)}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    cursor: hasOutput ? 'pointer' : 'default',
+                    position: 'relative', zIndex: 1
+                }}
+            >
+                {/* Status Icon */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, backgroundColor: '#ffffff' }}>
+                    {statusIcon}
+                </div>
+
+                {/* Title */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, overflow: 'hidden' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', color: '#6b7280' }}>{iconToDisplay}</span>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                        <span style={{
+                            fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            fontFamily: "'Matter', sans-serif", fontWeight: 500,
+                            color: isError ? '#ef4444' : '#111111',
+                            letterSpacing: '-0.01em',
+                            display: 'block'
+                        }}>
+                            {tc.displayName || tc.label || tc.toolName}
+                        </span>
+                        {/* Show command preview for terminal tools */}
+                        {isTerminal && cmdStr && (
+                            <div style={{
+                                fontSize: 12,
+                                color: '#6b7280',
+                                fontFamily: "'JetBrains Mono', monospace",
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginTop: 2
+                            }}>
+                                $ {cmdStr.length > 60 ? cmdStr.substring(0, 57) + '...' : cmdStr}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Chevron */}
+                {hasOutput && (
+                    <motion.span
+                        animate={{ rotate: expanded ? 0 : 90 }}
+                        style={{ display: 'flex', flexShrink: 0, color: '#9ca3af' }}
+                    >
+                        <ChevronUpIcon width={14} height={14} strokeWidth={2.5} />
+                    </motion.span>
+                )}
+
+                {/* Output indicator for terminal tools */}
+                {isTerminal && hasOutput && !expanded && (
+                    <div style={{
+                        fontSize: 11,
+                        color: '#10b981',
+                        backgroundColor: '#dcfce7',
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        fontWeight: 500
+                    }}>
+                        output
+                    </div>
+                )}
+            </div>
+
+            <AnimatePresence>
+                {expanded && displayOutput && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: "easeOut" }}
+                        style={{ overflow: 'hidden', paddingLeft: 28, marginTop: 12 }}
+                    >
+                        {hasSearchPills ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 4 }}>
+                                {/* Querying Section */}
+                                {queries.length > 0 && (
+                                    <div>
+                                        <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 500, marginBottom: 8, fontFamily: "'Matter', sans-serif" }}>Querying</div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                            {queries.map((q, i) => (
+                                                <div key={i} style={{
+                                                    display: 'flex', alignItems: 'center', gap: 6,
+                                                    padding: '6px 12px', borderRadius: 20,
+                                                    backgroundColor: '#f3f4f6', border: '1px solid transparent',
+                                                    fontSize: 13, color: '#374151', fontWeight: 500,
+                                                    fontFamily: "'Matter', sans-serif", transition: 'all 0.15s',
+                                                    cursor: 'default'
+                                                }}
+                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
+                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                                                >
+                                                    <MagnifyingGlassIcon width={14} height={14} color="#6b7280" strokeWidth={2.5} />
+                                                    {q}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Reading Section */}
+                                {docs.length > 0 && (
+                                    <div>
+                                        <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 500, marginBottom: 8, fontFamily: "'Matter', sans-serif" }}>Reading</div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                                            {docs.slice(0, 2).map((d, i) => (
+                                                <div key={i} style={{
+                                                    display: 'flex', alignItems: 'center', gap: 6,
+                                                    padding: '6px 12px', borderRadius: 20,
+                                                    backgroundColor: '#f3f4f6', border: '1px solid transparent',
+                                                    fontSize: 13, color: '#374151', fontWeight: 500,
+                                                    fontFamily: "'Matter', sans-serif", transition: 'all 0.15s',
+                                                    cursor: 'pointer'
+                                                }}
+                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
+                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                                                >
+                                                    <DocumentTextIcon width={14} height={14} color="#3b82f6" strokeWidth={2} />
+                                                    {d}
+                                                </div>
+                                            ))}
+                                            {docs.length > 2 && (
+                                                <div style={{ fontSize: 13, color: '#2563eb', fontWeight: 600, fontFamily: "'Matter', sans-serif", marginLeft: 4, cursor: 'pointer' }}>
+                                                    + {docs.length - 2} more
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            /* Standard Output rendering */
+                            <div style={{
+                                padding: '12px 16px',
+                                backgroundColor: isTerminal ? '#0d0d14' : '#f9fafb',
+                                borderRadius: 12,
+                                fontSize: 13,
+                                lineHeight: 1.6,
+                                fontFamily: isTerminal ? "'JetBrains Mono', monospace" : "inherit",
+                                color: isTerminal ? '#e2e8f0' : '#4b5563',
+                                maxHeight: 400, overflowY: 'auto',
+                                border: `1px solid ${isTerminal ? '#1e1e2e' : '#f3f4f6'}`,
+                            }}>
+                                {isTerminal ? (
+                                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                                        {/* Show the command that was executed */}
+                                        {cmdStr && (
+                                            <div style={{
+                                                marginBottom: 12,
+                                                paddingBottom: 8,
+                                                borderBottom: '1px solid #2d2d3a',
+                                                color: '#94a3b8',
+                                                fontSize: 12
+                                            }}>
+                                                <span style={{ color: '#64748b' }}>$ </span>
+                                                <span style={{ color: '#e2e8f0' }}>{cmdStr}</span>
+                                            </div>
+                                        )}
+                                        {/* Show the output */}
+                                        {displayOutput.slice(0, 2000)}
+                                        {displayOutput.length > 2000 && <span style={{ color: '#9ca3af' }}>{'\n'}... ({displayOutput.length - 2000} more chars)</span>}
+                                    </div>
+                                ) : (
+                                    <MarkdownRenderer content={displayOutput} />
+                                )}
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
+    );
+};
+
+// ── WriteDiffCard: Shows a diff viewer for write/edit tool calls ────────────
+const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
+    const [expanded, setExpanded] = useState(false);
+    const filename = (tc.args?.path as string)?.split(/[/\\]/).pop() || 'file';
+    const content = (tc.args?.content as string) || '';
+    const oldContent = (tc.args?.old_content as string) || '';
+    const ext = filename.split('.').pop()?.toUpperCase() || 'FILE';
+    const hasDiff = !!oldContent && oldContent !== content;
+
+    return (
+        <div style={{
+            borderRadius: 12, border: '1px solid #e8e6d9',
+            backgroundColor: '#ffffff', overflow: 'hidden', marginBottom: 8,
+        }}>
+            <div
+                onClick={() => setExpanded(!expanded)}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 14px', cursor: 'pointer',
+                    transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fafaf8'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+                <div style={{
+                    width: 34, height: 34, borderRadius: 8, border: '1px solid #e8e6d9',
+                    backgroundColor: '#f8f7f4', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 9, fontWeight: 700, color: '#9ca3af', flexShrink: 0,
+                    fontFamily: 'monospace'
+                }}>
+                    {ext}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {filename}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
+                        {hasDiff ? 'edited' : 'created'} · {(content.length / 1024).toFixed(1)} KB
+                    </div>
+                </div>
+                {tc.status === 'done' && (
+                    <svg width="14" height="14" viewBox="0 0 8 8" fill="none" style={{ flexShrink: 0 }}>
+                        <path d="M1.5 4L3 5.5L6.5 2" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                )}
+                <motion.span animate={{ rotate: expanded ? 180 : 0 }} style={{ display: 'flex', flexShrink: 0 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2">
+                        <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                </motion.span>
+            </div>
+            <AnimatePresence>
+                {expanded && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        style={{ overflow: 'hidden', borderTop: '1px solid #e8e6d9' }}
+                    >
+                        <DiffViewer
+                            oldFile={hasDiff ? { content: oldContent, name: filename } : { content: '', name: filename }}
+                            newFile={{ content, name: filename }}
+                            viewMode="unified"
+                            showLineNumbers
+                            showStats
+                            variant="ghost"
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+};
+
+// ── Report Link (inline trigger for report pane) ───────────────────────────────
+const ReportLink = ({ content, onOpen }: { content: string; onOpen: (label: string, path: string) => void }) => {
+    const computerLinkPattern = /\[([^\]]+)\]\(computer:\/\/\/([^)]+)\)/g;
+    const links: Array<{ label: string; path: string }> = [];
+    let match;
+    while ((match = computerLinkPattern.exec(content)) !== null) {
+        links.push({ label: match[1], path: match[2] });
+    }
+
+    if (links.length === 0) return null;
+
+    return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+            {links.map((link, idx) => (
+                <button
+                    key={idx}
+                    onClick={() => onOpen(link.label, link.path)}
+                    style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 7,
+                        padding: '7px 14px', borderRadius: 10,
+                        backgroundColor: '#f4f3ef', border: '1px solid #e0ded9',
+                        color: '#4a4846', fontSize: 12, fontWeight: 500,
+                        cursor: 'pointer', transition: 'all 0.15s',
+                        fontFamily: "'Figtree', system-ui, sans-serif"
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = '#eceae4';
+                        e.currentTarget.style.borderColor = '#ccc9c3';
+                        e.currentTarget.style.color = '#201e24';
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = '#f4f3ef';
+                        e.currentTarget.style.borderColor = '#e0ded9';
+                        e.currentTarget.style.color = '#4a4846';
+                    }}
+                >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
+                    </svg>
+                    {link.label}
+                </button>
+            ))}
+        </div>
+    );
+};
+
+// ── Report Preview Pane ────────────────────────────────────────────────────────
+const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose: () => void; label: string; path: string }) => {
+    const isHtml = /\.(html?|htm)$/i.test(path);
+    const fileUrl = `file:///${path.replace(/\\/g, '/')}`;
+
+    return (
+        <AnimatePresence>
+            {isOpen && (
+                <motion.div
+                    initial={{ x: '100%', opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: '100%', opacity: 0 }}
+                    transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+                    style={{
+                        position: 'fixed',
+                        top: 12,
+                        right: 12,
+                        bottom: 12,
+                        width: '65vw',
+                        maxWidth: 1100,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e8e6d9',
+                        borderRadius: 24,
+                        boxShadow: '-10px 0 40px rgba(0,0,0,0.08), 0 10px 30px rgba(0,0,0,0.03)',
+                        zIndex: 1000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden'
+                    }}
+                >
+                    {/* Header */}
+                    <div style={{ padding: '20px 28px', borderBottom: '1px solid #f0ede8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#faf9f7' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                            <div style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                                    <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h2 style={{ fontSize: 17, fontWeight: 600, color: '#201e24', margin: 0 }}>{label}</h2>
+                                <p style={{ fontSize: 12, color: '#8a8886', margin: '2px 0 0', fontFamily: "'JetBrains Mono', monospace" }}>{path.split(/[/\\]/).pop()}</p>
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                            <button
+                                onClick={() => window.open(fileUrl, '_blank')}
+                                style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid #e0ded9', backgroundColor: 'transparent', color: '#4a4846', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f4f3ef'; }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                                Open in Browser
+                            </button>
+                            <button
+                                onClick={onClose}
+                                style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: 'transparent', border: '1px solid #e0ded9', color: '#8a8886', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f4f3ef'; e.currentTarget.style.color = '#201e24'; }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#8a8886'; }}
+                            >
+                                <XMarkIcon width={18} height={18} />
+                            </button>
+                        </div>
+                    </div>
+                    {/* Content */}
+                    <div style={{ flex: 1, overflow: 'hidden', backgroundColor: '#fafaf8' }}>
+                        {isHtml ? (
+                            <iframe
+                                src={fileUrl}
+                                title={label}
+                                style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+                                sandbox="allow-same-origin allow-scripts"
+                            />
+                        ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 16 }}>
+                                <div style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: '#f4f3ef', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8a8886" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                                    </svg>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <p style={{ fontSize: 15, fontWeight: 600, color: '#201e24', margin: '0 0 4px' }}>Preview not available</p>
+                                    <p style={{ fontSize: 13, color: '#8a8886', margin: 0 }}>Open in browser to view this file</p>
+                                </div>
+                                <button
+                                    onClick={() => window.open(fileUrl, '_blank')}
+                                    style={{ padding: '10px 22px', borderRadius: 10, border: 'none', backgroundColor: '#6366f1', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                    Open in Browser
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+};
+
+
+// ── Plan Approval Banner ────────────────────────────────────────────────────
+const PlanApprovalBanner = () => (
+    <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 18px', borderRadius: 14,
+        background: 'linear-gradient(135deg, rgba(34,197,94,0.08) 0%, rgba(16,185,129,0.05) 100%)',
+        border: '1px solid rgba(34,197,94,0.25)',
+        marginBottom: 8
+    }}>
+        <div style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(34,197,94,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+            </svg>
+        </div>
+        <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Plan Approved</div>
+            <div style={{ fontSize: 14, color: '#15803d', lineHeight: 1.5 }}>I have reviewed and approved your execution plan. Please proceed with the execution as planned.</div>
+        </div>
+    </div>
+);
+// ── Reasoning Branch Component ─────────────────────────────────────────────────
+// Replace the existing ReasoningBranch with this version.
+const ReasoningBranch = ({
+    thought,
+    isLive,
+    duration,
+    autoCollapse = true
+}: {
+    thought?: string;
+    isLive?: boolean;
+    duration?: number;
+    autoCollapse?: boolean;
+}) => {
+    const [expanded, setExpanded] = useAutoCollapse(isLive || false, autoCollapse, duration);
+
+    if (!thought?.trim()) return null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            style={{ marginBottom: 14 }}
+        >
+            {/* Toggle row */}
+            <motion.button
+                onClick={() => setExpanded(!expanded)}
+                whileHover={{ opacity: 0.8 }}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: '0 0 8px', color: '#8a8886',
+                }}
+            >
+                {isLive ? (
+                    // Use animated Loader from animated-loading-svg-text-shimmer
+                    <Loader size={14} strokeWidth={2} className="text-zinc-500" />
+                ) : (
+                    // Static icon when done — the chat bubble from the created SVG style
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                )}
+
+                <span style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>
+                    {isLive ? 'Thinking…' : `Thought for ${formatDuration(duration)}`}
+                </span>
+
+                <motion.span
+                    animate={{ rotate: expanded ? 180 : 0 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                    style={{ display: 'flex', marginLeft: 2 }}
+                >
+                    <ChevronDownIcon width={12} height={12} color="#9ca3af" />
+                </motion.span>
+            </motion.button>
+
+            {/* Expanded thought content */}
+            <AnimatePresence>
+                {expanded && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                        style={{ overflow: 'hidden' }}
+                    >
+                        <div style={{
+                            borderLeft: '2px solid #e5e7eb',
+                            paddingLeft: 16,
+                            marginLeft: 2,
+                            marginBottom: 12,
+                        }}>
+                            <div style={{
+                                fontSize: 13.5,
+                                lineHeight: 1.75,
+                                color: '#9ca3af',
+                                fontStyle: 'italic',
+                                whiteSpace: 'pre-wrap',
+                            }}>
+                                {/* Shimmer overlay when live */}
+                                {isLive && (
+                                    <style>{`
+                                        @keyframes thoughtShimmer {
+                                            0% { background-position: -400px 0; }
+                                            100% { background-position: 400px 0; }
+                                        }
+                                    `}</style>
+                                )}
+                                <MarkdownRenderer content={thought} />
+                                {isLive && (
+                                    <motion.span
+                                        animate={{ opacity: [1, 0] }}
+                                        transition={{ repeat: Infinity, duration: 0.7, ease: 'linear' }}
+                                        style={{ display: 'inline-block', width: 2, height: '1em', backgroundColor: '#9ca3af', marginLeft: 2, verticalAlign: 'text-bottom' }}
+                                    />
+                                )}
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
+    );
+};
+// ── ReasoningPane — Agent Activity side panel ────────────────────────────────
+// Replace the existing ReasoningPane with this version.
+// Uses the inline SVG progress circles and context grid from the created icons.
+
+// ── Inline SVG: progress circles (3-step) ───────────────────────────────────
+const ProgressStepsIcon = ({ done = 0 }: { done?: number }) => {
+    // done = how many of 3 circles are filled with a check
+    const circles = [0, 1, 2];
+    return (
+        <svg width="38" height="12" viewBox="0 0 38 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+            {circles.map((i) => {
+                const cx = i === 0 ? 6 : i === 1 ? 19 : 32;
+                const filled = i < done;
+                return (
+                    <g key={i}>
+                        {/* dash connector */}
+                        {i > 0 && (
+                            <line
+                                x1={i === 1 ? 12 : 25} y1="6"
+                                x2={i === 1 ? 13 : 26} y2="6"
+                                stroke={filled ? 'currentColor' : '#d1d5db'}
+                                strokeWidth="1.5"
+                                strokeDasharray="2 1.5"
+                                strokeLinecap="round"
+                            />
+                        )}
+                        <circle
+                            cx={cx} cy="6" r="5"
+                            fill={filled ? 'currentColor' : 'none'}
+                            stroke={filled ? 'none' : '#d1d5db'}
+                            strokeWidth="1.5"
+                            opacity={filled ? 0.8 : 1}
+                        />
+                        {filled && (
+                            <path
+                                d={`M${cx - 2.5} 6 L${cx - 0.5} 8 L${cx + 2.5} 4`}
+                                stroke="white"
+                                strokeWidth="1.4"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        )}
+                    </g>
+                );
+            })}
+        </svg>
+    );
+};
+
+// ── Inline SVG: context thumbnail grid ──────────────────────────────────────
+const ContextGridIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="0.8" strokeOpacity="0.4" />
+        <rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="0.8" strokeOpacity="0.4" />
+        <rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="0.8" strokeOpacity="0.4" />
+        <rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="0.8" strokeOpacity="0.4" />
+    </svg>
+);
+
+// ── Section wrapper ──────────────────────────────────────────────────────────
+const PaneSection = ({
+    icon, label, badge, children, defaultOpen = true,
+}: {
+    icon: React.ReactNode;
+    label: string;
+    badge?: number;
+    children: React.ReactNode;
+    defaultOpen?: boolean;
+}) => {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <div style={{ marginBottom: 4 }}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 0', background: 'none', border: 'none', cursor: 'pointer',
+                }}
+            >
+                <span style={{ color: '#a1a1aa', display: 'flex', flexShrink: 0 }}>{icon}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', flex: 1, textAlign: 'left' }}>
+                    {label}
+                </span>
+                {badge !== undefined && (
+                    <span style={{ fontSize: 10, color: '#9ca3af', backgroundColor: '#f3f4f6', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>{badge}</span>
+                )}
+                <motion.span
+                    animate={{ rotate: open ? 180 : 0 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                    style={{ display: 'flex', color: '#9ca3af' }}
+                >
+                    <ChevronDownIcon width={13} height={13} color="currentColor" />
+                </motion.span>
+            </button>
+            <AnimatePresence>
+                {open && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                        style={{ overflow: 'hidden' }}
+                    >
+                        <div style={{ paddingBottom: 16 }}>{children}</div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+};
+
+// ── Main ReasoningPane ───────────────────────────────────────────────────────
+const ReasoningPane = ({
+    isOpen, onClose, thought, toolCalls, isLive,
+    intent, confidence, context, progress,
+}: {
+    isOpen: boolean;
+    onClose: () => void;
+    thought?: string;
+    toolCalls: ToolCallDisplay[];
+    isLive: boolean;
+    intent?: string;
+    confidence?: number;
+    context?: { completedSteps: string[]; pendingSteps: string[]; filesModified: string[] };
+    progress?: { current: number; total: number };
+}) => {
+    const doneCount = progress
+        ? Math.round((progress.current / progress.total) * 3)
+        : toolCalls.filter(t => t.status === 'done').length > 0
+            ? Math.min(toolCalls.filter(t => t.status === 'done').length, 2)
+            : 0;
+
+    return (
+        <AnimatePresence>
+            {isOpen && (
+                <motion.div
+                    initial={{ x: '100%', opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: '100%', opacity: 0 }}
+                    transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+                    style={{
+                        position: 'fixed', top: 52, right: 0, bottom: 0, width: 340,
+                        backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb',
+                        zIndex: 100, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                        boxShadow: '-6px 0 24px rgba(0,0,0,0.04)',
+                    }}
+                >
+                    {/* ── Header ── */}
+                    <div style={{
+                        padding: '16px 20px 14px',
+                        borderBottom: '1px solid #f3f4f6',
+                        display: 'flex', alignItems: 'center', gap: 12,
+                    }}>
+                        {/* Progress icon — updates as tools complete */}
+                        <div style={{ color: isLive ? '#6366f1' : '#6b7280', display: 'flex', flexShrink: 0 }}>
+                            <ProgressStepsIcon done={doneCount} />
+                        </div>
+
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>Agent Activity</div>
+                            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                {isLive ? (
+                                    <>
+                                        <motion.span
+                                            animate={{ opacity: [1, 0.3, 1] }}
+                                            transition={{ repeat: Infinity, duration: 1.4 }}
+                                            style={{ display: 'block', width: 6, height: 6, borderRadius: '50%', backgroundColor: '#22c55e', flexShrink: 0 }}
+                                        />
+                                        Processing
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
+                                            <circle cx="4" cy="4" r="3.5" stroke="#22c55e" strokeWidth="1" />
+                                            <path d="M2 4L3.5 5.5L6 2.5" stroke="#22c55e" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                                        </svg>
+                                        Completed
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={onClose}
+                            style={{
+                                width: 26, height: 26, borderRadius: 7, border: '1px solid #e5e7eb',
+                                backgroundColor: 'transparent', color: '#9ca3af', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.15s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f3f4f6'; e.currentTarget.style.color = '#374151'; }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#9ca3af'; }}
+                        >
+                            <XMarkIcon width={13} height={13} />
+                        </button>
+                    </div>
+
+                    {/* ── Body ── */}
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+
+                        {/* Intent pill */}
+                        {intent && (
+                            <div style={{ marginBottom: 16 }}>
+                                <div style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                                    padding: '4px 10px', borderRadius: 99,
+                                    backgroundColor: 'rgba(99,102,241,0.08)',
+                                    border: '1px solid rgba(99,102,241,0.18)',
+                                }}>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: '#6366f1' }}>{intent}</span>
+                                    {confidence !== undefined && (
+                                        <span style={{ fontSize: 11, color: '#a5b4fc' }}>{Math.round(confidence * 100)}%</span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Thought / Reasoning */}
+                        <PaneSection
+                            icon={
+                                isLive ? (
+                                    <span style={{ display: 'flex', gap: 3 }}>
+                                        {[0, 0.15, 0.3].map((delay, i) => (
+                                            <motion.span key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay }}
+                                                style={{ display: 'block', width: 4, height: 4, borderRadius: '50%', backgroundColor: '#9ca3af' }} />
+                                        ))}
+                                    </span>
+                                ) : (
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                    </svg>
+                                )
+                            }
+                            label="Reasoning"
+                        >
+                            {thought ? (
+                                <div style={{
+                                    fontSize: 12.5, lineHeight: 1.75, color: '#9ca3af',
+                                    fontStyle: 'italic',
+                                    borderLeft: '2px solid #e5e7eb',
+                                    paddingLeft: 12,
+                                    maxHeight: 220, overflowY: 'auto',
+                                }}>
+                                    <MarkdownRenderer content={thought} />
+                                    {isLive && (
+                                        <motion.span
+                                            animate={{ opacity: [1, 0] }}
+                                            transition={{ repeat: Infinity, duration: 0.7, ease: 'linear' }}
+                                            style={{ display: 'inline-block', width: 2, height: '0.9em', backgroundColor: '#9ca3af', marginLeft: 2, verticalAlign: 'text-bottom' }}
+                                        />
+                                    )}
+                                </div>
+                            ) : (
+                                <span style={{ fontSize: 12, color: '#d1d5db', fontStyle: 'italic' }}>
+                                    Waiting for model to reason…
+                                </span>
+                            )}
+                        </PaneSection>
+
+                        {/* Progress bar */}
+                        {progress && (
+                            <PaneSection
+                                icon={<ProgressStepsIcon done={doneCount} />}
+                                label="Progress"
+                            >
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                                        <span style={{ fontSize: 12, color: '#6b7280' }}>Step {progress.current} of {progress.total}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: '#22c55e' }}>{Math.round((progress.current / progress.total) * 100)}%</span>
+                                    </div>
+                                    <div style={{ width: '100%', height: 3, borderRadius: 99, backgroundColor: '#f3f4f6', overflow: 'hidden' }}>
+                                        <motion.div
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${(progress.current / progress.total) * 100}%` }}
+                                            style={{ height: '100%', borderRadius: 99, backgroundColor: '#22c55e' }}
+                                        />
+                                    </div>
+                                </div>
+                            </PaneSection>
+                        )}
+
+                        {/* Tools — the timeline */}
+                        <PaneSection
+                            icon={
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                                </svg>
+                            }
+                            label="Tools"
+                            badge={toolCalls.length}
+                        >
+                            {toolCalls.length === 0 ? (
+                                <span style={{ fontSize: 12, color: '#d1d5db', fontStyle: 'italic' }}>No tools called yet</span>
+                            ) : (
+                                <div style={{ borderLeft: '2px solid #e5e7eb', marginLeft: 4, paddingLeft: 14, display: 'flex', flexDirection: 'column' }}>
+                                    {toolCalls.map((tc, idx) => (
+                                        <motion.div
+                                            key={tc.id || idx}
+                                            initial={{ opacity: 0, x: -8 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ delay: idx * 0.04 }}
+                                            style={{ position: 'relative', paddingBottom: idx < toolCalls.length - 1 ? 10 : 0 }}
+                                        >
+                                            {/* Rail dot */}
+                                            <div style={{
+                                                position: 'absolute', left: -20, top: 8,
+                                                width: 8, height: 8, borderRadius: '50%',
+                                                backgroundColor:
+                                                    tc.status === 'running' ? '#f3f4f6'
+                                                        : tc.status === 'error' ? 'rgba(239,68,68,0.15)'
+                                                            : 'rgba(34,197,94,0.15)',
+                                                border:
+                                                    tc.status === 'running' ? '1.5px solid #d1d5db'
+                                                        : tc.status === 'error' ? '1.5px solid rgba(239,68,68,0.4)'
+                                                            : '1.5px solid rgba(34,197,94,0.4)',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            }}>
+                                                {tc.status === 'running' ? (
+                                                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
+                                                        style={{ width: 4, height: 4, borderRadius: '50%', border: '1px solid transparent', borderTopColor: '#9ca3af' }} />
+                                                ) : tc.status === 'error' ? (
+                                                    <XMarkIcon width={5} height={5} color="#ef4444" strokeWidth={3} />
+                                                ) : (
+                                                    <svg width="5" height="5" viewBox="0 0 8 8" fill="none">
+                                                        <path d="M1.5 4L3 5.5L6.5 2" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                )}
+                                            </div>
+
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                <span style={{ fontSize: 12, lineHeight: 1 }}>{tc.icon}</span>
+                                                <span style={{ fontSize: 12, color: tc.status === 'running' ? '#9ca3af' : '#374151', fontStyle: tc.status === 'running' ? 'italic' : 'normal', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                    {tc.label || tc.toolName}
+                                                </span>
+                                                {tc.durationMs !== undefined && (
+                                                    <span style={{ fontSize: 10.5, color: '#9ca3af', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
+                                                        {(tc.durationMs / 1000).toFixed(1)}s
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    ))}
+                                </div>
+                            )}
+                        </PaneSection>
+
+                        {/* Context */}
+                        {context && (
+                            <PaneSection
+                                icon={<ContextGridIcon />}
+                                label="Context"
+                            >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    {context.completedSteps.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Completed</div>
+                                            {context.completedSteps.map((step, i) => (
+                                                <div key={i} style={{ fontSize: 12, color: '#22c55e', marginBottom: 3, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ flexShrink: 0, marginTop: 2 }}>
+                                                        <circle cx="5" cy="5" r="4.5" fill="rgba(34,197,94,0.1)" stroke="rgba(34,197,94,0.3)" strokeWidth="1" />
+                                                        <path d="M3 5L4.5 6.5L7 3.5" stroke="#22c55e" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                    <span style={{ color: '#374151' }}>{step}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {context.pendingSteps.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Pending</div>
+                                            {context.pendingSteps.map((step, i) => (
+                                                <div key={i} style={{ fontSize: 12, color: '#9ca3af', marginBottom: 3, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                                                    <div style={{ width: 10, height: 10, borderRadius: '50%', border: '1.5px solid #d1d5db', flexShrink: 0, marginTop: 2 }} />
+                                                    <span>{step}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {context.filesModified.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Files</div>
+                                            {context.filesModified.map((file, i) => (
+                                                <div key={i} style={{ fontSize: 11, color: '#6b7280', fontFamily: "'JetBrains Mono', monospace", marginBottom: 2 }}>{file}</div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </PaneSection>
+                        )}
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+};
+// ── ThinkingBlock ────────────────────────────────────────────────────────────
+// @deprecated - use ToolTimeline instead
+const ThinkingBlock = ({ toolCalls, thought, isLive }: { toolCalls: ToolCallDisplay[]; thought?: string; isLive?: boolean }) => {
+    return null;
+}
 
 
 
+// ── TimelineStep — one row inside ThinkingBlock ──────────────────────────────
+// Extracted to keep ThinkingBlock readable. Replaces ToolCallTag inline usage.
+// @deprecated - use ToolCallRow instead
+const TimelineStep = ({
+    tc, isLast, isFirst, running, errored, looksLikeTerminal
+}: {
+    tc: ToolCallDisplay;
+    isLast: boolean;
+    isFirst: boolean;
+    running: boolean;
+    errored: boolean;
+    looksLikeTerminal: boolean;
+}) => {
+    return null;
+}
 
 
+// ── Agent Workspace Cards ────────────────────────────────────────────────────
+const AgentWorkspaceCards = ({ plan, contextItems, setTooltip }: { plan: any | null; contextItems: any[]; setTooltip: (ts: any) => void }) => {
+    const [progressExpanded, setProgressExpanded] = useState(true);
+    const [contextExpanded, setContextExpanded] = useState(true);
+
+    if (!plan && contextItems.length === 0) return null;
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {plan && (
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ width: "100%", backgroundColor: "transparent" }}>
+                    <div onClick={() => setProgressExpanded(!progressExpanded)} style={{ padding: "8px 0px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                        <span style={{ fontSize: 16, fontWeight: 600, color: "#201e24" }}>Progress</span>
+                        <ChevronDownIcon width={16} height={16} color="#8a8886" style={{ transform: progressExpanded ? "rotate(180deg)" : "none", transition: "0.2s" }} />
+                    </div>
+                    <AnimatePresence>
+                        {progressExpanded && (
+                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} style={{ overflow: "hidden" }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 12, paddingBottom: 16 }}>
+                                    {plan.steps?.map((step: any, index: number) => {
+                                        const isDone = step.status === 'done';
+                                        const isInProgress = step.status === 'in_progress';
+                                        return (
+                                            <div key={step.id} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                                                {isDone ? (
+                                                    <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "#f0fdf4", border: "1.5px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                                                        <CheckIcon width={14} height={14} color="#16a34a" strokeWidth={3} />
+                                                    </div>
+                                                ) : isInProgress ? (
+                                                    <div style={{ width: 24, height: 24, borderRadius: 12, border: "2.5px solid #111111", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                                                        <span style={{ fontSize: 13, color: "#111111", fontWeight: 700 }}>{index + 1}</span>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "#f4f4f4", border: "1px solid #e8e6d9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                                                        <span style={{ fontSize: 12, color: "#8a8886", fontWeight: 500 }}>{index + 1}</span>
+                                                    </div>
+                                                )}
+                                                <span style={{ fontSize: 14, fontWeight: isInProgress ? 500 : 400, color: isDone ? "#201e24" : isInProgress ? "#201e24" : "#8a8886", lineHeight: 1.5, marginTop: 4 }}>
+                                                    {step.description}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
+            )}
+
+            {contextItems.length > 0 && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={{ width: "100%", backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 16, overflow: "hidden" }}>
+                    <div onClick={() => setContextExpanded(!contextExpanded)} style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", borderBottom: contextExpanded ? "1px solid #e8e6d9" : "none" }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "#201e24", textTransform: "uppercase", letterSpacing: "0.03em" }}>Active Context</span>
+                        <ChevronDownIcon width={14} height={14} color="#8a8886" style={{ transform: contextExpanded ? "rotate(180deg)" : "none", transition: "0.2s" }} />
+                    </div>
+                    <AnimatePresence>
+                        {contextExpanded && (
+                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} style={{ overflow: "hidden" }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "12px 16px 16px" }}>
+                                    {contextItems.map((item, idx) => {
+                                        const isFolder = item.label.startsWith("Folder:");
+                                        return (
+                                            <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                                                <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "#f5f4f0", border: "1px solid #e8e6d9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                                                    {isFolder || item.type === 'file' ? (
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                                    ) : item.type === 'web' ? (
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1-4-10z"></path></svg>
+                                                    ) : (
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                                                    )}
+                                                </div>
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0 }}>
+                                                    <span
+                                                        onMouseEnter={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, content: item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '') })}
+                                                        onMouseMove={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, content: item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '') })}
+                                                        onMouseLeave={() => setTooltip({ visible: false, x: 0, y: 0, content: "" })}
+                                                        style={{ fontSize: 14, fontWeight: 400, color: "#A0A0A0", lineHeight: 1.5, marginTop: 4, wordBreak: "break-all", cursor: "default" }}
+                                                    >
+                                                        <span style={{ color: "#F0F0F0", fontWeight: 500 }}>{isFolder ? "Folder:" : item.type === "web" ? "URL:" : "File:"}</span> {item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '').split(/[/\\]/).pop()}
+                                                    </span>
+                                                    {item.base64Image && (
+                                                        <div style={{ marginTop: 2, borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)" }}>
+                                                            <img src={`data:image/jpeg;base64,${item.base64Image}`} alt="vision context" style={{ width: "100%", display: "block" }} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
+            )}
+        </div>
+    );
+};
+
+// ── Plan Review Card ─────────────────────────────────────────────────────────
+const PlanReviewCard = ({ plan, onApprove, onEdit }: { plan: { content: string; chatId: string }; onApprove: (content: string) => void; onEdit: () => void }) => {
+    return (
+        <motion.div initial={{ opacity: 0, scale: 0.98, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+            style={{ marginTop: '12px', marginBottom: '24px', padding: '24px', backgroundColor: 'rgba(251, 191, 36, 0.04)', border: '1px solid rgba(251, 191, 36, 0.15)', borderRadius: 24, display: 'flex', flexDirection: 'column', gap: 16, position: 'relative', overflow: 'hidden', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.3)' }}
+        >
+            <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle at top right, rgba(251, 191, 36, 0.12), transparent 70%)', pointerEvents: 'none' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(251, 191, 36, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                    <DocumentTextIcon width={24} height={24} color="#fbbf24" />
+                </div>
+                <div>
+                    <div style={{ fontSize: 17, fontWeight: 600, color: '#fff', letterSpacing: '-0.01em' }}>Execution Plan Ready</div>
+                    <div style={{ fontSize: 13, color: '#a1a1aa' }}>Review the proposed steps before I proceed</div>
+                </div>
+            </div>
+            <div style={{ backgroundColor: '#131312', border: '1px solid #2b2a29', borderRadius: 16, padding: '20px 24px', maxHeight: 350, overflowY: 'auto', WebkitMaskImage: 'linear-gradient(to bottom, black 90%, transparent 100%)' }}>
+                <MarkdownRenderer content={plan.content} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 4 }}>
+                <button onClick={onEdit} style={{ padding: '10px 20px', borderRadius: 12, border: '1px solid #363534', backgroundColor: 'transparent', color: '#a1a1aa', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = '#fff'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#a1a1aa'; }}>
+                    View in Artifacts
+                </button>
+                <button onClick={() => onApprove(plan.content)} style={{ padding: '10px 26px', borderRadius: 12, border: 'none', backgroundColor: '#fbbf24', color: '#1a1a1a', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 15px rgba(251, 191, 36, 0.2)', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(251, 191, 36, 0.3)'; }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 15px rgba(251, 191, 36, 0.2)'; }}>
+                    <CheckCircleIcon width={18} height={18} />
+                    Approve & Execute
+                </button>
+            </div>
+        </motion.div>
+    );
+};
 
 
+// ── HITL Approval Form Component ────────────────────────────────────────────
+const HitlApprovalForm = ({
+    request,
+    onApprove,
+    onReject
+}: {
+    request: {
+        question: string;
+        details: {
+            tools: any[];
+            summary: string;
+            reasoning: string;
+        };
+        options: string[];
+    };
+    onApprove: () => void;
+    onReject: () => void;
+}) => {
+    return (
+        <div style={{
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffeaa7',
+            borderRadius: 12,
+            padding: 20,
+            margin: '16px 0'
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 16,
+                color: '#856404',
+                fontSize: 14,
+                fontWeight: 600
+            }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                Human approval required
+            </div>
 
+            <h3 style={{
+                margin: '0 0 12px 0',
+                fontSize: 16,
+                fontWeight: 600,
+                color: '#1f2937'
+            }}>
+                {request.question}
+            </h3>
 
+            <div style={{
+                backgroundColor: '#f8f9fa',
+                border: '1px solid #e9ecef',
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 16,
+                fontSize: 13,
+                color: '#495057'
+            }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Operation Details:</div>
+                <div style={{ marginBottom: 4 }}><strong>Tools:</strong> {request.details.summary}</div>
+                <div><strong>Reason:</strong> {request.details.reasoning}</div>
+            </div>
 
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button
+                    onClick={onReject}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: 8,
+                        border: '1px solid #dc3545',
+                        backgroundColor: '#ffffff',
+                        color: '#dc3545',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = '#dc3545';
+                        e.currentTarget.style.color = '#ffffff';
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = '#ffffff';
+                        e.currentTarget.style.color = '#dc3545';
+                    }}
+                >
+                    Reject
+                </button>
+                <button
+                    onClick={onApprove}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: 8,
+                        border: 'none',
+                        backgroundColor: '#28a745',
+                        color: '#ffffff',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.backgroundColor = '#218838';
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = '#28a745';
+                    }}
+                >
+                    Approve
+                </button>
+            </div>
+        </div>
+    );
+};
 
+// ── User Question Form Component ─────────────────────────────────────────────
+const UserQuestionForm = ({
+    question,
+    options,
+    multiSelect,
+    selectedValues,
+    onSelectionChange,
+    onSubmit
+}: {
+    question: string;
+    options: Array<{ label: string; value: string; isRecommended?: boolean }>;
+    multiSelect: boolean;
+    selectedValues: string[];
+    onSelectionChange: (values: string[]) => void;
+    onSubmit: () => void;
+}) => {
+    const handleOptionClick = (value: string) => {
+        if (multiSelect) {
+            const newValues = selectedValues.includes(value)
+                ? selectedValues.filter(v => v !== value)
+                : [...selectedValues, value];
+            onSelectionChange(newValues);
+        } else {
+            onSelectionChange([value]);
+        }
+    };
 
+    return (
+        <div style={{
+            backgroundColor: '#f8f9fa',
+            border: '1px solid #e9ecef',
+            borderRadius: 12,
+            padding: 20,
+            margin: '16px 0'
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 16,
+                color: '#6366f1',
+                fontSize: 14,
+                fontWeight: 600
+            }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9,9h6v6H9z"/>
+                </svg>
+                Waiting for your input
+            </div>
 
+            <h3 style={{
+                margin: '0 0 16px 0',
+                fontSize: 16,
+                fontWeight: 600,
+                color: '#1f2937'
+            }}>
+                {question}
+            </h3>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                {options.map((option, idx) => (
+                    <button
+                        key={idx}
+                        onClick={() => handleOptionClick(option.value)}
+                        style={{
+                            padding: '12px 16px',
+                            borderRadius: 8,
+                            border: selectedValues.includes(option.value)
+                                ? '2px solid #6366f1'
+                                : '1px solid #d1d5db',
+                            backgroundColor: selectedValues.includes(option.value)
+                                ? '#f0f9ff'
+                                : '#ffffff',
+                            color: selectedValues.includes(option.value)
+                                ? '#1e40af'
+                                : '#374151',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            fontSize: 14,
+                            fontWeight: option.isRecommended ? 600 : 400,
+                            transition: 'all 0.2s',
+                            position: 'relative'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{
+                                width: 16,
+                                height: 16,
+                                borderRadius: multiSelect ? 4 : '50%',
+                                border: selectedValues.includes(option.value)
+                                    ? '2px solid #6366f1'
+                                    : '2px solid #d1d5db',
+                                backgroundColor: selectedValues.includes(option.value)
+                                    ? '#6366f1'
+                                    : 'transparent',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                {selectedValues.includes(option.value) && (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                        <polyline points="20,6 9,17 4,12"/>
+                                    </svg>
+                                )}
+                            </div>
+                            <span>{option.label}</span>
+                            {option.isRecommended && (
+                                <span style={{
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    color: '#059669',
+                                    backgroundColor: '#d1fae5',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    marginLeft: 'auto'
+                                }}>
+                                    RECOMMENDED
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                ))}
+            </div>
 
-
-
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                    onClick={onSubmit}
+                    disabled={selectedValues.length === 0}
+                    style={{
+                        padding: '10px 20px',
+                        borderRadius: 8,
+                        border: 'none',
+                        backgroundColor: selectedValues.length > 0 ? '#6366f1' : '#d1d5db',
+                        color: selectedValues.length > 0 ? '#ffffff' : '#9ca3af',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: selectedValues.length > 0 ? 'pointer' : 'not-allowed',
+                        transition: 'all 0.2s'
+                    }}
+                >
+                    Submit {multiSelect && selectedValues.length > 1 ? `(${selectedValues.length} selected)` : ''}
+                </button>
+            </div>
+        </div>
+    );
+};
 
 // ── Main ChatPage ─────────────────────────────────────────────────────────────
 export default function ChatPage() {

@@ -241,12 +241,12 @@ Analyze the input semantically and provide your classification in JSON format:
   "reasoning": "Brief explanation of why you chose this intent, including context inheritance if applicable"
 }
 
-IMPORTANT: 
+IMPORTANT:
 - Use semantic understanding, not keyword matching
 - Consider conversation context and file attachments
 - For short affirmatives, check if you should inherit the previous intent
 - Be confident in your classification (aim for 0.8+ confidence when clear)`;
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Intent classification timed out')), 30000));
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Intent classification timed out')), 3000));
     try {
         const aiPromise = client.chat({
             messages: [{ role: 'user', content: prompt }],

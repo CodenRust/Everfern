@@ -34,21 +34,21 @@ class IntentCache {
   get(input: string, historyLength: number | undefined): IntentClassification | null {
     const key = this.hashInput(input, historyLength);
     const entry = this.cache.get(key);
-    
+
     if (!entry) return null;
-    
+
     // Check if entry is still valid
     if (Date.now() - entry.timestamp > this.maxAge) {
       this.cache.delete(key);
       return null;
     }
-    
+
     return entry.classification;
   }
 
   set(input: string, historyLength: number | undefined, classification: IntentClassification): void {
     const key = this.hashInput(input, historyLength);
-    
+
     // Clean up old entries if cache is full
     if (this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value;
@@ -56,7 +56,7 @@ class IntentCache {
         this.cache.delete(oldestKey);
       }
     }
-    
+
     this.cache.set(key, {
       classification,
       timestamp: Date.now(),
@@ -89,12 +89,12 @@ setInterval(() => intentCache.cleanup(), 120000);
 function isShortAffirmative(message: string): boolean {
   const normalized = message.toLowerCase().trim();
   const affirmatives = ['yes', 'ok', 'okay', 'proceed', 'continue', 'sure', 'go ahead', 'yep', 'yeah'];
-  
+
   // Direct match with known affirmatives
   if (affirmatives.includes(normalized)) {
     return true;
   }
-  
+
   // Handle multi-word affirmatives like "ok proceed", "go ahead", etc.
   if (normalized.length < 15) {
     // Check for combinations of affirmative words
@@ -107,12 +107,12 @@ function isShortAffirmative(message: string): boolean {
       }
     }
   }
-  
+
   // Short messages that contain affirmative patterns
   if (normalized.length < 10) {
     return /^(yes|ok|okay|sure|yep|yeah|go|proceed|continue)/.test(normalized);
   }
-  
+
   return false;
 }
 
@@ -121,20 +121,20 @@ function isShortAffirmative(message: string): boolean {
  */
 function hasFileAttachment(message: any): boolean {
   if (!message || !message.content) return false;
-  
+
   // Handle array content (mixed text and file)
   if (Array.isArray(message.content)) {
-    return message.content.some((item: any) => 
-      item.type === 'file' || 
+    return message.content.some((item: any) =>
+      item.type === 'file' ||
       (typeof item === 'object' && (item.name || item.path || item.file))
     );
   }
-  
+
   // Handle object content with file properties
   if (typeof message.content === 'object') {
     return !!(message.content.file || message.content.name || message.content.path);
   }
-  
+
   return false;
 }
 
@@ -143,7 +143,7 @@ function hasFileAttachment(message: any): boolean {
  */
 function hasSubstantiveContent(message: any): boolean {
   if (!message || !message.content) return false;
-  
+
   let content = '';
   if (Array.isArray(message.content)) {
     content = message.content
@@ -155,7 +155,7 @@ function hasSubstantiveContent(message: any): boolean {
   } else if (typeof message.content === 'object' && message.content.text) {
     content = message.content.text;
   }
-  
+
   // Consider it substantive if it's longer than a typical greeting
   return content.trim().length > 20;
 }
@@ -165,18 +165,18 @@ function hasSubstantiveContent(message: any): boolean {
  */
 function extractPreviousIntent(history: any[]): IntentType | null {
   if (!history || history.length === 0) return null;
-  
+
   // Find the last user message (excluding the current one)
-  const userMessages = history.filter((msg: any) => 
+  const userMessages = history.filter((msg: any) =>
     msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human'
   );
-  
+
   if (userMessages.length < 1) return null;
-  
+
   // Get the previous user message (second to last)
   const previousUserMsg = userMessages[userMessages.length - 1];
   if (!previousUserMsg) return null;
-  
+
   // Check for file attachments first - strong signal for intent
   if (hasFileAttachment(previousUserMsg)) {
     let content = '';
@@ -186,7 +186,7 @@ function extractPreviousIntent(history: any[]): IntentType | null {
         .filter((item: any) => item.type === 'text' || typeof item === 'string')
         .map((item: any) => typeof item === 'string' ? item : item.text || '')
         .join(' ');
-      
+
       // Check file types for intent hints
       const files = previousUserMsg.content.filter((item: any) => item.type === 'file');
       for (const file of files) {
@@ -199,18 +199,18 @@ function extractPreviousIntent(history: any[]): IntentType | null {
         }
       }
     }
-    
+
     // Default for file uploads
     return 'analyze';
   }
-  
+
   // Check if previous message has substantive content
   if (hasSubstantiveContent(previousUserMsg)) {
     // Let AI handle the classification - don't use keywords
     // Return null to indicate we should use AI classification
     return null;
   }
-  
+
   return null;
 }
 
@@ -220,8 +220,8 @@ function extractPreviousIntent(history: any[]): IntentType | null {
  * without relying on hardcoded keyword matching
  */
 export async function classifyIntentAI(
-  client: AIClient, 
-  userInput: string, 
+  client: AIClient,
+  userInput: string,
   history: any[] = []
 ): Promise<IntentClassification> {
   const normalizedHistory = normalizeMessages(history);
@@ -233,7 +233,7 @@ export async function classifyIntentAI(
     } else if (Array.isArray(m.content)) {
       const textParts = m.content.filter((item: any) => item.type === 'text' || typeof item === 'string');
       content = textParts.map((item: any) => typeof item === 'string' ? item : item.text || '').join(' ').slice(0, 200);
-      
+
       // Detect file attachments
       const hasFiles = m.content.some((item: any) => item.type === 'file' || item.type === 'image_url');
       if (hasFiles) {
@@ -242,7 +242,7 @@ export async function classifyIntentAI(
     }
     return `[${role}]: ${content}`;
   }).join('\n');
-  
+
   const prompt = `You are an intelligent Intent Classification Agent for an AI coding assistant. Your job is to analyze user input and classify it into the most appropriate category based on semantic meaning, context, and conversation history.
 
 AVAILABLE INTENTS:
@@ -283,14 +283,14 @@ Analyze the input semantically and provide your classification in JSON format:
   "reasoning": "Brief explanation of why you chose this intent, including context inheritance if applicable"
 }
 
-IMPORTANT: 
+IMPORTANT:
 - Use semantic understanding, not keyword matching
 - Consider conversation context and file attachments
 - For short affirmatives, check if you should inherit the previous intent
 - Be confident in your classification (aim for 0.8+ confidence when clear)`;
 
-  const timeoutPromise = new Promise<never>((_, reject) => 
-    setTimeout(() => reject(new Error('Intent classification timed out')), 30000)
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Intent classification timed out')), 3000)
   );
 
   try {
@@ -302,12 +302,12 @@ IMPORTANT:
     });
 
     const response = await Promise.race([aiPromise, timeoutPromise]) as any;
-    
+
     let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
     // Remove markdown code blocks if present
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const data = JSON.parse(content);
-    
+
     return {
       intent: (data.intent || 'task') as IntentType,
       confidence: data.confidence || 0.7,
@@ -342,18 +342,18 @@ export function classifyIntentFallback(userInput: string, history: any[] = []): 
   // Absolute minimal fallback - only for when AI is completely unavailable
   // Default to conversation for very short inputs (likely greetings)
   if (normalized.length < 15) {
-    return { 
-      intent: 'conversation', 
-      confidence: 0.6, 
-      reasoning: 'Fallback: Short input without AI classification' 
+    return {
+      intent: 'conversation',
+      confidence: 0.6,
+      reasoning: 'Fallback: Short input without AI classification'
     };
   }
 
   // Default to task for anything else - AI should handle proper classification
-  return { 
-    intent: 'task', 
-    confidence: 0.4, 
-    reasoning: 'Fallback: AI classification unavailable - defaulting to task' 
+  return {
+    intent: 'task',
+    confidence: 0.4,
+    reasoning: 'Fallback: AI classification unavailable - defaulting to task'
   };
 }
 
@@ -363,14 +363,14 @@ export function classifyIntentFallback(userInput: string, history: any[] = []): 
  */
 export async function classifyIntent(userInput: string, client?: AIClient, history: any[] = []): Promise<IntentClassification> {
   const normalized = userInput.toLowerCase().trim();
-  
+
   // Check cache first for performance
   const cached = intentCache.get(userInput, history?.length);
   if (cached) {
     console.log('[IntentClassifier] Cache hit - using cached classification');
     return cached;
   }
-  
+
   // Quick context inheritance check for short affirmatives ONLY
   // This is the ONLY non-AI classification we allow
   if (isShortAffirmative(normalized) && history.length > 0) {
@@ -381,13 +381,13 @@ export async function classifyIntent(userInput: string, client?: AIClient, histo
         confidence: 0.95,
         reasoning: `Context inheritance: Short affirmative inheriting ${previousIntent} from previous message`
       };
-      
+
       // Cache the result
       intentCache.set(userInput, history?.length, result);
       return result;
     }
   }
-  
+
   // ALWAYS use AI agent for intent classification when available
   if (client) {
     try {
@@ -403,7 +403,7 @@ export async function classifyIntent(userInput: string, client?: AIClient, histo
       return classifyIntentFallback(userInput, history);
     }
   }
-  
+
   // Fallback when no AI client available (should be rare)
   console.warn('[IntentClassifier] No AI client available - using minimal fallback');
   const result = classifyIntentFallback(userInput, history);

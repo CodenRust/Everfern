@@ -55,6 +55,9 @@ exports.GraphState = langgraph_1.Annotation.Root({
     activeAgent: (0, langgraph_1.Annotation)(),
     validationResult: (0, langgraph_1.Annotation)(),
     shouldContinueIteration: (0, langgraph_1.Annotation)(),
+    // Completion signal — brain sets this before routing to judge
+    // to explain why it believes the mission should end
+    completionSignal: (0, langgraph_1.Annotation)(),
     // HITL Approval State
     hitlApprovalResult: (0, langgraph_1.Annotation)(),
     // Mission Tracking (OpenClaw style)

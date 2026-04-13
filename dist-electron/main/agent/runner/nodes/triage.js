@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createTriageNode = void 0;
 const triage_1 = require("../triage");
 const mission_integrator_1 = require("../mission-integrator");
+const task_decomposer_1 = require("../task-decomposer");
 const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
@@ -21,7 +22,21 @@ const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
             }).pop();
             const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : '';
             // Pass entire state.messages for context-aware classification
-            const classification = await (0, triage_1.classifyIntent)(content, runner.client, state.messages);
+            let classification;
+            try {
+                classification = await (0, triage_1.classifyIntent)(content, runner.client, state.messages);
+            }
+            catch (connErr) {
+                const msg = connErr instanceof Error ? connErr.message : String(connErr);
+                const isConnectionError = msg.includes('ECONNREFUSED') || msg.includes('fetch failed') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND');
+                if (isConnectionError) {
+                    console.warn('[Triage] AI provider unreachable, using fallback classification:', msg);
+                    classification = (0, triage_1.classifyIntentFallback)(content, state.messages);
+                }
+                else {
+                    throw connErr;
+                }
+            }
             runner.telemetry.info(`Intent identified: ${classification.intent.toUpperCase()} (${Math.round(classification.confidence * 100)}% confidence)`);
             if (classification.reasoning) {
                 runner.telemetry.info(`Classification logic: ${classification.reasoning}`);
@@ -33,9 +48,8 @@ const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
                 confidence: classification.confidence,
                 phase: 'triage'
             });
-            const { decomposeTask, getAGIHints } = require('../task-decomposer');
-            const decomposed = decomposeTask(content, []);
-            const agiHints = getAGIHints(content);
+            const decomposed = (0, task_decomposer_1.decomposeTask)(content, []);
+            const agiHints = (0, task_decomposer_1.getAGIHints)(content);
             runner.telemetry.info(`Graph expansion: ${decomposed.totalSteps} steps (Decomposition Mode: ${decomposed.executionMode})`);
             eventQueue?.push({
                 type: 'task_analyzed',

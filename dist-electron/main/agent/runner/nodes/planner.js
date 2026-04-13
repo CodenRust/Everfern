@@ -5,6 +5,7 @@ const task_decomposer_1 = require("../task-decomposer");
 const node_utils_1 = require("../services/node-utils");
 const messages_1 = require("@langchain/core/messages");
 const mission_integrator_1 = require("../mission-integrator");
+const triage_1 = require("../triage");
 /**
  * AI-based read-only intent detection
  * Replaces keyword-based intent checking with semantic analysis
@@ -38,12 +39,16 @@ Respond with JSON:
   "confidence": 0.0-1.0,
   "reasoning": "brief explanation"
 }`;
-        const response = await client.chat({
-            messages: [{ role: 'user', content: prompt }],
-            responseFormat: 'json',
-            temperature: 0.1,
-            maxTokens: 150
-        });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('isReadOnlyIntent timed out')), 3000));
+        const response = await Promise.race([
+            client.chat({
+                messages: [{ role: 'user', content: prompt }],
+                responseFormat: 'json',
+                temperature: 0.1,
+                maxTokens: 150
+            }),
+            timeoutPromise
+        ]);
         let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
         // Remove markdown code blocks if present
         content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -68,8 +73,22 @@ const createPlannerNode = (runner, eventQueue, missionTracker) => {
                 integrator.completeNode('planner', 'No task decomposition needed');
                 return { taskPhase: 'executing' };
             }
-            // Use AI to determine if task is read-only
-            const isReadOnly = await isReadOnlyIntent(state.currentIntent || 'unknown', runner.client);
+            // Fast-path: use synchronous heuristic for unambiguous intents
+            const intent = state.currentIntent || 'unknown';
+            const NON_READONLY_INTENTS = new Set(['coding', 'fix', 'build', 'task', 'automate', 'research', 'analyze']);
+            let isReadOnly;
+            if ((0, triage_1.isReadOnlyTask)(intent)) {
+                // Definitively read-only (conversation, question) — skip AI call
+                isReadOnly = true;
+            }
+            else if (NON_READONLY_INTENTS.has(intent)) {
+                // Definitively non-read-only — skip AI call
+                isReadOnly = false;
+            }
+            else {
+                // Ambiguous intent (e.g. 'unknown') — use AI
+                isReadOnly = await isReadOnlyIntent(intent, runner.client);
+            }
             if (isReadOnly) {
                 logger.info('Read-only task detected. Skipping execution pipeline compilation.');
                 integrator.completeNode('planner', 'Read-only task identified');

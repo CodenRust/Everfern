@@ -1,9 +1,10 @@
 import { START } from '@langchain/langgraph';
-import { GraphStateType, IntentType, StreamEvent } from '../state';
-import { classifyIntent } from '../triage';
+import { GraphStateType, IntentType, IntentClassification, StreamEvent } from '../state';
+import { classifyIntent, classifyIntentFallback } from '../triage';
 import { AgentRunner } from '../runner';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
+import { decomposeTask, getAGIHints } from '../task-decomposer';
 
 export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[], missionTracker?: MissionTracker, shouldAbort?: () => boolean) => {
   const integrator = createMissionIntegrator(missionTracker);
@@ -18,29 +19,40 @@ export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[]
       runner.telemetry.transition('triage');
       runner.telemetry.info('Analyzing user intent and decomposing task requirements...');
       eventQueue?.push({ type: 'thought', content: '🤖 Triage in progress: Analyzing intent and conversation context...' });
-      
+
       const lastUserMsg = state.messages.filter(m => {
         const msg = m as any;
         return msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human';
       }).pop();
       const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : '';
-      
+
       // Pass entire state.messages for context-aware classification
-      const classification = await classifyIntent(content, runner.client, state.messages);
+      let classification: IntentClassification;
+      try {
+        classification = await classifyIntent(content, runner.client, state.messages);
+      } catch (connErr) {
+        const msg = connErr instanceof Error ? connErr.message : String(connErr);
+        const isConnectionError = msg.includes('ECONNREFUSED') || msg.includes('fetch failed') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND');
+        if (isConnectionError) {
+          console.warn('[Triage] AI provider unreachable, using fallback classification:', msg);
+          classification = classifyIntentFallback(content, state.messages);
+        } else {
+          throw connErr;
+        }
+      }
       runner.telemetry.info(`Intent identified: ${classification.intent.toUpperCase()} (${Math.round(classification.confidence * 100)}% confidence)`);
       if (classification.reasoning) {
         runner.telemetry.info(`Classification logic: ${classification.reasoning}`);
         eventQueue?.push({ type: 'thought', content: `Intent Classification: ${classification.reasoning}` });
       }
-      
-      eventQueue?.push({ 
-        type: 'intent_classified', 
-        intent: classification.intent, 
+
+      eventQueue?.push({
+        type: 'intent_classified',
+        intent: classification.intent,
         confidence: classification.confidence,
         phase: 'triage'
       });
-      
-      const { decomposeTask, getAGIHints } = require('../task-decomposer');
+
       const decomposed = decomposeTask(content, []);
       const agiHints = getAGIHints(content);
       runner.telemetry.info(`Graph expansion: ${decomposed.totalSteps} steps (Decomposition Mode: ${decomposed.executionMode})`);

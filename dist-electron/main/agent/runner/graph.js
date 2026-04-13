@@ -41,6 +41,7 @@ const planner_1 = require("./nodes/planner");
 const execute_tools_1 = require("./nodes/execute_tools");
 const validation_1 = require("./nodes/validation");
 const brain_1 = require("./nodes/brain");
+const judge_1 = require("./nodes/judge");
 const state_manager_1 = require("./state-manager");
 const custom_checkpointer_1 = require("./custom-checkpointer");
 const hitl_1 = require("../../store/hitl");
@@ -48,8 +49,8 @@ const crypto = __importStar(require("crypto"));
 // Cache compiled graphs for better performance
 const graphCache = new Map();
 const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, missionTracker, shouldAbort) => {
-    // Create cache key based on runner configuration
-    const cacheKey = `graph_${runner.config?.maxIterations || 50}`;
+    // Create cache key based on runner configuration + graph version
+    const cacheKey = `graph_v2_${runner.config?.maxIterations || 50}`;
     // Return cached graph if available
     if (graphCache.has(cacheKey)) {
         console.log('\n╔════════════════════════════════════════════════════════════╗');
@@ -137,6 +138,7 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     };
     const orchestrator = (0, execute_tools_1.createExecuteToolsNode)(runner, tools, config, eventQueue, conversationId, missionTracker, shouldAbort, runner.client);
     const validator = (0, validation_1.createValidationNode)(runner, missionTracker);
+    const judge = (0, judge_1.createJudgeNode)(runner, eventQueue, missionTracker);
     console.log('\n┌─────────────────────────────────────────────────────────────┐');
     console.log('│  🧠 CORE NODES                                              │');
     console.log('├─────────────────────────────────────────────────────────────┤');
@@ -203,7 +205,8 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
         .addNode('brain', brain)
         .addNode('action_validation', validator)
         .addNode('hitl_approval', hitlNode)
-        .addNode('multi_tool_orchestrator', orchestrator);
+        .addNode('multi_tool_orchestrator', orchestrator)
+        .addNode('judge', judge);
     console.log('[Graph] ✅ Nodes added successfully');
     console.log('[Graph] 🔄 Adding edges...');
     compiledGraph
@@ -212,11 +215,12 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
         .addEdge('global_planner', 'brain')
         .addConditionalEdges('brain', (state) => {
         // Brain executes and produces tool calls if needed
+        // NEVER route directly to END — always pass through judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        return hasTools ? 'action_validation' : langgraph_1.END;
+        return hasTools ? 'action_validation' : 'judge';
     }, {
         action_validation: 'action_validation',
-        [langgraph_1.END]: langgraph_1.END
+        judge: 'judge',
     })
         .addConditionalEdges('action_validation', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
@@ -224,42 +228,43 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
         if (hasTools) {
             return state.validationResult?.isHighRisk ? 'hitl_approval' : 'multi_tool_orchestrator';
         }
-        // No tools - task complete
-        return langgraph_1.END;
+        // No tools — pass through judge
+        return 'judge';
     }, {
         hitl_approval: 'hitl_approval',
         multi_tool_orchestrator: 'multi_tool_orchestrator',
-        [langgraph_1.END]: langgraph_1.END
+        judge: 'judge',
     })
         .addConditionalEdges('hitl_approval', (state) => {
-        // Route based solely on approval decision
-        // If approved is undefined, we're still waiting for HITL - route to END to pause
-        // If approved is true, continue to execution
-        // If approved is false, end the mission
         const approved = state.hitlApprovalResult?.approved;
         if (approved === true) {
             return 'multi_tool_orchestrator';
         }
         else {
-            // For both false and undefined, route to END
-            // The difference is that undefined means "waiting for approval"
-            // while false means "approval denied"
             return langgraph_1.END;
         }
     }, {
         multi_tool_orchestrator: 'multi_tool_orchestrator',
         [langgraph_1.END]: langgraph_1.END
     })
-        .addEdge('multi_tool_orchestrator', 'brain');
+        .addEdge('multi_tool_orchestrator', 'brain')
+        .addConditionalEdges('judge', (state) => {
+        // Judge is the ONLY path to END
+        return state.shouldContinueIteration ? 'brain' : langgraph_1.END;
+    }, {
+        brain: 'brain',
+        [langgraph_1.END]: langgraph_1.END,
+    });
     console.log('[Graph] ✅ Cyclic graph structure created (brain ← execute_tools feedback loop)');
     console.log('[Graph] ✅ Edges added successfully');
     console.log('[Graph] 🔄 Compiling graph...');
     console.log('[Graph] ⏱️  Starting compilation...');
     console.log('[Graph] 📋 Edge Summary:');
     console.log('[Graph]    START → intent_classifier → global_planner → brain');
-    console.log('[Graph]    brain → [action_validation | END]');
-    console.log('[Graph]    action_validation → [hitl_approval | multi_tool_orchestrator | END]');
+    console.log('[Graph]    brain → [action_validation | judge]');
+    console.log('[Graph]    action_validation → [hitl_approval | multi_tool_orchestrator | judge]');
     console.log('[Graph]    hitl_approval → [multi_tool_orchestrator | END]');
+    console.log('[Graph]    judge → [brain (loop) | END]  ← ONLY path to END');
     console.log('[Graph]    multi_tool_orchestrator → brain (continues processing)');
     const compileStart = Date.now();
     let finalGraph;
@@ -288,7 +293,7 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     console.log('\n╔════════════════════════════════════════════════════════════╗');
     console.log('║  ✅ GRAPH COMPILED SUCCESSFULLY                            ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
-    console.log('║  Nodes: 6 | Edges: 8 | Cache: Enabled                     ║');
+    console.log('║  Nodes: 7 | Edges: 9 | Cache: Enabled                     ║');
     console.log('╚════════════════════════════════════════════════════════════╝\n');
     // Cache the compiled graph
     console.log('[Graph] 💾 Caching compiled graph...');

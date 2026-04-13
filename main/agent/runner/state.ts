@@ -68,27 +68,27 @@ export function hasThinkingDuration(event: StreamEvent): event is { type: 'missi
 // Validate thinking duration data
 export function isValidThinkingDuration(duration: ThinkingDuration | undefined): duration is ThinkingDuration {
   if (!duration) return false;
-  
+
   const { startTime, endTime, duration: durationMs } = duration;
-  
+
   // Validate required fields
   if (typeof startTime !== 'number' || startTime < 0) return false;
-  
+
   // If endTime is present, validate it
   if (endTime !== undefined) {
     if (typeof endTime !== 'number' || endTime < startTime) return false;
   }
-  
+
   // If duration is present, validate it
   if (durationMs !== undefined) {
     if (typeof durationMs !== 'number' || durationMs < 0) return false;
-    
+
     // If both endTime and startTime are present, duration should match
     if (endTime !== undefined && Math.abs(durationMs - (endTime - startTime)) > 1) {
       return false;
     }
   }
-  
+
   return true;
 }
 
@@ -113,6 +113,12 @@ export const GraphState = Annotation.Root({
     reasoning: string;
   }>(),
   shouldContinueIteration: Annotation<boolean>(),
+  // Completion signal — brain sets this before routing to judge
+  // to explain why it believes the mission should end
+  completionSignal: Annotation<{
+    reason: 'task_complete' | 'waiting_for_user_input' | 'needs_hitl' | 'cannot_proceed';
+    explanation: string;
+  } | null>(),
   // HITL Approval State
   hitlApprovalResult: Annotation<{
     approved: boolean;

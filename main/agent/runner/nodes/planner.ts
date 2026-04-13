@@ -7,6 +7,7 @@ import { SystemMessage } from '@langchain/core/messages';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 import type { AIClient } from '../../../lib/ai-client';
+import { isReadOnlyTask } from '../triage';
 
 /**
  * AI-based read-only intent detection
@@ -43,12 +44,18 @@ Respond with JSON:
   "reasoning": "brief explanation"
 }`;
 
-    const response = await client.chat({
-      messages: [{ role: 'user', content: prompt }],
-      responseFormat: 'json',
-      temperature: 0.1,
-      maxTokens: 150
-    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('isReadOnlyIntent timed out')), 3000)
+    );
+    const response = await Promise.race([
+      client.chat({
+        messages: [{ role: 'user', content: prompt }],
+        responseFormat: 'json',
+        temperature: 0.1,
+        maxTokens: 150
+      }),
+      timeoutPromise
+    ]) as any;
 
     let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
     // Remove markdown code blocks if present
@@ -70,20 +77,33 @@ export const createPlannerNode = (runner: AgentRunner, eventQueue?: StreamEvent[
     try {
       const logger = nodeLifecycle(runner, 'planner');
       logger.info('Compiling execution pipeline and integrating context hints...');
-      
+
       if (!state.decomposedTask) {
         logger.warn('Execution plan missing. Proceeding with direct model-driven logic.');
         integrator.completeNode('planner', 'No task decomposition needed');
         return { taskPhase: 'executing' };
       }
 
-      // Use AI to determine if task is read-only
-      const isReadOnly = await isReadOnlyIntent(state.currentIntent || 'unknown', runner.client);
+      // Fast-path: use synchronous heuristic for unambiguous intents
+      const intent = state.currentIntent || 'unknown';
+      const NON_READONLY_INTENTS = new Set(['coding', 'fix', 'build', 'task', 'automate', 'research', 'analyze']);
+
+      let isReadOnly: boolean;
+      if (isReadOnlyTask(intent as any)) {
+        // Definitively read-only (conversation, question) — skip AI call
+        isReadOnly = true;
+      } else if (NON_READONLY_INTENTS.has(intent)) {
+        // Definitively non-read-only — skip AI call
+        isReadOnly = false;
+      } else {
+        // Ambiguous intent (e.g. 'unknown') — use AI
+        isReadOnly = await isReadOnlyIntent(intent, runner.client);
+      }
 
       if (isReadOnly) {
         logger.info('Read-only task detected. Skipping execution pipeline compilation.');
         integrator.completeNode('planner', 'Read-only task identified');
-        return { 
+        return {
           taskPhase: 'executing',
           messages: [new SystemMessage("Proceed with responding to the user's request directly.")]
         };
@@ -92,17 +112,17 @@ export const createPlannerNode = (runner: AgentRunner, eventQueue?: StreamEvent[
       const planText = generatePlanText(state.decomposedTask);
       let agiHints = state.agiHints || '';
 
-      eventQueue?.push({ 
-        type: 'plan_created', 
-        plan: { 
-          id: state.decomposedTask.id, 
-          title: state.decomposedTask.title, 
+      eventQueue?.push({
+        type: 'plan_created',
+        plan: {
+          id: state.decomposedTask.id,
+          title: state.decomposedTask.title,
           steps: state.decomposedTask.steps.map((s: any) => ({
             id: s.id,
             description: s.description,
             tool: s.tool
           }))
-        } 
+        }
       });
 
       eventQueue?.push({ type: 'thought', content: `Compiling execution pipeline for: ${state.decomposedTask.title}` });
