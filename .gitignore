@@ -12,7 +12,9 @@
 .kiro/
 # testing
 /coverage
-
+Everfern-win32-x64/
+dist/
+*.exe
 # next.js
 /.next/
 /out/
