@@ -96,7 +96,7 @@ export class AgentRunner {
     if (!config) {
       return this.client;
     }
-    
+
     // Use pooled client for better performance
     return getPooledAIClient({
       provider: (config.provider || this.client.provider) as any,
@@ -113,7 +113,7 @@ export class AgentRunner {
     if (client === this.client) {
       return; // Don't release the main client
     }
-    
+
     releasePooledAIClient(client, {
       provider: (config.provider || this.client.provider) as any,
       model: config.model || this.client.model,
@@ -166,12 +166,12 @@ export class AgentRunner {
                       onUpdate?.(`[Sub-Agent] ✅ Finished tool: ${event.toolCall.toolName}`);
                   }
               }
-              return { 
-                response: lastResponse, 
-                toolCalls: toolCalls.map(tc => ({ 
-                  toolName: tc.toolName, 
-                  args: tc.args as Record<string, unknown> 
-                })) 
+              return {
+                response: lastResponse,
+                toolCalls: toolCalls.map(tc => ({
+                  toolName: tc.toolName,
+                  args: tc.args as Record<string, unknown>
+                }))
               };
             }
           });
@@ -244,16 +244,16 @@ export class AgentRunner {
     if (textInput.includes('[HITL_APPROVED]') || textInput.includes('[HITL_REJECTED]')) {
       const approved = textInput.includes('[HITL_APPROVED]');
       console.log(`[Runner] HITL response detected: ${approved ? 'APPROVED' : 'REJECTED'}`);
-      
+
       // Try to find the request ID from state manager
       const state = stateManager.getState(convId);
       const interruptData = stateManager.getInterruptData(convId);
-      
+
       if (interruptData && (interruptData as any).id) {
         const { saveHitlResponse } = await import('../../store/hitl');
         const responseId = crypto.randomUUID();
         const timestamp = new Date().toISOString();
-        
+
         saveHitlResponse({
           id: responseId,
           requestId: (interruptData as any).id,
@@ -262,7 +262,7 @@ export class AgentRunner {
           approved,
           response: textInput,
         });
-        
+
         console.log(`[Runner] HITL response saved: ${responseId} (${approved ? 'approved' : 'rejected'})`);
       } else {
         console.warn('[Runner] Could not find HITL request ID to save response');
@@ -272,11 +272,11 @@ export class AgentRunner {
     // Initialize mission tracker for timeline tracking
     const { createMissionTracker } = await import('./mission-tracker');
     const missionTracker = createMissionTracker(convId);
-    
+
     // Initialize duration tracker for thinking time tracking
     const { DurationTracker } = await import('./duration-tracker');
     const durationTracker = new DurationTracker();
-    
+
     // Add initial mission steps
     missionTracker.addStep({
       id: 'step:triage',
@@ -321,36 +321,36 @@ export class AgentRunner {
 
     this.telemetry.updateSpinner('Pre-loading system prompt...');
     const platform = os.platform();
-    
+
     // Ensure skills are loaded before building system prompt
     if (this.skills.length === 0) {
       console.log('[AgentRunner] Skills not yet loaded, loading now...');
       this.skills = await loadSkillsAsync();
     }
-    
+
     // Pre-load system prompt asynchronously with pre-loaded skills to avoid loading them twice
     const preloadedPrompt = await getSlimSystemPromptAsync(platform, conversationId, [], this.skills);
-    
+
     // Create eventQueue early so we can push status updates
     const eventQueue: StreamEvent[] = [];
-    
+
     // Skip boring internal messages - frontend shows LoadingBreadcrumb instead
     // These console logs are for debugging only
     this.telemetry.updateSpinner('Compiling system messages...');
     console.log('[AgentRunner] 🔄 Building system messages...');
-    
+
     const { messages: initialMessages } = buildSystemMessages(history, userInput, platform, conversationId, [], preloadedPrompt);
     console.log('[AgentRunner] ✅ System messages built');
-    
+
     await new Promise(resolve => setImmediate(resolve));
-    
+
     this.telemetry.updateSpinner('Building execution graph...');
     console.log('[AgentRunner] 🔄 Building execution graph...');
-    
+
     // Build graph asynchronously to avoid blocking the event loop
     const graph = await Promise.resolve().then(() => buildGraph(
-      this, 
-      this._buildToolDefinitions(), 
+      this,
+      this._buildToolDefinitions(),
       this.tools,
       eventQueue,
       convId,
@@ -358,12 +358,12 @@ export class AgentRunner {
       this.config.shouldAbort,
     ));
     console.log('[AgentRunner] ✅ Graph built successfully');
-    
+
     await new Promise(resolve => setImmediate(resolve));
 
     this.telemetry.updateSpinner('Starting agent...');
     console.log('[AgentRunner] 🚀 Starting agent execution...');
-    
+
     // Emit a fun status message
     yield { type: 'thought', content: '🎬 Let\'s do this!' };
 
@@ -403,19 +403,19 @@ export class AgentRunner {
       } catch (err) {
         console.error('[AgentRunner] Graph Error:', err);
         const errorMsg = err instanceof Error ? err.message : String(err);
-        
+
         // Specialized handling for rate limits
         if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit')) {
-          eventQueue.push({ 
-            type: 'chunk', 
-            content: `\n\n⚠️ **Rate Limit Reached**: The AI provider (Gemini) is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.` 
+          eventQueue.push({
+            type: 'chunk',
+            content: `\n\n⚠️ **Rate Limit Reached**: The AI provider (Gemini) is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.`
           });
           missionTracker.fail(errorMsg);
         } else {
           eventQueue.push({ type: 'chunk', content: `\n\n❌ **Error during execution:** ${errorMsg}` });
           missionTracker.fail(errorMsg);
         }
-        
+
         this.telemetry.warn(`Graph mission aborted: ${errorMsg}`);
         this.telemetry.terminate(false, errorMsg);
       } finally {
@@ -429,33 +429,37 @@ export class AgentRunner {
     while (!graphDone || eventQueue.length > 0) {
       if (eventQueue.length > 0) {
         const event = eventQueue.shift()!;
-        
+
         // Debug logging for HITL events
         if (event.type === 'hitl_request') {
           console.log('[Runner] Processing hitl_request event:', event);
         }
-        
+
         // Track when first thought event occurs
         if (event.type === 'thought') {
           durationTracker.onThoughtStart();
         }
-        
+
         yield event;
       } else {
         await new Promise(r => setTimeout(r, 10));
       }
     }
 
-    // Now mark mission as complete after all events have been drained
+    // Ensure judge evaluation completes before marking mission as complete
+    // Add a small delay to ensure all judge processing is finished
+    await new Promise(r => setTimeout(r, 50));
+
+    // Now mark mission as complete after all events have been drained and judge is done
     if (!missionTracker.getTimeline().isComplete && !missionTracker.getTimeline().error) {
       missionTracker.complete();
     }
 
     this.telemetry.terminate(true);
-    
+
     // Calculate thinking duration
     const thinkingDuration = durationTracker.onMissionComplete();
-    
+
     // Emit final mission completion event with thinking duration
     yield {
       type: 'mission_complete',
@@ -463,10 +467,10 @@ export class AgentRunner {
       steps: missionTracker.getSteps(),
       thinkingDuration,
     };
-    
+
     // Reset duration tracker for next mission
     durationTracker.reset();
-    
+
     yield { type: 'done' };
   }
 }

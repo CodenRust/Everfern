@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 // ── HITL Approval Form Component ────────────────────────────────────────────
 const HitlApprovalForm = ({
@@ -18,6 +18,21 @@ const HitlApprovalForm = ({
     onApprove: () => void;
     onReject: () => void;
 }) => {
+    const [followUpQuestion, setFollowUpQuestion] = useState('');
+    const [showFollowUpInput, setShowFollowUpInput] = useState(false);
+
+    const handleAskQuestion = () => {
+        if (followUpQuestion.trim()) {
+            // Send follow-up question to the agent
+            const event = new CustomEvent('hitl-follow-up', {
+                detail: { question: followUpQuestion }
+            });
+            window.dispatchEvent(event);
+            setFollowUpQuestion('');
+            setShowFollowUpInput(false);
+        }
+    };
+
     return (
         <div style={{
             backgroundColor: '#fff3cd',
@@ -64,53 +79,139 @@ const HitlApprovalForm = ({
                 <div><strong>Reason:</strong> {request.details.reasoning}</div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+            {showFollowUpInput && (
+                <div style={{
+                    backgroundColor: '#f0f4f8',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    padding: 12,
+                    marginBottom: 16
+                }}>
+                    <textarea
+                        value={followUpQuestion}
+                        onChange={(e) => setFollowUpQuestion(e.target.value)}
+                        placeholder="Ask a follow-up question..."
+                        style={{
+                            width: '100%',
+                            minHeight: 60,
+                            padding: 8,
+                            borderRadius: 6,
+                            border: '1px solid #d1d5db',
+                            fontSize: 13,
+                            fontFamily: 'inherit',
+                            resize: 'vertical'
+                        }}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }}>
+                        <button
+                            onClick={() => {
+                                setShowFollowUpInput(false);
+                                setFollowUpQuestion('');
+                            }}
+                            style={{
+                                padding: '8px 16px',
+                                borderRadius: 6,
+                                border: '1px solid #d1d5db',
+                                backgroundColor: '#ffffff',
+                                color: '#374151',
+                                fontSize: 13,
+                                fontWeight: 500,
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleAskQuestion}
+                            disabled={!followUpQuestion.trim()}
+                            style={{
+                                padding: '8px 16px',
+                                borderRadius: 6,
+                                border: 'none',
+                                backgroundColor: followUpQuestion.trim() ? '#6366f1' : '#d1d5db',
+                                color: '#ffffff',
+                                fontSize: 13,
+                                fontWeight: 600,
+                                cursor: followUpQuestion.trim() ? 'pointer' : 'not-allowed'
+                            }}
+                        >
+                            Ask Question
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 <button
-                    onClick={onReject}
+                    onClick={() => setShowFollowUpInput(!showFollowUpInput)}
                     style={{
-                        padding: '10px 20px',
+                        padding: '10px 16px',
                         borderRadius: 8,
-                        border: '1px solid #dc3545',
+                        border: '1px solid #6366f1',
                         backgroundColor: '#ffffff',
-                        color: '#dc3545',
+                        color: '#6366f1',
                         fontSize: 14,
                         fontWeight: 600,
                         cursor: 'pointer',
                         transition: 'all 0.2s'
                     }}
                     onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = '#dc3545';
-                        e.currentTarget.style.color = '#ffffff';
+                        e.currentTarget.style.backgroundColor = '#f0f9ff';
                     }}
                     onMouseLeave={e => {
                         e.currentTarget.style.backgroundColor = '#ffffff';
-                        e.currentTarget.style.color = '#dc3545';
                     }}
                 >
-                    Reject
+                    {showFollowUpInput ? 'Cancel' : 'Ask Question'}
                 </button>
-                <button
-                    onClick={onApprove}
-                    style={{
-                        padding: '10px 20px',
-                        borderRadius: 8,
-                        border: 'none',
-                        backgroundColor: '#28a745',
-                        color: '#ffffff',
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = '#218838';
-                    }}
-                    onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = '#28a745';
-                    }}
-                >
-                    Approve
-                </button>
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button
+                        onClick={onReject}
+                        style={{
+                            padding: '10px 20px',
+                            borderRadius: 8,
+                            border: '1px solid #dc3545',
+                            backgroundColor: '#ffffff',
+                            color: '#dc3545',
+                            fontSize: 14,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={e => {
+                            e.currentTarget.style.backgroundColor = '#dc3545';
+                            e.currentTarget.style.color = '#ffffff';
+                        }}
+                        onMouseLeave={e => {
+                            e.currentTarget.style.backgroundColor = '#ffffff';
+                            e.currentTarget.style.color = '#dc3545';
+                        }}
+                    >
+                        Reject
+                    </button>
+                    <button
+                        onClick={onApprove}
+                        style={{
+                            padding: '10px 20px',
+                            borderRadius: 8,
+                            border: 'none',
+                            backgroundColor: '#28a745',
+                            color: '#ffffff',
+                            fontSize: 14,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={e => {
+                            e.currentTarget.style.backgroundColor = '#218838';
+                        }}
+                        onMouseLeave={e => {
+                            e.currentTarget.style.backgroundColor = '#28a745';
+                        }}
+                    >
+                        Approve
+                    </button>
+                </div>
             </div>
         </div>
     );

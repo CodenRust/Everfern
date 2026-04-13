@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import { Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
 
 interface VoiceAssistantUIProps {
     isOpen: boolean;
@@ -194,17 +195,7 @@ export default function VoiceAssistantUI({
                                                 alignItems: 'center',
                                                 gap: 8,
                                             }}>
-                                                <motion.div
-                                                    animate={{ rotate: 360 }}
-                                                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                                                    style={{
-                                                        width: 12,
-                                                        height: 12,
-                                                        borderRadius: '50%',
-                                                        borderTop: '2px solid #a1a1aa',
-                                                        borderRight: '2px solid transparent',
-                                                    }}
-                                                />
+                                                <Loader size={12} strokeWidth={2} className="text-zinc-400" />
                                                 <span style={{ fontSize: 16, color: '#111111', fontWeight: 500 }}>
                                                     Transcribing...
                                                 </span>

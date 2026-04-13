@@ -15,6 +15,12 @@ export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[]
     }
 
     integrator.startNode('triage', 'Analyzing user intent and decomposing task');
+
+    // Emit phase change event for triage phase
+    if (missionTracker) {
+      missionTracker.setPhase('triage');
+    }
+
     try {
       runner.telemetry.transition('triage');
       runner.telemetry.info('Analyzing user intent and decomposing task requirements...');

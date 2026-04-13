@@ -17,6 +17,7 @@ import type { ToolCallDisplay } from '../types';
 import { MarkdownRenderer } from './MarkdownComponents';
 import { DiffViewer } from '@/components/diff-viewer';
 import { SyntaxHighlighter } from '../ArtifactsPanel';
+import { Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
 
 // ── Tool Call Tag Component ──────────────────────────────────────────────────
 const ToolCallTag = ({ tc, isLast }: { tc: ToolCallDisplay; isLast?: boolean }) => {
@@ -43,7 +44,7 @@ const ToolCallTag = ({ tc, isLast }: { tc: ToolCallDisplay; isLast?: boolean }) 
                     border: looksLikeTerminal ? '1.5px solid rgba(99,102,241,0.2)' : running ? '1.5px solid rgba(0,0,0,0.1)' : errored ? '1.5px solid rgba(239,68,68,0.2)' : '1.5px solid rgba(34,197,94,0.2)',
                 }}>
                     {running ? (
-                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} style={{ width: 8, height: 8, borderRadius: '50%', border: '1.5px solid transparent', borderTopColor: '#717171' }} />
+                        <Loader size={8} strokeWidth={2} className="text-zinc-500" />
                     ) : errored ? (
                         <XMarkIcon width={10} height={10} color="#ef4444" strokeWidth={3} />
                     ) : looksLikeTerminal ? (
@@ -244,11 +245,7 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
     }, [hasSearchPills, hasOutput]);
 
     const statusIcon = isRunning ? (
-        <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-            style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #e5e7eb', borderTopColor: '#10b981', flexShrink: 0, backgroundColor: '#ffffff' }}
-        />
+        <Loader size={14} strokeWidth={2} className="text-emerald-500" />
     ) : isError ? (
         <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3">

@@ -426,8 +426,7 @@ export const ReasoningPane = ({
                                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                             }}>
                                                 {tc.status === 'running' ? (
-                                                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
-                                                        style={{ width: 4, height: 4, borderRadius: '50%', border: '1px solid transparent', borderTopColor: '#9ca3af' }} />
+                                                    <Loader size={4} strokeWidth={1.5} className="text-zinc-400" />
                                                 ) : tc.status === 'error' ? (
                                                     <XMarkIcon width={5} height={5} color="#ef4444" strokeWidth={3} />
                                                 ) : (

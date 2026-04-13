@@ -36,6 +36,8 @@ import { CheckIcon as CheckSolidIcon } from "@heroicons/react/24/solid";
 
 // Components
 import { AgentTimeline } from "../../components/AgentTimeline";
+import MissionTimelineComponent from "../../components/MissionTimeline";
+import type { MissionTimeline as MissionTimelineType } from "../../components/MissionTimeline";
 import StreamView from "../../components/StreamView";
 import WindowControls from "../components/WindowControls";
 import Sidebar from "../components/Sidebar";
@@ -199,25 +201,42 @@ export default function ChatPage() {
 
     // Current node tracking for better status display
     const [currentNode, setCurrentNode] = useState<string>("");
+    const [currentPhase, setCurrentPhase] = useState<"triage" | "planning" | "execution" | "validation" | "completion" | undefined>(undefined);
 
-    // Get user-friendly node names
+    // Get user-friendly node names with enhanced phase context
     const getNodeDisplayName = (nodeName: string): string => {
         const nodeNames: Record<string, string> = {
+            // Triage phase nodes
             'intent_classifier': 'Understanding your request',
-            'global_planner': 'Planning approach',
-            'brain': 'Using brain',
-            'action_validation': 'Validating actions',
-            'hitl_approval': 'Waiting for approval',
-            'multi_tool_orchestrator': 'Executing tools',
+            'triage': 'Analyzing request complexity',
+
+            // Planning phase nodes
+            'global_planner': 'Creating execution plan',
+            'planner': 'Compiling execution pipeline',
+            'planning': 'Designing approach',
+
+            // Execution phase nodes
+            'brain': 'Processing with AI',
+            'multi_tool_orchestrator': 'Coordinating tools',
             'execute_tools': 'Running tools',
+            'execution': 'Executing plan',
             'VALIDATION': 'Validating approach',
             'EXECUTE_TOOLS': 'Running tools',
-            'BRAIN': 'Using brain'
+            'BRAIN': 'Processing with AI',
+
+            // Validation phase nodes
+            'action_validation': 'Validating actions',
+            'judge': 'Evaluating completion',
+            'validation': 'Validating results',
+
+            // Completion phase nodes
+            'completion': 'Finalizing results',
+            'hitl_approval': 'Waiting for approval'
         };
-        return nodeNames[nodeName] || 'Working';
+        return nodeNames[nodeName] || (nodeName ? `Working on ${nodeName.replace(/_/g, ' ')}` : 'Working');
     };
     const [modelCallInfo, setModelCallInfo] = useState<{ model: string; toolsCount: number } | null>(null);
-    // const [missionTimeline, setMissionTimeline] = useState<MissionTimelineType | null>(null);
+    const [missionTimeline, setMissionTimeline] = useState<MissionTimelineType | null>(null);
     const [missionComplete, setMissionComplete] = useState(false);
 
     // Settings
@@ -592,11 +611,16 @@ export default function ChatPage() {
         setLiveToolCalls([]);
         setStreamingContent("");
         setStreamingThought("");
+        setMissionTimeline(null);
+        setMissionComplete(false);
+        setCurrentNode("");
 
         // Clear any active user question when starting a new request
         setActiveUserQuestion(null);
         setQuestionFormValues([]);
         setCurrentNode("");
+        setMissionTimeline(null);
+        setMissionComplete(false);
         hasReceivedUsageData.current = false;
         isMessageCommittedRef.current = false;
         isHandlingPlanRef.current = false;
@@ -771,32 +795,33 @@ export default function ChatPage() {
                 }
             });
 
-            // Listen to mission timeline updates - DISABLED per user request
-            /*
+            // Listen to mission timeline updates
             acpApi.onMissionStepUpdate(({ step, timeline }: { step: any; timeline: MissionTimelineType }) => {
+                console.log('[Mission] Step update received:', step?.name, step?.status);
                 setMissionTimeline(timeline);
+
                 // Update current node based on the latest step
                 if (step && step.name) {
                     setCurrentNode(step.name);
                 }
             });
-            */
 
-            /*
             acpApi.onMissionPhaseChange(({ phase, timeline }: { phase: string; timeline: MissionTimelineType }) => {
+                console.log('[Mission] Phase change received:', phase);
                 setMissionTimeline(timeline);
-                // Update current node based on phase
+
+                // Update current phase and node based on phase
+                setCurrentPhase(phase as "triage" | "planning" | "execution" | "validation" | "completion");
                 setCurrentNode(phase);
             });
-            */
 
-            /*
             acpApi.onMissionComplete(({ timeline, steps, thinkingDuration }: { timeline: MissionTimelineType; steps: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
+                console.log('[Mission] Mission complete received');
                 setMissionTimeline(timeline);
                 setMissionComplete(true);
                 acpApi.removeStreamListeners();
                 isMessageCommittedRef.current = true;
-            */
+            });
 
             // Simplified mission complete handler without timeline
             acpApi.onMissionComplete(({ thinkingDuration }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
@@ -1015,6 +1040,9 @@ export default function ChatPage() {
         setLiveToolCalls([]);
         setStreamingContent("");
         setStreamingThought("");
+        setMissionTimeline(null);
+        setMissionComplete(false);
+        setCurrentNode("");
         liveToolCallsRef.current = [];
         streamingContentRef.current = "";
         streamingThoughtRef.current = "";
@@ -2103,6 +2131,8 @@ export default function ChatPage() {
                                                                 toolCalls={msg.toolCalls?.filter(tc => tc.toolName !== 'write' && tc.toolName !== 'write_to_file' && tc.toolName !== 'write_file') || []}
                                                                 thought={msg.thought}
                                                                 isLive={false}
+                                                                currentPhase={currentPhase}
+                                                                currentNode={currentNode}
                                                             />
                                                             {(() => {
                                                                 const { cleanContent, artifacts } = extractFileArtifacts(msg.content || '');
@@ -2156,6 +2186,8 @@ export default function ChatPage() {
                                                     toolCalls={liveToolCalls}
                                                     thought={streamingThought}
                                                     isLive={true}
+                                                    currentPhase={currentPhase}
+                                                    currentNode={currentNode}
                                                 />
                                                 {activeSurface && (
                                                     <SurfaceCanvas data={activeSurface} />
@@ -2201,8 +2233,8 @@ export default function ChatPage() {
                                     )}
                                     <div ref={messagesEndRef} />
 
-                                    {/* Mission Timeline Display - DISABLED per user request */}
-                                    {/* {missionTimeline && isLoading && (
+                                    {/* Mission Timeline Display */}
+                                    {missionTimeline && isLoading && (
                                         <motion.div
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}
@@ -2218,7 +2250,7 @@ export default function ChatPage() {
                                                 />
                                             </ErrorBoundary>
                                         </motion.div>
-                                    )} */}
+                                    )}
                                 </div>
                             </div>
 
@@ -2231,7 +2263,7 @@ export default function ChatPage() {
                                                 <div style={{ width: "100%", background: "#161615", border: "1px solid rgba(255, 255, 255, 0.12)", borderBottom: "none", borderRadius: "20px 20px 0 0", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
                                                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                                                         <div style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: showPermissionModal ? "rgba(251, 191, 36, 0.15)" : "rgba(255, 255, 255, 0.05)", border: showPermissionModal ? "1px solid rgba(251, 191, 36, 0.3)" : "1px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                                            {showPermissionModal ? <span style={{ fontSize: 16 }}>🔒</span> : <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }} style={{ width: 14, height: 14, borderRadius: '50%', border: "2px solid rgba(255, 255, 255, 0.2)", borderTopColor: "#e5e5e5" }} />}
+                                                            {showPermissionModal ? <span style={{ fontSize: 16 }}>🔒</span> : <Loader size={14} strokeWidth={2} className="text-zinc-300" />}
                                                         </div>
                                                         <div>
                                                             <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{showPermissionModal ? "Fern needs permission to access your system files" : "EverFern is controlling your PC"}</div>

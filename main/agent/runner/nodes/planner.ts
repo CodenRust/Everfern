@@ -45,7 +45,7 @@ Respond with JSON:
 }`;
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('isReadOnlyIntent timed out')), 3000)
+      setTimeout(() => reject(new Error('isReadOnlyIntent timed out')), 10000)
     );
     const response = await Promise.race([
       client.chat({
@@ -74,6 +74,12 @@ export const createPlannerNode = (runner: AgentRunner, eventQueue?: StreamEvent[
   const integrator = createMissionIntegrator(missionTracker);
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
     integrator.startNode('planner', 'Compiling execution pipeline');
+
+    // Emit phase change event for planning phase
+    if (missionTracker) {
+      missionTracker.setPhase('planning');
+    }
+
     try {
       const logger = nodeLifecycle(runner, 'planner');
       logger.info('Compiling execution pipeline and integrating context hints...');

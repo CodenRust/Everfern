@@ -16,6 +16,7 @@ import {
     ServerIcon,
 } from '@heroicons/react/24/outline';
 import Image from 'next/image';
+import { Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
 
 // ── No inline logos — using Image imports instead ─────────────────────────────────────────
 
@@ -1042,11 +1043,7 @@ export default function SettingsPage({
                     >
                         {toastState === 'saving' && (
                             <>
-                                <motion.div
-                                    animate={{ rotate: 360 }}
-                                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                                    style={{ width: 16, height: 16, border: '2px solid #ffffff', borderTopColor: 'transparent', borderRadius: '50%' }}
-                                />
+                                <Loader size={16} strokeWidth={2} className="text-white" />
                                 Saving settings...
                             </>
                         )}

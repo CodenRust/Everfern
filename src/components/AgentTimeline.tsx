@@ -2,13 +2,8 @@
 
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDownIcon, LoaderIcon } from "lucide-react";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { BrainIcon } from "lucide-react";
+import { ChevronDownIcon, LoaderIcon, BrainIcon } from "lucide-react";
+import { LoadingBreadcrumb } from "@/components/ui/animated-loading-svg-text-shimmer";
 
 export interface ToolCallDisplay {
     id: string;
@@ -24,6 +19,7 @@ export interface ToolCallDisplay {
     args?: Record<string, unknown>;
     displayName?: string;
     description?: string;
+    phase?: "triage" | "planning" | "execution" | "validation" | "completion";
 }
 
 interface AgentTimelineProps {
@@ -31,6 +27,8 @@ interface AgentTimelineProps {
     thought?: string;
     isLive?: boolean;
     showOutput?: boolean;
+    currentPhase?: "triage" | "planning" | "execution" | "validation" | "completion";
+    currentNode?: string;
 }
 
 const formatDuration = (ms: number): string => {
@@ -38,25 +36,117 @@ const formatDuration = (ms: number): string => {
     return `${(ms / 1000).toFixed(1)}s`;
 };
 
-const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast }: {
+// Phase colors and indicators for better visual distinction
+const phaseColors: Record<string, { bg: string; border: string; text: string; icon: string }> = {
+    triage: { bg: "rgba(139, 92, 246, 0.1)", border: "#8b5cf6", text: "#a855f7", icon: "🔍" },
+    planning: { bg: "rgba(59, 130, 246, 0.1)", border: "#3b82f6", text: "#3b82f6", icon: "📋" },
+    execution: { bg: "rgba(16, 185, 129, 0.1)", border: "#10b981", text: "#10b981", icon: "⚡" },
+    validation: { bg: "rgba(245, 158, 11, 0.1)", border: "#f59e0b", text: "#f59e0b", icon: "✓" },
+    completion: { bg: "rgba(34, 197, 94, 0.1)", border: "#22c55e", text: "#22c55e", icon: "🎯" }
+};
+
+// Enhanced node display names with phase context
+const getEnhancedNodeDisplayName = (nodeName: string, phase?: string): string => {
+    const nodeNames: Record<string, string> = {
+        // Triage phase nodes
+        'intent_classifier': 'Understanding your request',
+        'triage': 'Analyzing request complexity',
+
+        // Planning phase nodes
+        'global_planner': 'Creating execution plan',
+        'planner': 'Compiling execution pipeline',
+        'planning': 'Designing approach',
+
+        // Execution phase nodes
+        'brain': 'Processing with AI',
+        'multi_tool_orchestrator': 'Coordinating tools',
+        'execute_tools': 'Running tools',
+        'execution': 'Executing plan',
+
+        // Validation phase nodes
+        'action_validation': 'Validating actions',
+        'judge': 'Evaluating completion',
+        'validation': 'Validating results',
+
+        // Completion phase nodes
+        'completion': 'Finalizing results',
+        'hitl_approval': 'Waiting for approval'
+    };
+
+    const displayName = nodeNames[nodeName];
+    if (displayName) return displayName;
+
+    // Add phase context to unknown nodes
+    if (phase && nodeName) {
+        const phasePrefix = phase.charAt(0).toUpperCase() + phase.slice(1);
+        return `${phasePrefix}: ${nodeName.replace(/_/g, ' ')}`;
+    }
+
+    return nodeName ? `Working on ${nodeName.replace(/_/g, ' ')}` : 'Working';
+};
+
+// Phase Indicator Component
+const PhaseIndicator = ({ phase, currentNode }: { phase?: string; currentNode?: string }) => {
+    if (!phase) return null;
+
+    const phaseInfo = phaseColors[phase];
+    if (!phaseInfo) return null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex items-center gap-2 mb-3 p-2 rounded-lg"
+            style={{
+                backgroundColor: phaseInfo.bg,
+                border: `1px solid ${phaseInfo.border}20`
+            }}
+        >
+            <span className="text-sm">{phaseInfo.icon}</span>
+            <div className="flex-1">
+                <div className="text-xs font-medium" style={{ color: phaseInfo.text }}>
+                    {phase.charAt(0).toUpperCase() + phase.slice(1)} Phase
+                </div>
+                {currentNode && (
+                    <div className="text-xs opacity-75" style={{ color: phaseInfo.text }}>
+                        {getEnhancedNodeDisplayName(currentNode, phase)}
+                    </div>
+                )}
+            </div>
+            <motion.div
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: phaseInfo.border }}
+            />
+        </motion.div>
+    );
+};
+
+const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast, currentPhase }: {
     tc: ToolCallDisplay;
     isExpanded: boolean;
     onToggle: () => void;
     isFirst: boolean;
     isLast: boolean;
+    currentPhase?: string;
 }) => {
     const isRunning = tc.status === "running";
     const isError = tc.status === "error";
     const isTerminal = tc.toolName === "run_command" || tc.toolName === "bash";
     const hasOutput = !!tc.output && !isRunning;
 
+    // Use phase-specific colors if available
+    const toolPhase = tc.phase || currentPhase;
+    const phaseInfo = toolPhase ? phaseColors[toolPhase] : null;
+
     const statusColor = isRunning
-        ? { dot: "#6b7280", line: "#d1d5db" }
+        ? { dot: phaseInfo?.border || "#6b7280", line: "#d1d5db" }
         : isError
             ? { dot: "#ef4444", line: "#fecaca" }
             : isTerminal
                 ? { dot: "#6366f1", line: "#c7d2fe" }
-                : { dot: "#22c55e", line: "#bbf7d0" };
+                : { dot: phaseInfo?.border || "#22c55e", line: "#bbf7d0" };
 
     return (
         <motion.div
@@ -116,6 +206,21 @@ const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast }: {
                     }}
                 >
                     <div style={{ width: 12, height: 1, backgroundColor: "#e5e7eb", marginLeft: -12, zIndex: 1 }} />
+
+                    {/* Phase indicator for tool */}
+                    {toolPhase && phaseInfo && (
+                        <span
+                            className="text-xs px-1.5 py-0.5 rounded"
+                            style={{
+                                backgroundColor: phaseInfo.bg,
+                                color: phaseInfo.text,
+                                border: `1px solid ${phaseInfo.border}30`
+                            }}
+                        >
+                            {phaseInfo.icon}
+                        </span>
+                    )}
+
                     <span style={{
                         fontSize: 13,
                         fontWeight: 500,
@@ -175,10 +280,8 @@ const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast }: {
     );
 };
 
-export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true }: AgentTimelineProps) => {
+export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, currentPhase, currentNode }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
-    const [toolsOpen, setToolsOpen] = useState(true);
-    const [reasoningOpen, setReasoningOpen] = useState(isLive);
 
     const nonWriteToolCalls = useMemo(
         () => toolCalls.filter((tc) => tc.toolName !== "write" && tc.toolName !== "write_file"),
@@ -189,7 +292,7 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true }:
         setExpandedToolId((prev) => (prev === id ? null : id));
     };
 
-    if (!isLive && nonWriteToolCalls.length === 0 && !thought?.trim()) return null;
+    if (!isLive && nonWriteToolCalls.length === 0 && !thought?.trim() && !currentPhase) return null;
 
     const runningCount = toolCalls.filter((t) => t.status === "running").length;
     const hasRunning = runningCount > 0 || isLive;
@@ -200,27 +303,21 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true }:
             animate={{ opacity: 1, y: 0 }}
             style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 4 }}
         >
+            {/* Phase Indicator */}
+            <PhaseIndicator phase={currentPhase} currentNode={currentNode} />
+
             {thought && (
                 <div style={{ padding: '0 8px 8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        {isLive ? (
-                            <span style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                                {[0, 0.15, 0.3].map((delay, i) => (
-                                    <motion.span
-                                        key={i}
-                                        animate={{ opacity: [0.3, 1, 0.3] }}
-                                        transition={{ repeat: Infinity, duration: 1.2, delay, ease: 'easeInOut' }}
-                                        style={{ display: 'block', width: 4, height: 4, borderRadius: '50%', backgroundColor: '#9ca3af' }}
-                                    />
-                                ))}
-                            </span>
-                        ) : (
+                    {isLive ? (
+                        <LoadingBreadcrumb text="Thinking" className="mb-2" />
+                    ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                             <BrainIcon width={14} height={14} className="text-zinc-400" />
-                        )}
-                        <span style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic', fontWeight: 500 }}>
-                            {isLive ? 'Thinking...' : 'Reasoning'}
-                        </span>
-                    </div>
+                            <span style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic', fontWeight: 500 }}>
+                                Reasoning
+                            </span>
+                        </div>
+                    )}
                     <div style={{ fontSize: 13.5, color: '#4b5563', whiteSpace: 'pre-wrap', lineHeight: 1.7, borderLeft: '2px solid #e5e7eb', paddingLeft: 12, marginLeft: 6 }}>
                         {thought}
                         {isLive && (
@@ -244,12 +341,13 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true }:
                             onToggle={() => toggleTool(tc.id)}
                             isFirst={idx === 0}
                             isLast={idx === nonWriteToolCalls.length - 1}
+                            currentPhase={currentPhase}
                         />
                     ))}
                 </div>
             )}
 
-            {hasRunning && nonWriteToolCalls.length === 0 && (
+            {hasRunning && nonWriteToolCalls.length === 0 && !currentPhase && (
                 <div style={{ padding: "12px 0", textAlign: "center" }}>
                     <span style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>
                         Initializing...

@@ -1,4 +1,4 @@
-import { GraphStateType, StreamEvent } from '../state';
+    import { GraphStateType, StreamEvent } from '../state';
 import { AgentRunner } from '../runner';
 import { ToolDefinition } from '../../../lib/ai-client';
 import { runAgentStep } from '../services/agent-runtime';
@@ -19,7 +19,10 @@ async function buildCompletionSignal(
   responseContent: string,
   originalRequest: string,
 ): Promise<{ reason: CompletionReason; explanation: string } | null> {
-  if (!runner.client) return null;
+  if (!runner.client) {
+    console.warn('[Brain] No client available for completion signal');
+    return null;
+  }
 
   try {
     const prompt = `You just produced a response to a user request. Classify why you are done for this turn.
@@ -39,8 +42,11 @@ Respond with JSON only:
   "explanation": "one sentence explaining why"
 }`;
 
+    console.log('[Brain] Building completion signal...');
+    const startTime = Date.now();
+
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('completion signal timed out')), 3000)
+      setTimeout(() => reject(new Error('completion signal timed out')), 15000)
     );
 
     const response = await Promise.race([
@@ -53,15 +59,32 @@ Respond with JSON only:
       timeoutPromise,
     ]) as any;
 
+    const duration = Date.now() - startTime;
+    console.log(`[Brain] Completion signal response received in ${duration}ms`);
+
     let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const signal = JSON.parse(content);
+
+    let signal;
+    try {
+      signal = JSON.parse(content);
+    } catch (parseError) {
+      console.warn('[Brain] Failed to parse completion signal JSON:', content);
+      return null;
+    }
 
     const validReasons: CompletionReason[] = ['task_complete', 'waiting_for_user_input', 'needs_hitl', 'cannot_proceed'];
-    if (!validReasons.includes(signal.reason)) return null;
+    if (!validReasons.includes(signal.reason)) {
+      console.warn('[Brain] Invalid completion signal reason:', signal.reason);
+      return null;
+    }
 
+    console.log(`[Brain] Completion signal built successfully: ${signal.reason}`);
     return { reason: signal.reason as CompletionReason, explanation: String(signal.explanation || '') };
-  } catch {
+  } catch (error) {
+    // Log the specific error for debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn('[Brain] Completion signal failed:', errorMessage);
     return null;
   }
 }
@@ -83,6 +106,11 @@ export const createBrainNode = (
 
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
     const tools = toolDefs || (runner as any)._buildToolDefinitions();
+
+    // Emit phase change event for execution phase (only on first brain call)
+    if (missionTracker && state.iterations === 0) {
+      missionTracker.setPhase('execution');
+    }
 
     const result = await integrator.wrapNode(
       'brain',
@@ -126,6 +154,9 @@ export const createBrainNode = (
     if (signal) {
       runner.telemetry.info(`Brain completion signal: ${signal.reason} — ${signal.explanation}`);
       eventQueue?.push({ type: 'thought', content: `🧠 Brain: ${signal.reason} — ${signal.explanation}` });
+    } else {
+      runner.telemetry.warn('Brain completion signal failed — judge will use fallback');
+      eventQueue?.push({ type: 'thought', content: '🧠 Brain: completion signal failed, judge will evaluate' });
     }
 
     return { ...result, completionSignal: signal };
