@@ -34,7 +34,7 @@ Respond with JSON only:
 }`;
         console.log('[Brain] Building completion signal...');
         const startTime = Date.now();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('completion signal timed out')), 15000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('completion signal timed out')), 5000));
         const response = await Promise.race([
             runner.client.chat({
                 messages: [{ role: 'user', content: prompt }],
@@ -61,7 +61,7 @@ Respond with JSON only:
             console.warn('[Brain] Invalid completion signal reason:', signal.reason);
             return null;
         }
-        console.log(`[Brain] Completion signal built successfully: ${signal.reason}`);
+        console.log(`[Brain] Completion signal built successfully in ${duration}ms: ${signal.reason}`);
         return { reason: signal.reason, explanation: String(signal.explanation || '') };
     }
     catch (error) {

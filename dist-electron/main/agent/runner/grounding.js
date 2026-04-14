@@ -31,14 +31,18 @@
  * 11. SELF-HEALING       — Failed backends recover after 60 s.
  * 12. COORD GUARD        — Rejects hallucinated top-left corner + out-of-range.
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GroundingEngine = void 0;
 const electron_1 = require("electron");
 const showui_server_1 = require("./showui-server");
-const sharp_1 = __importDefault(require("sharp"));
+// sharp is an optional native module — load lazily so a missing binary doesn't crash startup
+let sharp = null;
+try {
+    sharp = require('sharp');
+}
+catch {
+    console.warn('[Grounding] sharp unavailable — image processing disabled');
+}
 // ── Constants ────────────────────────────────────────────────────────────────
 const CONFIDENCE_THRESHOLD = 75;
 const MAX_LOCATE_ATTEMPTS = 3;
@@ -183,7 +187,7 @@ async function prepareImageForQwen(b64, w, h) {
     const round32 = (v) => Math.max(SCALE_32, Math.floor(v / SCALE_32) * SCALE_32);
     const rw = round32(w * scale);
     const rh = round32(h * scale);
-    const outB64 = await (0, sharp_1.default)(Buffer.from(b64, 'base64'))
+    const outB64 = await sharp(Buffer.from(b64, 'base64'))
         .resize(rw, rh, { kernel: 'lanczos3' })
         .jpeg({ quality: 75, optimizeScans: true })
         .toBuffer()
@@ -213,7 +217,7 @@ async function annotateSoM(b64, elements, w, h) {
         `<text x="${px + PAD}" y="${py + 14}" font-family="system-ui,sans-serif" font-size="11" font-weight="600" fill="white">${label}</text>`);
     }
     svgParts.push('</svg>');
-    return (0, sharp_1.default)(Buffer.from(b64, 'base64'))
+    return sharp(Buffer.from(b64, 'base64'))
         .composite([{ input: Buffer.from(svgParts.join('')), top: 0, left: 0 }])
         .jpeg({ quality: 90 })
         .toBuffer()

@@ -34,7 +34,10 @@
 import { nativeImage } from 'electron';
 import { AIClient } from '../../lib/ai-client';
 import { ensureShowUIServer } from './showui-server';
-import sharp from 'sharp';
+
+// sharp is an optional native module — load lazily so a missing binary doesn't crash startup
+let sharp: typeof import('sharp') | null = null;
+try { sharp = require('sharp'); } catch { console.warn('[Grounding] sharp unavailable — image processing disabled'); }
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,7 +244,7 @@ async function prepareImageForQwen(b64: string, w: number, h: number): Promise<{
   const rw = round32(w * scale);
   const rh = round32(h * scale);
 
-  const outB64 = await sharp(Buffer.from(b64, 'base64'))
+  const outB64 = await sharp!(Buffer.from(b64, 'base64'))
     .resize(rw, rh, { kernel: 'lanczos3' })
     .jpeg({ quality: 75, optimizeScans: true })
     .toBuffer()
@@ -283,7 +286,7 @@ async function annotateSoM(b64: string, elements: SoMElement[], w: number, h: nu
 
   svgParts.push('</svg>');
 
-  return sharp(Buffer.from(b64, 'base64'))
+  return sharp!(Buffer.from(b64, 'base64'))
     .composite([{ input: Buffer.from(svgParts.join('')), top: 0, left: 0 }])
     .jpeg({ quality: 90 })
     .toBuffer()
@@ -613,7 +616,7 @@ export class GroundingEngine {
     }
 
     console.log('[Grounding] 🔍 SoM detection starting...');
-    
+
     // Use Qwen-optimal scaling for detection
     const { b64: workB64, rw: workW, rh: workH } = await prepareImageForQwen(b64, imgW, imgH);
     let elements: SoMElement[] = [];

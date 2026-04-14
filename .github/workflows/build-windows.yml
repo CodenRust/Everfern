@@ -8,13 +8,12 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
-
-    strategy:
-      matrix:
-        node-version: [22.x]
 
     steps:
       - name: Checkout code
@@ -23,11 +22,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '22.x'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Rebuild native modules for Electron
+        run: npx @electron/rebuild --force --types prod,dev,optional --module-dir . --which-module sharp
+        env:
+          npm_config_platform: win32
+          npm_config_arch: x64
 
       - name: Build Next.js
         run: npm run build:next
@@ -35,20 +40,45 @@ jobs:
       - name: Build Electron TypeScript
         run: npm run build:electron-ts
 
-      - name: Create Windows EXE
+      - name: Create Windows installer
         run: npm run make
 
-      - name: Upload artifacts
+      - name: List build output
+        run: Get-ChildItem -Recurse out\make | Select-Object FullName
+        shell: pwsh
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-exe
-          path: out/make/squirrel.windows/x64/*.exe
+          name: windows-installer
+          path: out/make/**/*
           retention-days: 30
 
-      - name: Create Release
+      # ── Release on tag push ────────────────────────────────────────────────
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: out/make/squirrel.windows/x64/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            out/make/squirrel.windows/x64/*.exe
+            out/make/squirrel.windows/x64/*.nupkg
+            out/make/squirrel.windows/x64/RELEASES
+
+      # ── Rolling "latest" release on main branch push ───────────────────────
+      - name: Update rolling latest release
+        if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          draft: false
+          prerelease: true
+          generate_release_notes: false
+          files: |
+            out/make/squirrel.windows/x64/*.exe
+            out/make/squirrel.windows/x64/*.nupkg
+            out/make/squirrel.windows/x64/RELEASES

@@ -219,30 +219,54 @@ const HitlApprovalForm = ({
 
 // ── User Question Form Component ─────────────────────────────────────────────
 const UserQuestionForm = ({
-    question,
-    options,
-    multiSelect,
-    selectedValues,
-    onSelectionChange,
+    questions,
     onSubmit
 }: {
-    question: string;
-    options: Array<{ label: string; value: string; isRecommended?: boolean }>;
-    multiSelect: boolean;
-    selectedValues: string[];
-    onSelectionChange: (values: string[]) => void;
-    onSubmit: () => void;
+    questions: Array<{
+        question: string;
+        options: Array<{ label: string; value: string; isRecommended?: boolean }>;
+        multiSelect: boolean;
+    }>;
+    onSubmit: (answers: Record<string, string[]>) => void;
 }) => {
+    const [currentIndex, setCurrentIndex] = React.useState(0);
+    const [answers, setAnswers] = React.useState<Record<string, string[]>>({});
+
+    const current = questions[currentIndex];
+    const total = questions.length;
+    const currentAnswers = answers[current?.question] || [];
+    const isAnswered = currentAnswers.length > 0;
+    const allAnswered = questions.every(q => (answers[q.question] || []).length > 0);
+
     const handleOptionClick = (value: string) => {
-        if (multiSelect) {
-            const newValues = selectedValues.includes(value)
-                ? selectedValues.filter(v => v !== value)
-                : [...selectedValues, value];
-            onSelectionChange(newValues);
-        } else {
-            onSelectionChange([value]);
-        }
+        const q = current.question;
+        setAnswers(prev => {
+            if (current.multiSelect) {
+                const existing = prev[q] || [];
+                return {
+                    ...prev,
+                    [q]: existing.includes(value)
+                        ? existing.filter(v => v !== value)
+                        : [...existing, value]
+                };
+            }
+            return { ...prev, [q]: [value] };
+        });
     };
+
+    const handleNext = () => {
+        if (currentIndex < total - 1) setCurrentIndex(i => i + 1);
+    };
+
+    const handleBack = () => {
+        if (currentIndex > 0) setCurrentIndex(i => i - 1);
+    };
+
+    const handleSubmit = () => {
+        if (allAnswered) onSubmit(answers);
+    };
+
+    if (!current) return null;
 
     return (
         <div style={{
@@ -252,114 +276,135 @@ const UserQuestionForm = ({
             padding: 20,
             margin: '16px 0'
         }}>
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                marginBottom: 16,
-                color: '#6366f1',
-                fontSize: 14,
-                fontWeight: 600
-            }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M9,9h6v6H9z"/>
-                </svg>
-                Waiting for your input
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6366f1', fontSize: 14, fontWeight: 600 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9,9h6v6H9z"/>
+                    </svg>
+                    Waiting for your input
+                </div>
+                {total > 1 && (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>
+                        {currentIndex + 1} / {total}
+                    </span>
+                )}
             </div>
 
-            <h3 style={{
-                margin: '0 0 16px 0',
-                fontSize: 16,
-                fontWeight: 600,
-                color: '#1f2937'
-            }}>
-                {question}
+            {/* Progress bar (only for multiple questions) */}
+            {total > 1 && (
+                <div style={{ height: 3, backgroundColor: '#e5e7eb', borderRadius: 2, marginBottom: 16 }}>
+                    <div style={{
+                        height: '100%',
+                        backgroundColor: '#6366f1',
+                        borderRadius: 2,
+                        width: `${((currentIndex + 1) / total) * 100}%`,
+                        transition: 'width 0.2s ease'
+                    }} />
+                </div>
+            )}
+
+            <h3 style={{ margin: '0 0 16px 0', fontSize: 16, fontWeight: 600, color: '#1f2937' }}>
+                {current.question}
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {options.map((option, idx) => (
-                    <button
-                        key={idx}
-                        onClick={() => handleOptionClick(option.value)}
-                        style={{
-                            padding: '12px 16px',
-                            borderRadius: 8,
-                            border: selectedValues.includes(option.value)
-                                ? '2px solid #6366f1'
-                                : '1px solid #d1d5db',
-                            backgroundColor: selectedValues.includes(option.value)
-                                ? '#f0f9ff'
-                                : '#ffffff',
-                            color: selectedValues.includes(option.value)
-                                ? '#1e40af'
-                                : '#374151',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            fontSize: 14,
-                            fontWeight: option.isRecommended ? 600 : 400,
-                            transition: 'all 0.2s',
-                            position: 'relative'
-                        }}
-                    >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{
-                                width: 16,
-                                height: 16,
-                                borderRadius: multiSelect ? 4 : '50%',
-                                border: selectedValues.includes(option.value)
-                                    ? '2px solid #6366f1'
-                                    : '2px solid #d1d5db',
-                                backgroundColor: selectedValues.includes(option.value)
-                                    ? '#6366f1'
-                                    : 'transparent',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}>
-                                {selectedValues.includes(option.value) && (
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                                        <polyline points="20,6 9,17 4,12"/>
-                                    </svg>
+                {current.options.map((option, idx) => {
+                    const selected = currentAnswers.includes(option.value);
+                    return (
+                        <button
+                            key={idx}
+                            onClick={() => handleOptionClick(option.value)}
+                            style={{
+                                padding: '12px 16px',
+                                borderRadius: 8,
+                                border: selected ? '2px solid #6366f1' : '1px solid #d1d5db',
+                                backgroundColor: selected ? '#f0f9ff' : '#ffffff',
+                                color: selected ? '#1e40af' : '#374151',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontSize: 14,
+                                fontWeight: option.isRecommended ? 600 : 400,
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{
+                                    width: 16, height: 16,
+                                    borderRadius: current.multiSelect ? 4 : '50%',
+                                    border: selected ? '2px solid #6366f1' : '2px solid #d1d5db',
+                                    backgroundColor: selected ? '#6366f1' : 'transparent',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                                }}>
+                                    {selected && (
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                            <polyline points="20,6 9,17 4,12"/>
+                                        </svg>
+                                    )}
+                                </div>
+                                <span>{option.label}</span>
+                                {option.isRecommended && (
+                                    <span style={{
+                                        fontSize: 11, fontWeight: 600, color: '#059669',
+                                        backgroundColor: '#d1fae5', padding: '2px 6px',
+                                        borderRadius: 4, marginLeft: 'auto'
+                                    }}>
+                                        RECOMMENDED
+                                    </span>
                                 )}
                             </div>
-                            <span>{option.label}</span>
-                            {option.isRecommended && (
-                                <span style={{
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    color: '#059669',
-                                    backgroundColor: '#d1fae5',
-                                    padding: '2px 6px',
-                                    borderRadius: 4,
-                                    marginLeft: 'auto'
-                                }}>
-                                    RECOMMENDED
-                                </span>
-                            )}
-                        </div>
-                    </button>
-                ))}
+                        </button>
+                    );
+                })}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button
-                    onClick={onSubmit}
-                    disabled={selectedValues.length === 0}
-                    style={{
-                        padding: '10px 20px',
-                        borderRadius: 8,
-                        border: 'none',
-                        backgroundColor: selectedValues.length > 0 ? '#6366f1' : '#d1d5db',
-                        color: selectedValues.length > 0 ? '#ffffff' : '#9ca3af',
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: selectedValues.length > 0 ? 'pointer' : 'not-allowed',
-                        transition: 'all 0.2s'
-                    }}
-                >
-                    Submit {multiSelect && selectedValues.length > 1 ? `(${selectedValues.length} selected)` : ''}
-                </button>
+            {/* Footer: back/next/submit */}
+            <div style={{ display: 'flex', justifyContent: total > 1 ? 'space-between' : 'flex-end', gap: 8 }}>
+                {total > 1 && (
+                    <button
+                        onClick={handleBack}
+                        disabled={currentIndex === 0}
+                        style={{
+                            padding: '10px 16px', borderRadius: 8,
+                            border: '1px solid #d1d5db',
+                            backgroundColor: currentIndex === 0 ? '#f3f4f6' : '#ffffff',
+                            color: currentIndex === 0 ? '#9ca3af' : '#374151',
+                            fontSize: 14, fontWeight: 500,
+                            cursor: currentIndex === 0 ? 'not-allowed' : 'pointer'
+                        }}
+                    >
+                        Back
+                    </button>
+                )}
+                {currentIndex < total - 1 ? (
+                    <button
+                        onClick={handleNext}
+                        disabled={!isAnswered}
+                        style={{
+                            padding: '10px 20px', borderRadius: 8, border: 'none',
+                            backgroundColor: isAnswered ? '#6366f1' : '#d1d5db',
+                            color: '#ffffff', fontSize: 14, fontWeight: 600,
+                            cursor: isAnswered ? 'pointer' : 'not-allowed', transition: 'all 0.2s'
+                        }}
+                    >
+                        Next
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleSubmit}
+                        disabled={!allAnswered}
+                        style={{
+                            padding: '10px 20px', borderRadius: 8, border: 'none',
+                            backgroundColor: allAnswered ? '#6366f1' : '#d1d5db',
+                            color: allAnswered ? '#ffffff' : '#9ca3af',
+                            fontSize: 14, fontWeight: 600,
+                            cursor: allAnswered ? 'pointer' : 'not-allowed', transition: 'all 0.2s'
+                        }}
+                    >
+                        Submit {current.multiSelect && currentAnswers.length > 1 ? `(${currentAnswers.length} selected)` : ''}
+                    </button>
+                )}
             </div>
         </div>
     );

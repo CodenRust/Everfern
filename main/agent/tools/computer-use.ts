@@ -4,7 +4,10 @@ import { execSync } from "child_process";
 import { screen as electronScreen } from 'electron';
 import type { AgentTool, ToolResult as AgentToolResult } from '../runner/types';
 import { AIClient, ChatMessage, ToolCall } from '../../lib/ai-client';
-import sharp from 'sharp';
+
+// sharp is an optional native module — load lazily so a missing binary doesn't crash startup
+let sharp: typeof import('sharp') | null = null;
+try { sharp = require('sharp'); } catch { console.warn('[ComputerUse] sharp unavailable — image processing disabled'); }
 
 // ── Native Automation ────────────────────────────────────────────────────────
 let robot: any = null;
@@ -572,7 +575,7 @@ class ComputerUseTool {
     // Crop and convert to base64
     let encoded = "";
     try {
-      const croppedBuffer = await sharp(rawBuffer)
+      const croppedBuffer = await sharp!(rawBuffer)
         .extract({ left: Math.round(left), top: Math.round(top), width: Math.round(width), height: Math.round(height) })
         .jpeg({ quality: 85 }) // High quality for zoom
         .toBuffer();
@@ -769,7 +772,7 @@ class ComputerUseTool {
     // Re-encode as JPEG at target size using sharp
     let encoded = "";
     try {
-      const jpegBuffer = await sharp(imgBuffer)
+      const jpegBuffer = await sharp!(imgBuffer)
         .resize(newW, newH, { fit: 'fill' })
         .jpeg({ quality: this.imageQuality })
         .toBuffer();

@@ -192,12 +192,19 @@ export default function ChatPage() {
     const [streamingThought, setStreamingThought] = useState("");
 
     // User question form state
-    const [activeUserQuestion, setActiveUserQuestion] = useState<{
+    const [activeUserQuestions, setActiveUserQuestions] = useState<Array<{
         question: string;
         options: Array<{ label: string; value: string; isRecommended?: boolean }>;
         multiSelect: boolean;
-    } | null>(null);
-    const [questionFormValues, setQuestionFormValues] = useState<string[]>([]);
+    }>>([]);
+
+    // Multiple questions panel state (unused - kept for legacy compat)
+    const [userQuestions, setUserQuestions] = useState<Array<{
+        question: string;
+        options: string[];
+        multiSelect?: boolean;
+    }>>([]);
+    const [isUserQuestionsOpen, setIsUserQuestionsOpen] = useState(false);
 
     // Current node tracking for better status display
     const [currentNode, setCurrentNode] = useState<string>("");
@@ -616,8 +623,7 @@ export default function ChatPage() {
         setCurrentNode("");
 
         // Clear any active user question when starting a new request
-        setActiveUserQuestion(null);
-        setQuestionFormValues([]);
+        setActiveUserQuestions([]);
         setCurrentNode("");
         setMissionTimeline(null);
         setMissionComplete(false);
@@ -654,43 +660,15 @@ export default function ChatPage() {
                 liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                 setLiveToolCalls([...liveToolCallsRef.current]);
 
-                // Handle ask_user_question tool start - extract question from args
+                // Handle ask_user_question tool start - questions are set in onToolCall
                 if (toolName === 'ask_user_question') {
-                    // Try to extract question from tool arguments
-                    if (toolArgs.questions && Array.isArray(toolArgs.questions)) {
-                        const question = toolArgs.questions[0];
-                        console.log('[Frontend] Setting activeUserQuestion from questions array:', question);
-                        setActiveUserQuestion({
-                            question: question.question,
-                            options: question.options?.map((opt: any) => ({
-                                label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                            })) || [],
-                            multiSelect: question.multiSelect || false
-                        });
-                        setQuestionFormValues([]);
-                    } else if (toolArgs.question) {
-                        // Handle single question format
-                        console.log('[Frontend] Setting activeUserQuestion from single question:', toolArgs.question);
-                        setActiveUserQuestion({
-                            question: toolArgs.question as string,
-                            options: (toolArgs.options as any[])?.map((opt: any) => ({
-                                label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                            })) || [],
-                            multiSelect: (toolArgs.multiSelect as boolean) || false
-                        });
-                        setQuestionFormValues([]);
-                    } else {
-                        console.log('[Frontend] ask_user_question tool_start but no question found in toolArgs');
-                    }
+                    // no-op: full questions array is available in onToolCall result
                 }
             });
             acpApi.onToolCall((record: any) => {
                 // Debug: Log the tool call structure
                 if (record.toolName === 'ask_user_question') {
+
                     console.log('[Frontend] 📥 Received ask_user_question tool call');
                 }
                 const existingIdx = liveToolCallsRef.current.findIndex(t => t.toolName === record.toolName && t.status === 'running');
@@ -704,62 +682,34 @@ export default function ChatPage() {
                     if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
                         // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
                         (window as any).__activeUserQuestion = true;
-                        console.log('[Frontend] ⚡ Set __activeUserQuestion flag EARLY (before data extraction)');
 
                         const data = record.result.data;
+                        const normalizeOpts = (opts: any[]) => (opts || []).map((opt: any) => ({
+                            label: typeof opt === 'string' ? opt : opt.label || opt.value || String(opt),
+                            value: typeof opt === 'string' ? opt : opt.value || opt.label || String(opt),
+                            isRecommended: typeof opt === 'object' ? (opt.isRecommended || false) : false
+                        }));
 
-                        // Try data.questions[0] first (primary path)
                         if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-                            const question = data.questions[0];
-
-                            // Validate question structure
-                            if (!question.question) {
-                                console.error('[Frontend] ❌ Invalid question structure: missing question field');
-                                (window as any).__activeUserQuestion = false;
-                                return;
-                            }
-
-                            const formData = {
-                                question: question.question,
-                                options: question.options?.map((opt: any) => ({
-                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                                })) || [],
-                                multiSelect: question.multiSelect || false
-                            };
-                            setActiveUserQuestion(formData);
-                            setQuestionFormValues([]);
-                        }
-                        // Fallback to data.question (secondary path)
-                        else if (data.question) {
-                            const formData = {
+                            const normalized = data.questions.map((q: any) => ({
+                                question: q.question,
+                                options: normalizeOpts(q.options),
+                                multiSelect: q.multiSelect || false
+                            }));
+                            setActiveUserQuestions(normalized);
+                            console.log(`[Frontend] Set ${normalized.length} questions`);
+                        } else if (data.question) {
+                            setActiveUserQuestions([{
                                 question: typeof data.question === 'string' ? data.question : data.question.question,
-                                options: data.options?.map((opt: any) => ({
-                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                                })) || [],
+                                options: normalizeOpts(data.options),
                                 multiSelect: data.multiSelect || false
-                            };
-                            setActiveUserQuestion(formData);
-                            setQuestionFormValues([]);
-                            console.log('[Frontend] ✅ activeUserQuestion state updated successfully (fallback)');
-                        }
-                        // No valid question data found
-                        else {
+                            }]);
+                        } else {
                             console.error('[Frontend] ❌ No valid question data found in tool_call');
-                            console.error('[Frontend] Data structure received:', JSON.stringify(data, null, 2));
-                            // Clear flag if no valid question data
                             (window as any).__activeUserQuestion = false;
                         }
                     } else if (record.toolName === 'ask_user_question') {
-                        console.error('[Frontend] ❌ ask_user_question tool_call missing required data:', {
-                            hasResult: !!record.result,
-                            resultSuccess: record.result?.success,
-                            hasData: !!record.result?.data,
-                            dataType: typeof record.result?.data
-                        });
+                        console.error('[Frontend] ❌ ask_user_question tool_call missing required data');
                     }
                 }
             });
@@ -835,7 +785,7 @@ export default function ChatPage() {
 
                     // Only remove listeners if no HITL or user question is active
                     const hasActiveHitl = (window as any).__activeHitl || showHitlApproval;
-                    const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestion;
+                    const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
                     const hasAnyActive = hasActiveHitl || hasActiveUserQuestion;
 
                     if (!hasAnyActive) {
@@ -844,7 +794,7 @@ export default function ChatPage() {
                         // Check again in 1 second in case the HITL/question gets resolved
                         setTimeout(() => {
                             const stillActiveHitl = (window as any).__activeHitl || showHitlApproval;
-                            const stillActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestion;
+                            const stillActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
                             const stillActive = stillActiveHitl || stillActiveUserQuestion;
                             if (!stillActive) {
                                 acpApi.removeStreamListeners();
@@ -856,6 +806,7 @@ export default function ChatPage() {
                 // Use setTimeout(0) to flush any pending IPC chunk events before we
                 // read streamingContentRef and set isMessageCommittedRef.
                 // This prevents in-flight chunks from being dropped by the guard.
+                // Use 150ms to ensure onToolCall (which sets activeUserQuestions) fires first.
                 setTimeout(() => {
                     isMessageCommittedRef.current = true;
 
@@ -869,11 +820,14 @@ export default function ChatPage() {
                 const durationMs = thinkingDuration?.duration;
 
                 // Check if there's an active user question - commit accumulated content
-                // so it doesn't disappear when the next send resets streaming state
-                const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestion;
+                // so it doesn't disappear when the next send resets streaming state.
+                // Use the window flag as the primary check since it's set synchronously
+                // in onToolCall before React state updates propagate.
+                const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
 
                 if (hasActiveUserQuestion) {
                     console.log('[Frontend] ⏸️ Active user question detected - committing accumulated content before pausing');
+                    setIsLoading(false);
                     if (finalContent || finalThought || finalToolCalls.length > 0) {
                         const assistantMsg: Message = {
                             id: crypto.randomUUID(),
@@ -932,7 +886,7 @@ export default function ChatPage() {
                     setLiveToolCalls([]);
                     setIsLoading(false);
                 }
-                }, 0); // flush pending IPC chunk events before reading streamingContentRef
+                }, 150); // flush pending IPC chunk events + allow onToolCall to fire first
             });
 
 
@@ -1080,38 +1034,9 @@ export default function ChatPage() {
                     liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                     setLiveToolCalls(liveToolCallsRef.current);
 
-                    // Handle ask_user_question tool start - extract question from args
+                    // Handle ask_user_question tool start - questions are set in onToolCall
                     if (toolName === 'ask_user_question') {
-                        // Try to extract question from tool arguments
-                        if (toolArgs.questions && Array.isArray(toolArgs.questions)) {
-                            const question = toolArgs.questions[0];
-                            console.log('[Frontend] Setting activeUserQuestion from questions array:', question);
-                            setActiveUserQuestion({
-                                question: question.question,
-                                options: question.options?.map((opt: any) => ({
-                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                                })) || [],
-                                multiSelect: question.multiSelect || false
-                            });
-                            setQuestionFormValues([]);
-                        } else if (toolArgs.question) {
-                            // Handle single question format
-                            console.log('[Frontend] Setting activeUserQuestion from single question:', toolArgs.question);
-                            setActiveUserQuestion({
-                                question: toolArgs.question as string,
-                                options: (toolArgs.options as any[])?.map((opt: any) => ({
-                                    label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                    value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                    isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                                })) || [],
-                                multiSelect: (toolArgs.multiSelect as boolean) || false
-                            });
-                            setQuestionFormValues([]);
-                        } else {
-                            console.log('[Frontend] ask_user_question tool_start but no question found in toolArgs');
-                        }
+                        // no-op: full questions array is available in onToolCall result
                     }
                 });
                 api.onViewSkill(({ name }: { name: string }) => {
@@ -1203,61 +1128,34 @@ export default function ChatPage() {
                         if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
                             // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
                             (window as any).__activeUserQuestion = true;
-                            console.log('[Frontend] ⚡ Set __activeUserQuestion flag EARLY (before data extraction)');
 
-                            console.log('[Frontend] ask_user_question tool_call has data, processing...');
                             const data = record.result.data;
+                            const normalizeOpts = (opts: any[]) => (opts || []).map((opt: any) => ({
+                                label: typeof opt === 'string' ? opt : opt.label || opt.value || String(opt),
+                                value: typeof opt === 'string' ? opt : opt.value || opt.label || String(opt),
+                                isRecommended: typeof opt === 'object' ? (opt.isRecommended || false) : false
+                            }));
 
-                            // Try data.questions[0] first (primary path)
                             if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-                                const question = data.questions[0];
-
-                                // Validate question structure
-                                if (!question.question) {
-                                    console.error('[Frontend] ❌ Invalid question structure: missing question field');
-                                    (window as any).__activeUserQuestion = false;
-                                    return;
-                                }
-
-                                const formData = {
-                                    question: question.question,
-                                    options: question.options?.map((opt: any) => ({
-                                        label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                        value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                        isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                                    })) || [],
-                                    multiSelect: question.multiSelect || false
-                                };
-                                setActiveUserQuestion(formData);
-                                setQuestionFormValues([]);
-                            }
-                            // Fallback to data.question (secondary path)
-                            else if (data.question) {
-                                const formData = {
+                                const normalized = data.questions.map((q: any) => ({
+                                    question: q.question,
+                                    options: normalizeOpts(q.options),
+                                    multiSelect: q.multiSelect || false
+                                }));
+                                setActiveUserQuestions(normalized);
+                                console.log(`[Frontend] Set ${normalized.length} questions`);
+                            } else if (data.question) {
+                                setActiveUserQuestions([{
                                     question: typeof data.question === 'string' ? data.question : data.question.question,
-                                    options: data.options?.map((opt: any) => ({
-                                        label: typeof opt === 'string' ? opt : opt.label || opt.value || opt,
-                                        value: typeof opt === 'string' ? opt : opt.value || opt.label || opt,
-                                        isRecommended: typeof opt === 'object' ? opt.isRecommended : false
-                                    })) || [],
+                                    options: normalizeOpts(data.options),
                                     multiSelect: data.multiSelect || false
-                                };
-                                setActiveUserQuestion(formData);
-                                setQuestionFormValues([]);
-                            }
-                            // No valid question data found
-                            else {
+                                }]);
+                            } else {
                                 console.error('[Frontend] ❌ No valid question data found in tool_call');
-                                // Clear flag if no valid question data
                                 (window as any).__activeUserQuestion = false;
                             }
                         } else if (record.toolName === 'ask_user_question') {
-                            console.error('[Frontend] ❌ ask_user_question tool_call missing required data:', {
-                                hasResult: !!record.result,
-                                resultSuccess: record.result?.success,
-                                hasData: !!record.result?.data,
-                                dataType: typeof record.result?.data
-                            });
+                            console.error('[Frontend] ❌ ask_user_question tool_call missing required data');
                         }
                     }
                 });
@@ -1416,30 +1314,21 @@ export default function ChatPage() {
         })();
     }, [inputValue, attachments, folderContexts, isLoading, messages, saveConversation, selectedModel, availableModels, activeConversationId, checkForPlan]);
 
-    const handleQuestionSubmit = useCallback(() => {
-        if (!activeUserQuestion || questionFormValues.length === 0) return;
+    const handleQuestionSubmit = useCallback((answers: Record<string, string[]>) => {
+        const answerLines = Object.entries(answers).map(([question, values]) => `${question}: ${values.join(', ')}`);
+        const responseText = answerLines.join('\n');
 
-        const selectedOptions = questionFormValues.join(', ');
-        const responseText = `Selected: ${selectedOptions}`;
-
-        // Clear the question form
-        setActiveUserQuestion(null);
-        setQuestionFormValues([]);
-
-        // Clear streaming state (already committed by mission_complete handler)
+        setActiveUserQuestions([]);
         setStreamingContent("");
         setStreamingThought("");
         setLiveToolCalls([]);
         streamingContentRef.current = "";
         streamingThoughtRef.current = "";
         liveToolCallsRef.current = [];
-
-        // Clear the active user question flag
         (window as any).__activeUserQuestion = false;
 
-        // Send the response as a regular message — starts a new graph run
         handleSend(responseText);
-    }, [activeUserQuestion, questionFormValues, handleSend]);
+    }, [handleSend]);
 
     const handleHitlApproval = useCallback((approved: boolean) => {
         if (!hitlRequest) return;
@@ -1685,7 +1574,7 @@ export default function ChatPage() {
                     <StopIcon width={16} height={16} />
                 </button>
             ) : (
-                <button type="button" onClick={handleSend} disabled={!!activeUserQuestion || !!showHitlApproval || (!inputValue.trim() && attachments.length === 0 && folderContexts.length === 0)} title="Send"
+                <button type="button" onClick={handleSend} disabled={activeUserQuestions.length > 0 || !!showHitlApproval || (!inputValue.trim() && attachments.length === 0 && folderContexts.length === 0)} title="Send"
                     style={{ width: 32, height: 32, borderRadius: 10, background: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "#201e24" : "#f4f4f4", border: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "none" : "1px solid #e8e6d9", color: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "#ffffff" : "#a1a1aa", cursor: (inputValue.trim() || attachments.length > 0 || folderContexts.length > 0) ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s" }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -1995,14 +1884,10 @@ export default function ChatPage() {
 
                                             {/* ── Empty state composer ── */}
                                             <div style={{ width: "100%", maxWidth: 740 }}>
-                                                {/* User Question Form */}
-                                                {activeUserQuestion && (
+                                                {/* User Question Form (single or multiple questions) */}
+                                                {activeUserQuestions.length > 0 && (
                                                     <UserQuestionForm
-                                                        question={activeUserQuestion.question}
-                                                        options={activeUserQuestion.options}
-                                                        multiSelect={activeUserQuestion.multiSelect}
-                                                        selectedValues={questionFormValues}
-                                                        onSelectionChange={setQuestionFormValues}
+                                                        questions={activeUserQuestions}
                                                         onSubmit={handleQuestionSubmit}
                                                     />
                                                 )}
@@ -2018,10 +1903,10 @@ export default function ChatPage() {
 
                                                 <div style={{ backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#f4f4f4", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: 16, display: "flex", flexDirection: "column", minHeight: 120, transition: "all 0.3s ease" }}>
                                                     {renderAttachmentStrip()}
-                                                    <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestion ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
-                                                        disabled={!!activeUserQuestion || !!showHitlApproval}
+                                                    <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestions.length > 0 ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
+                                                        disabled={activeUserQuestions.length > 0 || !!showHitlApproval}
                                                         className="placeholder-[#a5a3a0]"
-                                                        style={{ width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestion || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "20px 24px", minHeight: 70, maxHeight: 240 }} />
+                                                        style={{ width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestions.length > 0 || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "20px 24px", minHeight: 70, maxHeight: 240 }} />
                                                     <div style={{ flex: 1 }} />
                                                     <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", padding: "10px 24px 16px" }}>
                                                         {renderComposerLeftActions()}
@@ -2204,10 +2089,10 @@ export default function ChatPage() {
                                                         </>
                                                     );
                                                 })()}
-                                                {!streamingContent && liveToolCalls.length === 0 && !streamingThought && !activeUserQuestion && !showHitlApproval && (
+                                                {!streamingContent && liveToolCalls.length === 0 && !streamingThought && activeUserQuestions.length === 0 && !showHitlApproval && (
                                                     <LoadingBreadcrumb text={getNodeDisplayName(currentNode)} />
                                                 )}
-                                                {(activeUserQuestion || showHitlApproval) && (
+                                                {(activeUserQuestions.length > 0 || showHitlApproval) && (
                                                     <div style={{
                                                         display: 'flex',
                                                         alignItems: 'center',
@@ -2289,15 +2174,11 @@ export default function ChatPage() {
 
                                     <div style={{ width: "96%", maxWidth: 840, margin: "0 auto 8px auto", display: "flex", flexDirection: "column" }}>
                                         <div style={{ width: "100%", backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#ffffff", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: (isComputerUseActive || showPermissionModal) ? "0 0 16px 16px" : 16, position: "relative", zIndex: 2, display: "flex", flexDirection: "column", minHeight: 100, transition: "all 0.3s ease" }}>
-                                            {/* User Question Form */}
-                                            {activeUserQuestion && (
+                                            {/* User Question Form (single or multiple questions) */}
+                                            {activeUserQuestions.length > 0 && (
                                                 <div style={{ padding: '16px 20px 0' }}>
                                                     <UserQuestionForm
-                                                        question={activeUserQuestion.question}
-                                                        options={activeUserQuestion.options}
-                                                        multiSelect={activeUserQuestion.multiSelect}
-                                                        selectedValues={questionFormValues}
-                                                        onSelectionChange={setQuestionFormValues}
+                                                        questions={activeUserQuestions}
                                                         onSubmit={handleQuestionSubmit}
                                                     />
                                                 </div>
@@ -2316,9 +2197,9 @@ export default function ChatPage() {
 
                                             {renderAttachmentStrip()}
                                             <div style={{ display: "flex", alignItems: "flex-end", gap: 12, paddingRight: 12 }}>
-                                                <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestion ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
-                                                    disabled={!!activeUserQuestion || !!showHitlApproval}
-                                                    style={{ flex: 1, width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestion || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "16px 20px", minHeight: 50, maxHeight: 240 }} />
+                                                <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestions.length > 0 ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
+                                                    disabled={activeUserQuestions.length > 0 || !!showHitlApproval}
+                                                    style={{ flex: 1, width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestions.length > 0 || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "16px 20px", minHeight: 50, maxHeight: 240 }} />
                                             </div>
 
                                             {/* Voice recording status */}

@@ -226,6 +226,8 @@ class AIClientPool {
   private pool: PooledClient[] = [];
   private maxPoolSize = 3;
   private maxIdleTime = 60000; // 1 minute
+  private connectionReuseCount = 0;
+  private totalConnectionCount = 0;
 
   getClient(baseClient: AIClient): AIClient {
     // In test environment, just return the original client to preserve mocks
@@ -239,6 +241,8 @@ class AIClientPool {
     // Find available client
     const available = this.pool.find(p => !p.inUse);
     if (available) {
+      this.connectionReuseCount++;
+      this.totalConnectionCount++;
       available.inUse = true;
       available.lastUsed = Date.now();
       return available.client;
@@ -246,6 +250,7 @@ class AIClientPool {
 
     // Create new client if pool not full
     if (this.pool.length < this.maxPoolSize) {
+      this.totalConnectionCount++;
       const pooledClient: PooledClient = {
         client: baseClient, // Reuse the same client instance for now
         lastUsed: Date.now(),
@@ -256,6 +261,7 @@ class AIClientPool {
     }
 
     // Pool full, return base client
+    this.totalConnectionCount++;
     return baseClient;
   }
 
@@ -270,6 +276,11 @@ class AIClientPool {
       pooled.inUse = false;
       pooled.lastUsed = Date.now();
     }
+  }
+
+  getConnectionReuseRate(): number {
+    if (this.totalConnectionCount === 0) return 0;
+    return this.connectionReuseCount / this.totalConnectionCount;
   }
 
   private cleanup(): void {
@@ -294,12 +305,22 @@ async function withRetry<T>(
   options: RetryOptions
 ): Promise<T> {
   let lastError: Error = new Error('Unknown error');
+  const startTime = Date.now();
 
   for (let attempt = 0; attempt <= options.maxRetries; attempt++) {
     try {
-      // Create timeout promise for this attempt
+      // Calculate remaining timeout budget
+      const elapsedTime = Date.now() - startTime;
+      const remainingTimeoutMs = options.timeoutMs - elapsedTime;
+
+      // Fail fast if timeout is imminent (< 200ms remaining)
+      if (remainingTimeoutMs < 200) {
+        throw new Error('Timeout budget exhausted');
+      }
+
+      // Create timeout promise for this attempt with remaining budget
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Intent classification timed out')), options.timeoutMs)
+        setTimeout(() => reject(new Error('Intent classification timed out')), remainingTimeoutMs)
       );
 
       return await Promise.race([operation(), timeoutPromise]);
@@ -324,13 +345,26 @@ async function withRetry<T>(
         throw lastError;
       }
 
-      // Calculate delay with exponential backoff
-      const delay = Math.min(
+      // Calculate remaining timeout budget
+      const elapsedTime = Date.now() - startTime;
+      const remainingTimeoutMs = options.timeoutMs - elapsedTime;
+
+      // Fail fast if timeout budget is too tight for another retry
+      if (remainingTimeoutMs < 300) {
+        console.warn(`[IntentAgent] Timeout budget exhausted after ${attempt + 1} attempts. Total elapsed: ${elapsedTime}ms`);
+        break;
+      }
+
+      // Calculate delay with exponential backoff, respecting remaining timeout
+      const maxDelayForThisAttempt = Math.min(
         options.baseDelay * Math.pow(2, attempt),
-        options.maxDelay
+        options.maxDelay,
+        remainingTimeoutMs - 100 // Leave 100ms buffer for the next attempt
       );
 
-      console.warn(`[IntentAgent] Attempt ${attempt + 1} failed: ${lastError.message}. Retrying in ${delay}ms...`);
+      const delay = Math.max(0, maxDelayForThisAttempt);
+
+      console.warn(`[IntentAgent] Attempt ${attempt + 1} failed: ${lastError.message}. Retrying in ${delay}ms... (${remainingTimeoutMs}ms remaining)`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -370,51 +404,21 @@ export async function classifyIntentAI(
     return `[${role}]: ${content}`;
   }).join('\n');
 
-  const prompt = `You are an intelligent Intent Classification Agent for an AI coding assistant. Your job is to analyze user input and classify it into the most appropriate category based on semantic meaning, context, and conversation history.
+  const prompt = `Classify the user's intent into exactly one category. Reply with JSON only.
 
-AVAILABLE INTENTS:
-- coding: Writing, refactoring, debugging code/scripts, implementing features, code review
-- research: Web searching, information gathering, investigating topics, looking up documentation
-- task: General operations (file management, shell commands, system tasks, file operations)
-- question: Direct informational questions requiring factual answers (what, how, why questions)
-- conversation: Greetings, social interaction, polite exchanges, acknowledgments
-- build: Creating new projects, scaffolding applications, generating project structures
-- fix: Fixing bugs, resolving errors, troubleshooting issues, debugging problems
-- analyze: Data analysis, visualization, processing datasets/files, reviewing data
-- automate: Setting up workflows, schedules, recurring processes, automation scripts
+Categories: coding, research, task, question, conversation, build, fix, analyze, automate
 
-CLASSIFICATION STRATEGY:
-1. **Context Inheritance**: If the user input is a short affirmative response (yes, ok, proceed, continue, sure, go ahead, looks good, etc.) AND there's a clear previous intent in the conversation history, inherit that intent rather than classifying as 'conversation'.
+Rules:
+- Short affirmatives (yes/ok/proceed/sure) with history → inherit previous intent
+- File attachments: data files → analyze, code files → coding
+- Focus on what the user wants to accomplish
 
-2. **File Context**: If recent messages contain file attachments:
-   - CSV/Excel/JSON/data files → likely 'analyze'
-   - Code files (.ts, .js, .py, etc.) → likely 'coding'
-   - Configuration files → likely 'task' or 'build'
-
-3. **Semantic Analysis**: Focus on the semantic meaning and user's goal, not just keyword matching. Consider:
-   - What is the user trying to accomplish?
-   - What action or outcome do they want?
-   - What domain does this fall into?
-
-4. **Conversation Flow**: Consider the conversation flow and previous exchanges to understand context.
-
-CONVERSATION HISTORY (last 5 messages):
+History (last 5):
 ${lastMessages || 'None'}
 
-CURRENT USER INPUT: "${userInput}"
+Input: "${userInput}"
 
-Analyze the input semantically and provide your classification in JSON format:
-{
-  "intent": "coding|research|task|question|conversation|build|fix|analyze|automate",
-  "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation of why you chose this intent, including context inheritance if applicable"
-}
-
-IMPORTANT:
-- Use semantic understanding, not keyword matching
-- Consider conversation context and file attachments
-- For short affirmatives, check if you should inherit the previous intent
-- Be confident in your classification (aim for 0.8+ confidence when clear)`;
+JSON: {"intent":"<category>","confidence":<0-1>,"reasoning":"<brief>"}`;
 
   // Get pooled client for better connection reuse
   const pooledClient = clientPool.getClient(client);
@@ -426,10 +430,11 @@ IMPORTANT:
           messages: [{ role: 'user', content: prompt }],
           responseFormat: 'json',
           temperature: 0.1,
-          maxTokens: 500
+          maxTokens: 80  // Intent JSON is tiny — {"intent":"...","confidence":0.9,"reasoning":"..."}
         });
 
         let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+        console.log(`[IntentAgent] Raw AI response: ${content.slice(0, 200)}`);
         // Remove markdown code blocks if present
         content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         const data = JSON.parse(content);
@@ -441,13 +446,14 @@ IMPORTANT:
         };
       },
       {
-        maxRetries: 2,
+        maxRetries: 1,
         baseDelay: 200,
-        maxDelay: 1000,
-        timeoutMs: 2000 // Reduced from 3000ms to 2000ms for faster fallback
+        maxDelay: 500,
+        timeoutMs: 5000  // 5s total budget — enough for slow providers, fast enough for UX
       }
     );
 
+    console.log(`[IntentAgent] Classification completed successfully: ${result.intent} (confidence: ${result.confidence})`);
     return result;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -462,6 +468,12 @@ IMPORTANT:
   } finally {
     // Release client back to pool
     clientPool.releaseClient(pooledClient);
+
+    // Log connection reuse metrics
+    const reuseRate = clientPool.getConnectionReuseRate();
+    if (reuseRate > 0) {
+      console.log(`[IntentAgent] Connection reuse rate: ${(reuseRate * 100).toFixed(1)}%`);
+    }
   }
 }
 

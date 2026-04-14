@@ -41,14 +41,17 @@ const createJudgeNode = (runner, eventQueue, missionTracker) => {
                 return { taskPhase: 'executing', shouldContinueIteration: false };
             }
             // Read-only intents always complete after one brain pass
+            // EXCEPTION: if the brain explicitly signals waiting_for_user_input or needs_hitl,
+            // honour that signal even for read-only intents — the agent asked the user something.
+            const signal = state.completionSignal;
             const isReadOnly = state.currentIntent === 'question' || state.currentIntent === 'conversation';
-            if (isReadOnly) {
+            const signalNeedsUserAction = signal?.reason === 'waiting_for_user_input' || signal?.reason === 'needs_hitl';
+            if (isReadOnly && !signalNeedsUserAction) {
                 runner.telemetry.info('Read-only intent — complete');
                 integrator.completeNode('judge', 'Read-only complete');
                 return { taskPhase: 'executing', shouldContinueIteration: false };
             }
             // ── Primary path: use the brain's completion signal ──────────────────
-            const signal = state.completionSignal;
             if (signal) {
                 const { reason, explanation } = signal;
                 runner.telemetry.info(`Judge: brain signal = ${reason} — ${explanation}`);
@@ -58,11 +61,10 @@ const createJudgeNode = (runner, eventQueue, missionTracker) => {
                         integrator.completeNode('judge', 'Task complete');
                         return { taskPhase: 'executing', shouldContinueIteration: false };
                     case 'waiting_for_user_input':
-                        // Brain is waiting for user input — this means the response is incomplete
-                        // and the agent should continue iterating to provide a complete response
-                        // before asking the user for input
-                        integrator.completeNode('judge', 'Waiting for user input — looping back');
-                        return { taskPhase: 'executing', shouldContinueIteration: true };
+                        // Brain is waiting for user input — end this turn so the user can respond.
+                        // The ask_user_question tool has already surfaced the form on the frontend.
+                        integrator.completeNode('judge', 'Waiting for user input — ending turn');
+                        return { taskPhase: 'executing', shouldContinueIteration: false };
                     case 'needs_hitl':
                         // HITL is handled by the validation → hitl_approval path.
                         // If brain signals needs_hitl here (no tool calls), surface to user and end.

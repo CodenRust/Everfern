@@ -46,7 +46,7 @@ Respond with JSON only:
     const startTime = Date.now();
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('completion signal timed out')), 15000)
+      setTimeout(() => reject(new Error('completion signal timed out')), 5000)
     );
 
     const response = await Promise.race([
@@ -79,7 +79,7 @@ Respond with JSON only:
       return null;
     }
 
-    console.log(`[Brain] Completion signal built successfully: ${signal.reason}`);
+    console.log(`[Brain] Completion signal built successfully in ${duration}ms: ${signal.reason}`);
     return { reason: signal.reason as CompletionReason, explanation: String(signal.explanation || '') };
   } catch (error) {
     // Log the specific error for debugging

@@ -32,9 +32,6 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.abortComputerUse = abortComputerUse;
 exports.createComputerUseTool = createComputerUseTool;
@@ -44,7 +41,14 @@ const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const electron_1 = require("electron");
 const ai_client_1 = require("../../lib/ai-client");
-const sharp_1 = __importDefault(require("sharp"));
+// sharp is an optional native module — load lazily so a missing binary doesn't crash startup
+let sharp = null;
+try {
+    sharp = require('sharp');
+}
+catch {
+    console.warn('[ComputerUse] sharp unavailable — image processing disabled');
+}
 // ── Native Automation ────────────────────────────────────────────────────────
 let robot = null;
 try {
@@ -525,7 +529,7 @@ class ComputerUseTool {
         // Crop and convert to base64
         let encoded = "";
         try {
-            const croppedBuffer = await (0, sharp_1.default)(rawBuffer)
+            const croppedBuffer = await sharp(rawBuffer)
                 .extract({ left: Math.round(left), top: Math.round(top), width: Math.round(width), height: Math.round(height) })
                 .jpeg({ quality: 85 }) // High quality for zoom
                 .toBuffer();
@@ -722,7 +726,7 @@ class ComputerUseTool {
         // Re-encode as JPEG at target size using sharp
         let encoded = "";
         try {
-            const jpegBuffer = await (0, sharp_1.default)(imgBuffer)
+            const jpegBuffer = await sharp(imgBuffer)
                 .resize(newW, newH, { fit: 'fill' })
                 .jpeg({ quality: this.imageQuality })
                 .toBuffer();
