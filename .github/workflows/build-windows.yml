@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Windows Installer
 
 on:
   push:
@@ -40,45 +40,66 @@ jobs:
       - name: Build Electron TypeScript
         run: npm run build:electron-ts
 
-      - name: Create Windows installer
-        run: npm run make
+      - name: Build Windows installer (electron-builder)
+        run: npx electron-builder --win --x64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List build output
-        run: Get-ChildItem -Recurse out\make | Select-Object FullName
+      - name: List release output
+        run: Get-ChildItem -Recurse release | Select-Object FullName
         shell: pwsh
 
-      - name: Upload build artifacts
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: out/make/**/*
+          name: EverFern-Windows-Installer
+          path: |
+            release/*.exe
+            release/*.yml
           retention-days: 30
 
-      # ── Release on tag push ────────────────────────────────────────────────
-      - name: Create GitHub Release
+      # ── Versioned release on tag push ──────────────────────────────────────
+      - name: Create versioned GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          name: EverFern ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: |
-            out/make/squirrel.windows/x64/*.exe
-            out/make/squirrel.windows/x64/*.nupkg
-            out/make/squirrel.windows/x64/RELEASES
+          body: |
+            ## EverFern ${{ github.ref_name }}
 
-      # ── Rolling "latest" release on main branch push ───────────────────────
-      - name: Update rolling latest release
-        if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+            EverFern is an open-source autonomous AI desktop agent.
+
+            ### Installation
+            Download and run the `.exe` installer below. It will install EverFern to your user profile (no admin required).
+
+            ### What's new
+            See the auto-generated release notes below.
+
+            ---
+            **License:** MIT — open source, free to use and modify.
+            **Source:** https://github.com/${{ github.repository }}
+          files: |
+            release/*.exe
+            release/latest.yml
+
+      # ── Rolling pre-release on main branch push ────────────────────────────
+      - name: Update rolling latest pre-release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Latest Build
+          tag_name: latest-build
+          name: Latest Build (main)
           draft: false
           prerelease: true
           generate_release_notes: false
+          body: |
+            Automated build from the `main` branch. This is a pre-release — use versioned releases for stable builds.
+
+            **Commit:** ${{ github.sha }}
+            **Built:** ${{ github.run_id }}
           files: |
-            out/make/squirrel.windows/x64/*.exe
-            out/make/squirrel.windows/x64/*.nupkg
-            out/make/squirrel.windows/x64/RELEASES
+            release/*.exe
+            release/latest.yml

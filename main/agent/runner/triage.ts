@@ -332,14 +332,15 @@ async function withRetry<T>(
         break;
       }
 
-      // Check if error is retryable (transient network issues)
+      // Check if error is retryable (transient network issues only — NOT timeouts)
       const errorMsg = lastError.message.toLowerCase();
-      const isRetryable = errorMsg.includes('timeout') ||
-                         errorMsg.includes('econnrefused') ||
-                         errorMsg.includes('etimedout') ||
-                         errorMsg.includes('enotfound') ||
-                         errorMsg.includes('fetch failed') ||
-                         errorMsg.includes('network error');
+      const isRetryable = !errorMsg.includes('timed out') &&
+                         !errorMsg.includes('timeout budget') &&
+                         (errorMsg.includes('econnrefused') ||
+                          errorMsg.includes('etimedout') ||
+                          errorMsg.includes('enotfound') ||
+                          errorMsg.includes('fetch failed') ||
+                          errorMsg.includes('network error'));
 
       if (!isRetryable) {
         throw lastError;
@@ -373,28 +374,80 @@ async function withRetry<T>(
 }
 
 /**
- * AI-powered intent classification agent with optimized timeout handling
- * Features:
- * - Reduced timeout from 3000ms to 2000ms for faster fallback
- * - Retry mechanism with exponential backoff for transient failures
- * - AI client pooling to reduce connection overhead
- * - Improved fallback logic with graceful error handling
+ * Fast synchronous intent classification for obvious cases.
+ * Returns null if the intent is ambiguous and needs AI.
+ */
+function classifyIntentFast(userInput: string, history: any[]): IntentClassification | null {
+  const normalized = userInput.toLowerCase().trim();
+
+  // Short affirmatives — inherit from history
+  if (isShortAffirmative(normalized) && history.length > 0) {
+    const prev = extractPreviousIntent(history);
+    if (prev) {
+      return { intent: prev, confidence: 0.95, reasoning: 'Context inheritance: short affirmative' };
+    }
+  }
+
+  // Very short inputs — likely conversational
+  if (normalized.length < 8) {
+    return { intent: 'conversation', confidence: 0.8, reasoning: 'Fast: very short input' };
+  }
+
+  // Strong fix/debug signals
+  if (/\b(fix|debug|error|bug|crash|broken|not working|doesn't work|failing)\b/.test(normalized)) {
+    return { intent: 'fix', confidence: 0.85, reasoning: 'Fast: fix/debug keywords' };
+  }
+
+  // Strong coding signals
+  if (/\b(write|implement|create|add|refactor|code|function|class|component|script)\b/.test(normalized) &&
+      /\b(code|function|class|component|script|method|api|endpoint|module)\b/.test(normalized)) {
+    return { intent: 'coding', confidence: 0.85, reasoning: 'Fast: coding keywords' };
+  }
+
+  // Strong build signals
+  if (/\b(build|scaffold|generate|setup|initialize|bootstrap)\b.*\b(project|app|application|repo|template)\b/.test(normalized)) {
+    return { intent: 'build', confidence: 0.85, reasoning: 'Fast: build keywords' };
+  }
+
+  // Strong question signals
+  if (/^(what|how|why|when|where|which|who|can you explain|tell me about)\b/.test(normalized)) {
+    return { intent: 'question', confidence: 0.8, reasoning: 'Fast: question pattern' };
+  }
+
+  // Greetings
+  if (/^(hi|hello|hey|good morning|good afternoon|thanks|thank you|bye)\b/.test(normalized)) {
+    return { intent: 'conversation', confidence: 0.9, reasoning: 'Fast: greeting' };
+  }
+
+  // Ambiguous — needs AI
+  return null;
+}
+
+/**
+ * AI-powered intent classification with fast-path heuristics.
+ * Tries synchronous classification first; only calls AI for ambiguous inputs.
  */
 export async function classifyIntentAI(
   client: AIClient,
   userInput: string,
   history: any[] = []
 ): Promise<IntentClassification> {
+  // Fast path: skip AI for obvious intents
+  const fast = classifyIntentFast(userInput, history);
+  if (fast) {
+    console.log(`[IntentAgent] Fast classification: ${fast.intent} (${fast.reasoning})`);
+    return fast;
+  }
+
   const normalizedHistory = normalizeMessages(history);
   const lastMessages = normalizedHistory.slice(-5).map(m => {
     const role = m.role.toUpperCase();
     let content = '';
     if (typeof m.content === 'string') {
-      content = m.content.slice(0, 200); // Limit content length for context
+      content = m.content.slice(0, 200);
     } else if (Array.isArray(m.content)) {
       const textParts = m.content.filter((item: any) => item.type === 'text' || typeof item === 'string');
       content = textParts.map((item: any) => typeof item === 'string' ? item : item.text || '').join(' ').slice(0, 200);
-
       // Detect file attachments
       const hasFiles = m.content.some((item: any) => item.type === 'file' || item.type === 'image_url');
       if (hasFiles) {

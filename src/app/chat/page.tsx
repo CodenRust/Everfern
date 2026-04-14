@@ -190,6 +190,8 @@ export default function ChatPage() {
     const [liveToolCalls, setLiveToolCalls] = useState<ToolCallDisplay[]>([]);
     const [streamingContent, setStreamingContent] = useState("");
     const [streamingThought, setStreamingThought] = useState("");
+    const [activePlanSteps, setActivePlanSteps] = useState<Array<{ id: string; description: string; tool?: string }> | null>(null);
+    const [activePlanTitle, setActivePlanTitle] = useState<string | null>(null);
 
     // User question form state
     const [activeUserQuestions, setActiveUserQuestions] = useState<Array<{
@@ -625,6 +627,8 @@ export default function ChatPage() {
         // Clear any active user question when starting a new request
         setActiveUserQuestions([]);
         setCurrentNode("");
+        setActivePlanSteps(null);
+        setActivePlanTitle(null);
         setMissionTimeline(null);
         setMissionComplete(false);
         hasReceivedUsageData.current = false;
@@ -662,7 +666,8 @@ export default function ChatPage() {
 
                 // Handle ask_user_question tool start - questions are set in onToolCall
                 if (toolName === 'ask_user_question') {
-                    // no-op: full questions array is available in onToolCall result
+                    // Set the flag immediately so mission_complete doesn't clear the form
+                    (window as any).__activeUserQuestion = true;
                 }
             });
             acpApi.onToolCall((record: any) => {
@@ -759,18 +764,14 @@ export default function ChatPage() {
             acpApi.onMissionPhaseChange(({ phase, timeline }: { phase: string; timeline: MissionTimelineType }) => {
                 console.log('[Mission] Phase change received:', phase);
                 setMissionTimeline(timeline);
-
-                // Update current phase and node based on phase
-                setCurrentPhase(phase as "triage" | "planning" | "execution" | "validation" | "completion");
-                setCurrentNode(phase);
+                setCurrentPhase(phase as any);
             });
 
-            acpApi.onMissionComplete(({ timeline, steps, thinkingDuration }: { timeline: MissionTimelineType; steps: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
-                console.log('[Mission] Mission complete received');
-                setMissionTimeline(timeline);
-                setMissionComplete(true);
-                acpApi.removeStreamListeners();
-                isMessageCommittedRef.current = true;
+            acpApi.onPlanCreated?.(({ plan }: { plan: any }) => {
+                if (plan?.steps) {
+                    setActivePlanSteps(plan.steps);
+                    setActivePlanTitle(plan.title || null);
+                }
             });
 
             // Simplified mission complete handler without timeline
@@ -780,9 +781,6 @@ export default function ChatPage() {
 
                 // Delay listener removal to allow pending events (like HITL requests and user questions) to be processed first
                 setTimeout(() => {
-                    const checkTime = Date.now();
-                    const elapsedMs = checkTime - receiveTime;
-
                     // Only remove listeners if no HITL or user question is active
                     const hasActiveHitl = (window as any).__activeHitl || showHitlApproval;
                     const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
@@ -790,17 +788,10 @@ export default function ChatPage() {
 
                     if (!hasAnyActive) {
                         acpApi.removeStreamListeners();
-                    } else {
-                        // Check again in 1 second in case the HITL/question gets resolved
-                        setTimeout(() => {
-                            const stillActiveHitl = (window as any).__activeHitl || showHitlApproval;
-                            const stillActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
-                            const stillActive = stillActiveHitl || stillActiveUserQuestion;
-                            if (!stillActive) {
-                                acpApi.removeStreamListeners();
-                            }
-                        }, 1000);
                     }
+                    // If a question is active, do NOT schedule a retry removal —
+                    // the next handleSend call will call removeStreamListeners() itself
+                    // before re-registering, so we don't need to clean up here.
                 }, 500);
 
                 // Use setTimeout(0) to flush any pending IPC chunk events before we
@@ -1036,7 +1027,8 @@ export default function ChatPage() {
 
                     // Handle ask_user_question tool start - questions are set in onToolCall
                     if (toolName === 'ask_user_question') {
-                        // no-op: full questions array is available in onToolCall result
+                        // Set the flag immediately so mission_complete doesn't clear the form
+                        (window as any).__activeUserQuestion = true;
                     }
                 });
                 api.onViewSkill(({ name }: { name: string }) => {
@@ -1314,7 +1306,7 @@ export default function ChatPage() {
         })();
     }, [inputValue, attachments, folderContexts, isLoading, messages, saveConversation, selectedModel, availableModels, activeConversationId, checkForPlan]);
 
-    const handleQuestionSubmit = useCallback((answers: Record<string, string[]>) => {
+    const handleQuestionSubmit = useCallback((answers: Record<string, string[]>, attachedFiles?: Array<{ name: string; content?: string; base64?: string; mimeType?: string }>) => {
         const answerLines = Object.entries(answers).map(([question, values]) => `${question}: ${values.join(', ')}`);
         const responseText = answerLines.join('\n');
 
@@ -1325,7 +1317,20 @@ export default function ChatPage() {
         streamingContentRef.current = "";
         streamingThoughtRef.current = "";
         liveToolCallsRef.current = [];
+        isMessageCommittedRef.current = false; // Reset so next run's streaming content appears
         (window as any).__activeUserQuestion = false;
+
+        // If files were attached, add them to the attachments state before sending
+        if (attachedFiles && attachedFiles.length > 0) {
+            const newAttachments = attachedFiles.map(f => ({
+                id: crypto.randomUUID(),
+                name: f.name,
+                mimeType: f.mimeType || 'application/octet-stream',
+                content: f.content,
+                base64: f.base64,
+            }));
+            setAttachments(prev => [...prev, ...newAttachments as any]);
+        }
 
         handleSend(responseText);
     }, [handleSend]);
@@ -2073,6 +2078,8 @@ export default function ChatPage() {
                                                     isLive={true}
                                                     currentPhase={currentPhase}
                                                     currentNode={currentNode}
+                                                    planSteps={activePlanSteps}
+                                                    planTitle={activePlanTitle}
                                                 />
                                                 {activeSurface && (
                                                     <SurfaceCanvas data={activeSurface} />

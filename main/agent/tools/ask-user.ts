@@ -4,7 +4,9 @@ export const askUserTool: AgentTool = {
   name: 'ask_user_question',
   description:
     'Present multiple-choice questions to the user for clarification before starting work. ' +
-    'Surfaces tappable options. Do not use for simple text chat.',
+    'Surfaces tappable options. Do not use for simple text chat. ' +
+    'If an option requires the user to provide a file (e.g. "Upload a file"), set requiresFileUpload: true on that option — ' +
+    'the frontend will automatically show a file picker when the user selects it.',
   parameters: {
     type: 'object',
     properties: {
@@ -17,7 +19,16 @@ export const askUserTool: AgentTool = {
             question: { type: 'string', description: 'The question text.' },
             options: {
               type: 'array',
-              items: { type: 'string' },
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Display text for the option.' },
+                  value: { type: 'string', description: 'Value sent back when selected.' },
+                  isRecommended: { type: 'boolean', description: 'Highlight as recommended.' },
+                  requiresFileUpload: { type: 'boolean', description: 'If true, selecting this option opens a file picker so the user can attach a file.' }
+                },
+                required: ['label', 'value']
+              },
               description: 'Possible answers for the user to pick from.'
             },
             multiSelect: { type: 'boolean', description: 'Whether multiple options can be chosen.' }
@@ -77,7 +88,8 @@ export const askUserTool: AgentTool = {
           return {
             label: String(opt.label || opt.value || opt),
             value: String(opt.value || opt.label || opt),
-            isRecommended: Boolean(opt.isRecommended || opt.recommended || false)
+            isRecommended: Boolean(opt.isRecommended || opt.recommended || false),
+            requiresFileUpload: Boolean(opt.requiresFileUpload || false)
           };
         }
         return { label: String(opt), value: String(opt) };

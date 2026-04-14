@@ -4,7 +4,7 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
   packagerConfig: {
     asar: {
-      unpack: '**/*.node',
+      unpack: ['**/*.node', 'out/**/*'],
     },
   },
   rebuildConfig: {},

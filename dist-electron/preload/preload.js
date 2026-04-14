@@ -107,7 +107,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         getPermissionSoundUrl: () => '/sounds/permission.mp3',
         playSound: (soundPath) => electron_1.ipcRenderer.invoke('audio:play-sound', soundPath),
         validateNvidiaModel: (modelId, apiKey) => electron_1.ipcRenderer.invoke('acp:validate-nvidia-model', modelId, apiKey),
-        // Mission Timeline Events 
+        // Mission Timeline Events
         onMissionStepUpdate: (cb) => {
             electron_1.ipcRenderer.on('acp:mission-step-update', (_e, data) => cb(data));
         },
@@ -116,6 +116,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         },
         onMissionComplete: (cb) => {
             electron_1.ipcRenderer.on('acp:mission-complete', (_e, data) => cb(data));
+        },
+        onPlanCreated: (cb) => {
+            electron_1.ipcRenderer.on('acp:plan-created', (_e, data) => cb(data));
         },
         onHitlRequest: (cb) => {
             console.log('[Preload] 🔧 Setting up HITL request listener');
@@ -141,6 +144,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:mission-step-update');
             electron_1.ipcRenderer.removeAllListeners('acp:mission-phase-change');
             electron_1.ipcRenderer.removeAllListeners('acp:mission-complete');
+            electron_1.ipcRenderer.removeAllListeners('acp:plan-created');
             electron_1.ipcRenderer.removeAllListeners('acp:hitl-request');
         },
     },

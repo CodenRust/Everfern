@@ -106,3 +106,10 @@ If you are expanding inference, register the new engine ID in the `ProviderType`
 
 ## Privacy & Footprint
 The architecture treats local directories strictly. All key vaults, application statuses, and context history stores live in your localized filesystem footprint (primarily nested within `~/.everfern/store`). No secrets leave your desktop.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 CodenRust
+

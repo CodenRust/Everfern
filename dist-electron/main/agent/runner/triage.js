@@ -258,14 +258,15 @@ async function withRetry(operation, options) {
             if (attempt === options.maxRetries) {
                 break;
             }
-            // Check if error is retryable (transient network issues)
+            // Check if error is retryable (transient network issues only — NOT timeouts)
             const errorMsg = lastError.message.toLowerCase();
-            const isRetryable = errorMsg.includes('timeout') ||
-                errorMsg.includes('econnrefused') ||
-                errorMsg.includes('etimedout') ||
-                errorMsg.includes('enotfound') ||
-                errorMsg.includes('fetch failed') ||
-                errorMsg.includes('network error');
+            const isRetryable = !errorMsg.includes('timed out') &&
+                !errorMsg.includes('timeout budget') &&
+                (errorMsg.includes('econnrefused') ||
+                    errorMsg.includes('etimedout') ||
+                    errorMsg.includes('enotfound') ||
+                    errorMsg.includes('fetch failed') ||
+                    errorMsg.includes('network error'));
             if (!isRetryable) {
                 throw lastError;
             }
@@ -288,20 +289,63 @@ async function withRetry(operation, options) {
     throw lastError;
 }
 /**
- * AI-powered intent classification agent with optimized timeout handling
- * Features:
- * - Reduced timeout from 3000ms to 2000ms for faster fallback
- * - Retry mechanism with exponential backoff for transient failures
- * - AI client pooling to reduce connection overhead
- * - Improved fallback logic with graceful error handling
+ * Fast synchronous intent classification for obvious cases.
+ * Returns null if the intent is ambiguous and needs AI.
+ */
+function classifyIntentFast(userInput, history) {
+    const normalized = userInput.toLowerCase().trim();
+    // Short affirmatives — inherit from history
+    if (isShortAffirmative(normalized) && history.length > 0) {
+        const prev = extractPreviousIntent(history);
+        if (prev) {
+            return { intent: prev, confidence: 0.95, reasoning: 'Context inheritance: short affirmative' };
+        }
+    }
+    // Very short inputs — likely conversational
+    if (normalized.length < 8) {
+        return { intent: 'conversation', confidence: 0.8, reasoning: 'Fast: very short input' };
+    }
+    // Strong fix/debug signals
+    if (/\b(fix|debug|error|bug|crash|broken|not working|doesn't work|failing)\b/.test(normalized)) {
+        return { intent: 'fix', confidence: 0.85, reasoning: 'Fast: fix/debug keywords' };
+    }
+    // Strong coding signals
+    if (/\b(write|implement|create|add|refactor|code|function|class|component|script)\b/.test(normalized) &&
+        /\b(code|function|class|component|script|method|api|endpoint|module)\b/.test(normalized)) {
+        return { intent: 'coding', confidence: 0.85, reasoning: 'Fast: coding keywords' };
+    }
+    // Strong build signals
+    if (/\b(build|scaffold|generate|setup|initialize|bootstrap)\b.*\b(project|app|application|repo|template)\b/.test(normalized)) {
+        return { intent: 'build', confidence: 0.85, reasoning: 'Fast: build keywords' };
+    }
+    // Strong question signals
+    if (/^(what|how|why|when|where|which|who|can you explain|tell me about)\b/.test(normalized)) {
+        return { intent: 'question', confidence: 0.8, reasoning: 'Fast: question pattern' };
+    }
+    // Greetings
+    if (/^(hi|hello|hey|good morning|good afternoon|thanks|thank you|bye)\b/.test(normalized)) {
+        return { intent: 'conversation', confidence: 0.9, reasoning: 'Fast: greeting' };
+    }
+    // Ambiguous — needs AI
+    return null;
+}
+/**
+ * AI-powered intent classification with fast-path heuristics.
+ * Tries synchronous classification first; only calls AI for ambiguous inputs.
  */
 async function classifyIntentAI(client, userInput, history = []) {
+    // Fast path: skip AI for obvious intents
+    const fast = classifyIntentFast(userInput, history);
+    if (fast) {
+        console.log(`[IntentAgent] Fast classification: ${fast.intent} (${fast.reasoning})`);
+        return fast;
+    }
     const normalizedHistory = (0, message_utils_1.normalizeMessages)(history);
     const lastMessages = normalizedHistory.slice(-5).map(m => {
         const role = m.role.toUpperCase();
         let content = '';
         if (typeof m.content === 'string') {
-            content = m.content.slice(0, 200); // Limit content length for context
+            content = m.content.slice(0, 200);
         }
         else if (Array.isArray(m.content)) {
             const textParts = m.content.filter((item) => item.type === 'text' || typeof item === 'string');
@@ -314,51 +358,21 @@ async function classifyIntentAI(client, userInput, history = []) {
         }
         return `[${role}]: ${content}`;
     }).join('\n');
-    const prompt = `You are an intelligent Intent Classification Agent for an AI coding assistant. Your job is to analyze user input and classify it into the most appropriate category based on semantic meaning, context, and conversation history.
+    const prompt = `Classify the user's intent into exactly one category. Reply with JSON only.
 
-AVAILABLE INTENTS:
-- coding: Writing, refactoring, debugging code/scripts, implementing features, code review
-- research: Web searching, information gathering, investigating topics, looking up documentation
-- task: General operations (file management, shell commands, system tasks, file operations)
-- question: Direct informational questions requiring factual answers (what, how, why questions)
-- conversation: Greetings, social interaction, polite exchanges, acknowledgments
-- build: Creating new projects, scaffolding applications, generating project structures
-- fix: Fixing bugs, resolving errors, troubleshooting issues, debugging problems
-- analyze: Data analysis, visualization, processing datasets/files, reviewing data
-- automate: Setting up workflows, schedules, recurring processes, automation scripts
+Categories: coding, research, task, question, conversation, build, fix, analyze, automate
 
-CLASSIFICATION STRATEGY:
-1. **Context Inheritance**: If the user input is a short affirmative response (yes, ok, proceed, continue, sure, go ahead, looks good, etc.) AND there's a clear previous intent in the conversation history, inherit that intent rather than classifying as 'conversation'.
+Rules:
+- Short affirmatives (yes/ok/proceed/sure) with history → inherit previous intent
+- File attachments: data files → analyze, code files → coding
+- Focus on what the user wants to accomplish
 
-2. **File Context**: If recent messages contain file attachments:
-   - CSV/Excel/JSON/data files → likely 'analyze'
-   - Code files (.ts, .js, .py, etc.) → likely 'coding'
-   - Configuration files → likely 'task' or 'build'
-
-3. **Semantic Analysis**: Focus on the semantic meaning and user's goal, not just keyword matching. Consider:
-   - What is the user trying to accomplish?
-   - What action or outcome do they want?
-   - What domain does this fall into?
-
-4. **Conversation Flow**: Consider the conversation flow and previous exchanges to understand context.
-
-CONVERSATION HISTORY (last 5 messages):
+History (last 5):
 ${lastMessages || 'None'}
 
-CURRENT USER INPUT: "${userInput}"
+Input: "${userInput}"
 
-Analyze the input semantically and provide your classification in JSON format:
-{
-  "intent": "coding|research|task|question|conversation|build|fix|analyze|automate",
-  "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation of why you chose this intent, including context inheritance if applicable"
-}
-
-IMPORTANT:
-- Use semantic understanding, not keyword matching
-- Consider conversation context and file attachments
-- For short affirmatives, check if you should inherit the previous intent
-- Be confident in your classification (aim for 0.8+ confidence when clear)`;
+JSON: {"intent":"<category>","confidence":<0-1>,"reasoning":"<brief>"}`;
     // Get pooled client for better connection reuse
     const pooledClient = clientPool.getClient(client);
     try {
@@ -367,9 +381,10 @@ IMPORTANT:
                 messages: [{ role: 'user', content: prompt }],
                 responseFormat: 'json',
                 temperature: 0.1,
-                maxTokens: 500
+                maxTokens: 80 // Intent JSON is tiny — {"intent":"...","confidence":0.9,"reasoning":"..."}
             });
             let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+            console.log(`[IntentAgent] Raw AI response: ${content.slice(0, 200)}`);
             // Remove markdown code blocks if present
             content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
             const data = JSON.parse(content);
@@ -379,10 +394,10 @@ IMPORTANT:
                 reasoning: data.reasoning || 'AI Intent Classification'
             };
         }, {
-            maxRetries: 2,
+            maxRetries: 1,
             baseDelay: 200,
-            maxDelay: 1000,
-            timeoutMs: 1500 // Reduced from 2000ms to 1500ms for better performance
+            maxDelay: 500,
+            timeoutMs: 5000 // 5s total budget — enough for slow providers, fast enough for UX
         });
         console.log(`[IntentAgent] Classification completed successfully: ${result.intent} (confidence: ${result.confidence})`);
         return result;

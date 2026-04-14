@@ -67,8 +67,8 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
         if (missionTracker)
             missionTracker.startStep('step:hitl');
         try {
-            // Create detailed approval request
-            const toolSummary = state.pendingToolCalls?.map(call => `${call.name}(${JSON.stringify(call.arguments)})`).join(', ') || 'No tools';
+            const toolSummary = state.pendingToolCalls?.map(call => `**${call.name}** — \`${JSON.stringify(call.arguments).slice(0, 120)}\``).join('\n') || 'No tools pending';
+            const reasoning = state.validationResult?.reasoning || 'High-risk operation detected';
             const requestId = crypto.randomUUID();
             const timestamp = new Date().toISOString();
             const approvalRequest = {
@@ -79,60 +79,71 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
                 details: {
                     tools: state.pendingToolCalls || [],
                     summary: toolSummary,
-                    reasoning: state.validationResult?.reasoning || 'High-risk operation detected'
+                    reasoning,
                 },
                 options: ['approve', 'reject', 'modify']
             };
-            // Save HITL request to storage
             if (conversationId) {
-                console.log('[HITL] Saving request to storage:', requestId);
                 (0, hitl_1.saveHitlRequest)(approvalRequest);
-            }
-            // Save state before interrupt
-            if (conversationId) {
                 state_manager_1.stateManager.saveState(conversationId, state);
                 state_manager_1.stateManager.setInterrupted(conversationId, approvalRequest);
             }
-            // Push HITL request to event queue for frontend
-            console.log('[HITL] Pushing hitl_request event to queue, current queue length:', eventQueue?.length || 0);
+            // Use ask_user_question to surface the approval UI — same path as regular questions,
+            // fully wired up on the frontend with the HitlApprovalForm.
+            const { askUserTool } = await Promise.resolve().then(() => __importStar(require('../tools/ask-user')));
+            const hitlResult = await askUserTool.execute({
+                questions: [
+                    {
+                        question: `⚠️ High-risk action requires your approval\n\n${reasoning}\n\nActions to execute:\n${toolSummary}`,
+                        options: ['✅ Approve — proceed with the action', '❌ Reject — cancel and do not proceed'],
+                        multiSelect: false,
+                    }
+                ]
+            }, (msg) => runner.telemetry.info(msg));
+            // Push the ask_user result as a tool_call event so the frontend shows the form
+            eventQueue?.push({
+                type: 'tool_call',
+                toolCall: {
+                    toolName: 'ask_user_question',
+                    args: { questions: hitlResult.data?.questions },
+                    result: hitlResult,
+                },
+            });
+            // Also push the legacy hitl_request event for backward compat
             eventQueue?.push({
                 type: 'hitl_request',
                 request: approvalRequest,
             });
-            console.log('[HITL] Event pushed, new queue length:', eventQueue?.length || 0);
-            // Add a longer delay to ensure the event is fully processed and sent to frontend
-            // before the graph completes and sends mission_complete
-            // This prevents mission_complete from removing listeners before HITL event is handled
-            await new Promise(resolve => setTimeout(resolve, 500));
-            // NOTE: Without checkpointer, we can't use interrupt()
-            // The graph will complete here, and the user must send a new message to resume
-            // The frontend should handle this by showing the approval UI and sending the response
-            console.log('[HITL] ⏸️  HITL approval required - graph will pause');
-            console.log('[HITL] ℹ️  User must respond with approval/rejection to continue');
-            // Don't complete the HITL step yet - wait for approval
-            // if (missionTracker) missionTracker.completeStep('step:hitl');
-            // Return a state that indicates we're waiting for HITL
-            // Don't set approved: false as this will cause the graph to route to END
+            // Give the frontend time to receive the events before graph ends
+            await new Promise(resolve => setTimeout(resolve, 300));
+            runner.telemetry.info('HITL approval required — ending turn, user must respond');
+            if (missionTracker)
+                missionTracker.completeStep('step:hitl');
+            // End this turn. The user's approval/rejection comes back as a new message,
+            // which runner.ts detects via [HITL_APPROVED] / [HITL_REJECTED] markers.
             return {
                 taskPhase: 'awaiting_hitl',
                 hitlApprovalResult: {
-                    approved: undefined, // Don't set to false, as this causes immediate END routing
+                    approved: undefined,
                     response: 'Waiting for human approval',
-                    reasoning: 'HITL approval pending'
-                }
+                    reasoning: 'HITL approval pending — user must respond',
+                },
+                completionSignal: {
+                    reason: 'needs_hitl',
+                    explanation: reasoning,
+                },
             };
         }
         catch (error) {
             if (missionTracker)
                 missionTracker.failStep('step:hitl', error instanceof Error ? error.message : String(error));
-            // Default to rejection on error for safety
             return {
                 taskPhase: 'planning',
                 hitlApprovalResult: {
                     approved: false,
                     response: 'Error occurred during approval process',
-                    reasoning: `HITL approval failed: ${error instanceof Error ? error.message : String(error)}`
-                }
+                    reasoning: `HITL approval failed: ${error instanceof Error ? error.message : String(error)}`,
+                },
             };
         }
     };
@@ -237,14 +248,21 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     })
         .addConditionalEdges('hitl_approval', (state) => {
         const approved = state.hitlApprovalResult?.approved;
+        // approved === true  → user approved, execute the tools
+        // approved === false → user rejected, go back to planner
+        // approved === undefined → waiting for user (turn ends, user responds next)
         if (approved === true) {
             return 'multi_tool_orchestrator';
         }
+        else if (approved === false) {
+            return 'judge'; // surface rejection message to user via judge
+        }
         else {
-            return langgraph_1.END;
+            return langgraph_1.END; // awaiting_hitl — end turn, user's next message resumes
         }
     }, {
         multi_tool_orchestrator: 'multi_tool_orchestrator',
+        judge: 'judge',
         [langgraph_1.END]: langgraph_1.END
     })
         .addEdge('multi_tool_orchestrator', 'brain')

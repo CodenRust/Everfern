@@ -22,7 +22,16 @@ import { AgentRunner } from './agent/runner/runner';
 import { ensureShowUIServer, killShowUIServer } from './agent/runner/showui-server';
 import { AIClient } from './lib/ai-client';
 import { getAllModelsFlat, FlatModelEntry } from './lib/providers';
-import { toggleDebugWindow } from './lib/debug';
+import { toggleDebugWindow, setupLogging } from './lib/debug';
+
+// ── Initialize Logging ──────────────────────────────────────────────
+setupLogging();
+console.log('[Startup] EverFern Main Process starting...');
+console.log('[Startup] Platform:', process.platform);
+console.log('[Startup] Node version:', process.version);
+console.log('[Startup] App path:', app.getAppPath());
+console.log('[Startup] User data:', app.getPath('userData'));
+
 import { globalShortcut } from 'electron';
 import { memorySaveTool } from './agent/tools/memory-save';
 import { dbOps, closeDb } from './lib/db';
@@ -63,8 +72,18 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
 // ── Singletons ──────────────────────────────────────────────────────
 
-const acpManager  = new ACPManager();
-const historyStore = new ChatHistoryStore();
+let acpManager: ACPManager;
+let historyStore: ChatHistoryStore;
+
+try {
+  console.log('[Startup] Initializing ACPManager...');
+  acpManager = new ACPManager();
+  console.log('[Startup] Initializing ChatHistoryStore...');
+  historyStore = new ChatHistoryStore();
+  console.log('[Startup] Singletons initialized.');
+} catch (err) {
+  console.error('[Startup] ❌ Critical failure during singleton initialization:', err);
+}
 
 // Computer-Use Permissions (per session)
 let permissionsGranted = false;
@@ -85,29 +104,43 @@ let installProc: import('child_process').ChildProcess | null = null;
 // ── Window ──────────────────────────────────────────────────────────
 
 function createWindow(): void {
-  const isDev = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
+  const isDev = !app.isPackaged;
+  console.log(`[Window] Creating window (app.isPackaged: ${app.isPackaged}, isDev: ${isDev})`);
+  console.log(`[Window] NODE_ENV: ${process.env.NODE_ENV}`);
 
   mainWindow = new BrowserWindow({
     width: 1200, height: 800,
     minWidth: 800, minHeight: 600,
     frame: false,
-    icon: path.join(__dirname, isDev ? '../../public/images/logos/everfern-rounded.png' : '../../out/images/logos/everfern-rounded.png'),
+    icon: isDev
+      ? path.join(__dirname, '../../public/images/logos/everfern-rounded.png')
+      : path.join(app.getAppPath(), process.platform === 'win32'
+          ? 'public/images/logos/everfern.ico'
+          : 'public/images/logos/everfern-rounded.png'),
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 16, y: 16 },
-    // transparent: true,
-    // backgroundMaterial: 'acrylic',
     backgroundColor: '#1a1a1a',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      // Prevent blank window when GPU cache is unavailable (Windows cache-lock issue)
       backgroundThrottling: false,
+      webSecurity: false, // Temporarily disabled for production path debugging
     },
   });
 
+  // Fallback: Show window after 5 seconds if ready-to-show never fires
+  const showFallback = setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      console.warn('[Window] ready-to-show timed out, forcing show()');
+      mainWindow.show();
+    }
+  }, 5000);
+
   mainWindow.once('ready-to-show', () => {
+    console.log('[Window] ready-to-show received');
+    clearTimeout(showFallback);
     mainWindow?.show();
   });
 
@@ -154,75 +187,130 @@ function createWindow(): void {
     console.log('[Window] Starting tryLoad...');
     tryLoad();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../out/index.html'));
+    console.log('[Window] Production mode detected, using everfern-app protocol');
+    mainWindow.loadURL('everfern-app://./index.html').catch(err => {
+      console.error('[Window] ❌ loadURL failed for everfern-app protocol:', err);
+    });
   }
 
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
-    console.error('[Window] Failed to load:', errorCode, errorDescription);
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[Window] ❌ did-fail-load: ${errorCode} (${errorDescription}) for URL: ${validatedURL}`);
+  });
+
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    const levels = ['Log', 'Info', 'Warn', 'Error'];
+    const levelStr = levels[level] || 'Log';
+    console.log(`[Renderer ${levelStr}] ${message} (at ${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error('[Window] ❌ Renderer process gone:', details);
+  });
+
+  mainWindow.webContents.on('unresponsive', () => {
+    console.warn('[Window] ⚠️ Renderer is unresponsive');
   });
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[Window] Page finished loading');
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    console.log('[Window] Window closed');
+    mainWindow = null;
+  });
 }
 
-// ── Protocol: Local Sites ──────────────────────────────────────────
+// ── Protocol: Local App & Sites ──────────────────────────────────────────
 // registerSchemesAsPrivileged must be called BEFORE app is ready
-// and should only be called once. Since we're using protocol.handle later,
-// we don't actually need registerSchemesAsPrivileged for this use case.
-// The protocol.handle will work without it.
-// If you need to register as privileged, uncomment below:
-// protocol.registerSchemesAsPrivileged([
-//   { scheme: 'everfern-site', privileges: { standard: true, secure: true, supportFetchAPI: true, allowServiceWorkers: true } }
-// ]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'everfern-app', privileges: { standard: true, secure: true, supportFetchAPI: true, allowServiceWorkers: true } },
+  { scheme: 'everfern-site', privileges: { standard: true, secure: true, supportFetchAPI: true, allowServiceWorkers: true } }
+]);
 
 // ── App lifecycle ───────────────────────────────────────────────────
 
 app.whenReady().then(() => {
   console.log('[App] App ready, starting initialization...');
 
-  // ── Migrate legacy store ──────────────────────────────────────────
-  const configDir = path.join(os.homedir(), '.everfern');
-  const oldPath   = path.join(configDir, 'store');
-  const newPath   = path.join(configDir, 'config.json');
+  // ── Protocol Handlers ──────────────────────────────────────────────
 
-  if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
-
-  if (fs.existsSync(oldPath) && fs.lstatSync(oldPath).isFile()) {
-    if (!fs.existsSync(newPath)) {
-      try { fs.renameSync(oldPath, newPath); } catch (e) { console.error('[Migration] rename failed:', e); }
-    } else {
-      try { fs.unlinkSync(oldPath); } catch (e) { console.error('[Migration] cleanup failed:', e); }
-    }
-  }
-
-  createWindow();
-
-  // ── Deferred: Sync Built-In Skills (non-blocking) ─────────────────
-  // Run after window is shown so it doesn't block startup
-  setTimeout(() => {
-    console.log('[App] 🚀 Syncing built-in skills (deferred)...');
+  // Custom protocol for the main application (Next.js out folder)
+  protocol.handle('everfern-app', async (request) => {
     try {
-      syncBuiltInSkills();
-      mergeCustomSkills();
-      console.log('[App] Skills sync completed');
+      const url = new URL(request.url);
+      let filePath = url.pathname;
+      if (filePath === '/' || !filePath || filePath === '.') filePath = '/index.html';
+
+      // Normalize path (handle leading slashes and dots)
+      if (filePath.startsWith('./')) filePath = filePath.substring(1);
+      if (!filePath.startsWith('/')) filePath = '/' + filePath;
+
+      const baseDir = app.isPackaged
+        ? path.join(app.getAppPath(), 'out')
+        : path.join(__dirname, '../../out');
+
+      const absPath = path.join(baseDir, filePath);
+      console.log(`[Protocol] Request: ${request.url} -> ${absPath} (baseDir: ${baseDir}, isPackaged: ${app.isPackaged})`);
+
+      // Try the requested file first
+      if (fs.existsSync(absPath)) {
+        const extension = path.extname(absPath).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          '.html': 'text/html',
+          '.js':   'text/javascript',
+          '.css':  'text/css',
+          '.json': 'application/json',
+          '.png':  'image/png',
+          '.jpg':  'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.gif':  'image/gif',
+          '.svg':  'image/svg+xml',
+          '.ico':  'image/x-icon',
+          '.woff': 'font/woff',
+          '.woff2': 'font/woff2',
+          '.ttf':  'font/ttf',
+          '.otf':  'font/otf',
+        };
+
+        const contentType = mimeTypes[extension] || 'application/octet-stream';
+        const data = fs.readFileSync(absPath);
+
+        return new Response(data, {
+          headers: { 'Content-Type': contentType }
+        });
+      }
+
+      // File not found — try index.html for client-side routing (SPA fallback)
+      console.warn(`[Protocol] ⚠️ 404: ${absPath}, trying index.html for client-side routing`);
+      const indexPath = path.join(baseDir, 'index.html');
+      console.log(`[Protocol] Checking for index.html at: ${indexPath}`);
+
+      if (fs.existsSync(indexPath)) {
+        console.log(`[Protocol] ✅ Found index.html, serving for SPA routing`);
+        const data = fs.readFileSync(indexPath);
+        return new Response(data, {
+          headers: { 'Content-Type': 'text/html' }
+        });
+      }
+
+      console.warn(`[Protocol] ❌ 404: ${absPath} and index.html not found`);
+      console.warn(`[Protocol] baseDir exists: ${fs.existsSync(baseDir)}`);
+      if (fs.existsSync(baseDir)) {
+        const files = fs.readdirSync(baseDir).slice(0, 10);
+        console.warn(`[Protocol] Files in baseDir: ${files.join(', ')}`);
+      }
+      return new Response('Not Found', { status: 404 });
     } catch (err) {
-      console.error('[App] Skills sync failed (non-critical):', err);
+      console.error('[Protocol] ❌ Error handling request:', err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      return new Response(`Internal Server Error: ${errorMsg}`, { status: 500 });
     }
-  }, 3000);
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  globalShortcut.register('CommandOrControl+Shift+P', () => {
-    toggleDebugWindow();
-  });
-
-  // ── Protocol Handler ───────────────────────────────────────────────
+  // Custom protocol for local sites
   protocol.handle('everfern-site', (request) => {
+// ... existing site logic ...
     const url = new URL(request.url);
     const chatId = url.hostname;
     let filePath = url.pathname;
@@ -250,10 +338,20 @@ app.whenReady().then(() => {
 
     return net.fetch(`file://${absPath.replace(/\\/g, '/')}`);
   });
+
+  // ── Create Main Window ─────────────────────────────────────────────
+  createWindow();
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('activate', () => {
+  // On macOS, re-create the window when the dock icon is clicked and no windows are open.
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
 
 // ── ShowUI process cleanup on quit ──────────────────────────────────
@@ -1097,10 +1195,10 @@ ipcMain.handle('acp:stream', async (event, request: {
       } else if (streamEvent.type === 'mission_phase_change') {
         safeSend('acp:mission-phase-change', { phase: streamEvent.phase, timeline: streamEvent.timeline });
       } else if (streamEvent.type === 'mission_complete') {
-        safeSend('acp:mission-complete', { 
-          timeline: streamEvent.timeline, 
+        safeSend('acp:mission-complete', {
+          timeline: streamEvent.timeline,
           steps: streamEvent.steps,
-          thinkingDuration: streamEvent.thinkingDuration 
+          thinkingDuration: streamEvent.thinkingDuration
         });
       } else if (streamEvent.type === 'done') {
         safeSend('acp:stream-chunk', { delta: '', done: true });

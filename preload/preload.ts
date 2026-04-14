@@ -111,8 +111,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPermissionSoundUrl: () => '/sounds/permission.mp3',
     playSound: (soundPath: string) => ipcRenderer.invoke('audio:play-sound', soundPath),
     validateNvidiaModel: (modelId: string, apiKey: string) => ipcRenderer.invoke('acp:validate-nvidia-model', modelId, apiKey),
-    
-    // Mission Timeline Events 
+
+    // Mission Timeline Events
     onMissionStepUpdate: (cb: (data: { step: any; timeline: any }) => void) => {
       ipcRenderer.on('acp:mission-step-update', (_e, data) => cb(data));
     },
@@ -121,6 +121,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     onMissionComplete: (cb: (data: { timeline: any; steps: any[] }) => void) => {
       ipcRenderer.on('acp:mission-complete', (_e, data) => cb(data));
+    },
+    onPlanCreated: (cb: (data: { plan: any }) => void) => {
+      ipcRenderer.on('acp:plan-created', (_e, data) => cb(data));
     },
     onHitlRequest: (cb: (data: any) => void) => {
       console.log('[Preload] 🔧 Setting up HITL request listener');
@@ -147,6 +150,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:mission-step-update');
       ipcRenderer.removeAllListeners('acp:mission-phase-change');
       ipcRenderer.removeAllListeners('acp:mission-complete');
+      ipcRenderer.removeAllListeners('acp:plan-created');
       ipcRenderer.removeAllListeners('acp:hitl-request');
     },
   },
@@ -211,7 +215,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (chatId: string) => ipcRenderer.invoke('vectors:get', chatId),
     delete: (chatId: string) => ipcRenderer.invoke('vectors:delete', chatId),
     stats: () => ipcRenderer.invoke('vectors:stats'),
-    indexMessage: (id: string, chatId: string, role: string, content: string, createdAt: number) => 
+    indexMessage: (id: string, chatId: string, role: string, content: string, createdAt: number) =>
       ipcRenderer.invoke('vectors:index-message', id, chatId, role, content, createdAt),
     refreshConfig: () => ipcRenderer.invoke('vectors:refresh-config'),
   },
@@ -273,6 +277,7 @@ export type ElectronAPI = {
     onMissionStepUpdate: (cb: (data: { step: any; timeline: any }) => void) => void;
     onMissionPhaseChange: (cb: (data: { phase: string; timeline: any }) => void) => void;
     onMissionComplete: (cb: (data: { timeline: any; steps: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => void) => void;
+    onPlanCreated: (cb: (data: { plan: any }) => void) => void;
     onHitlRequest: (cb: (data: any) => void) => void;
     removeStreamListeners: () => void;
   };

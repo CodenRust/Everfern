@@ -224,13 +224,16 @@ const UserQuestionForm = ({
 }: {
     questions: Array<{
         question: string;
-        options: Array<{ label: string; value: string; isRecommended?: boolean }>;
+        options: Array<{ label: string; value: string; isRecommended?: boolean; requiresFileUpload?: boolean }>;
         multiSelect: boolean;
     }>;
-    onSubmit: (answers: Record<string, string[]>) => void;
+    onSubmit: (answers: Record<string, string[]>, attachedFiles?: Array<{ name: string; content?: string; base64?: string; mimeType?: string }>) => void;
 }) => {
     const [currentIndex, setCurrentIndex] = React.useState(0);
     const [answers, setAnswers] = React.useState<Record<string, string[]>>({});
+    const [pendingFileOption, setPendingFileOption] = React.useState<string | null>(null);
+    const [attachedFiles, setAttachedFiles] = React.useState<Array<{ name: string; content?: string; base64?: string; mimeType?: string }>>([]);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const current = questions[currentIndex];
     const total = questions.length;
@@ -238,8 +241,15 @@ const UserQuestionForm = ({
     const isAnswered = currentAnswers.length > 0;
     const allAnswered = questions.every(q => (answers[q.question] || []).length > 0);
 
-    const handleOptionClick = (value: string) => {
+    const handleOptionClick = (value: string, requiresFileUpload?: boolean) => {
         const q = current.question;
+        if (requiresFileUpload) {
+            // Select the option and trigger file picker
+            setAnswers(prev => ({ ...prev, [q]: [value] }));
+            setPendingFileOption(value);
+            setTimeout(() => fileInputRef.current?.click(), 50);
+            return;
+        }
         setAnswers(prev => {
             if (current.multiSelect) {
                 const existing = prev[q] || [];
@@ -254,6 +264,29 @@ const UserQuestionForm = ({
         });
     };
 
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const result = ev.target?.result as string;
+            const isImage = file.type.startsWith('image/');
+            setAttachedFiles(prev => [...prev, {
+                name: file.name,
+                mimeType: file.type,
+                ...(isImage ? { base64: result } : { content: result }),
+            }]);
+        };
+        if (file.type.startsWith('image/')) {
+            reader.readAsDataURL(file);
+        } else {
+            reader.readAsText(file);
+        }
+        // Reset input so same file can be re-selected
+        e.target.value = '';
+    };
+
     const handleNext = () => {
         if (currentIndex < total - 1) setCurrentIndex(i => i + 1);
     };
@@ -263,7 +296,7 @@ const UserQuestionForm = ({
     };
 
     const handleSubmit = () => {
-        if (allAnswered) onSubmit(answers);
+        if (allAnswered) onSubmit(answers, attachedFiles.length > 0 ? attachedFiles : undefined);
     };
 
     if (!current) return null;
@@ -276,6 +309,14 @@ const UserQuestionForm = ({
             padding: 20,
             margin: '16px 0'
         }}>
+            {/* Hidden file input */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+            />
+
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6366f1', fontSize: 14, fontWeight: 600 }}>
@@ -312,10 +353,12 @@ const UserQuestionForm = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                 {current.options.map((option, idx) => {
                     const selected = currentAnswers.includes(option.value);
+                    const isFileOption = option.requiresFileUpload;
+                    const fileAttached = isFileOption && attachedFiles.some(f => pendingFileOption === option.value);
                     return (
                         <button
                             key={idx}
-                            onClick={() => handleOptionClick(option.value)}
+                            onClick={() => handleOptionClick(option.value, option.requiresFileUpload)}
                             style={{
                                 padding: '12px 16px',
                                 borderRadius: 8,
@@ -344,6 +387,11 @@ const UserQuestionForm = ({
                                     )}
                                 </div>
                                 <span>{option.label}</span>
+                                {isFileOption && (
+                                    <span style={{ fontSize: 11, color: '#6366f1', marginLeft: 4 }}>
+                                        📎 {fileAttached ? '✓ File attached' : 'Click to attach file'}
+                                    </span>
+                                )}
                                 {option.isRecommended && (
                                     <span style={{
                                         fontSize: 11, fontWeight: 600, color: '#059669',
@@ -358,6 +406,24 @@ const UserQuestionForm = ({
                     );
                 })}
             </div>
+
+            {/* Attached files summary */}
+            {attachedFiles.length > 0 && (
+                <div style={{ marginBottom: 12, padding: '8px 12px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+                    {attachedFiles.map((f, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#166534' }}>
+                            <span>📎</span>
+                            <span style={{ fontWeight: 500 }}>{f.name}</span>
+                            <button
+                                onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))}
+                                style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: 12 }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Footer: back/next/submit */}
             <div style={{ display: 'flex', justifyContent: total > 1 ? 'space-between' : 'flex-end', gap: 8 }}>

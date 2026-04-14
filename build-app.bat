@@ -51,9 +51,9 @@ echo   SUCCESS! EverFern has been packaged.
 echo =============================================================================
 echo.
 echo Your .exe file has been generated in:
-echo %CD%\dist
+echo %CD%\release
 echo.
 echo Press any key to open the folder...
 pause > nul
-start "" "dist"
+start "" "release"
 exit /b 0

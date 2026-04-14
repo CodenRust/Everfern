@@ -29,6 +29,8 @@ interface AgentTimelineProps {
     showOutput?: boolean;
     currentPhase?: "triage" | "planning" | "execution" | "validation" | "completion";
     currentNode?: string;
+    planSteps?: Array<{ id: string; description: string; tool?: string }> | null;
+    planTitle?: string | null;
 }
 
 const formatDuration = (ms: number): string => {
@@ -122,6 +124,83 @@ const PhaseIndicator = ({ phase, currentNode }: { phase?: string; currentNode?: 
         </motion.div>
     );
 };
+
+// Plan Steps Component — shown during planning phase
+const PlanSteps = ({ steps, title }: { steps: Array<{ id: string; description: string; tool?: string }>; title?: string | null }) => {
+    const [expanded, setExpanded] = React.useState(false);
+    if (!steps || steps.length === 0) return null;
+
+    const toolIcon = (tool?: string) => {
+        if (!tool) return '▸';
+        if (tool.includes('write') || tool.includes('edit')) return '✏️';
+        if (tool.includes('read') || tool.includes('find') || tool.includes('grep')) return '🔍';
+        if (tool.includes('run') || tool.includes('command') || tool.includes('bash')) return '⚡';
+        if (tool.includes('web') || tool.includes('search') || tool.includes('fetch')) return '🌐';
+        return '▸';
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={{
+                margin: '8px 0 12px',
+                borderRadius: 10,
+                border: '1px solid rgba(59,130,246,0.2)',
+                backgroundColor: 'rgba(59,130,246,0.04)',
+                overflow: 'hidden'
+            }}
+        >
+            <button
+                onClick={() => setExpanded(e => !e)}
+                style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '10px 14px', background: 'none', border: 'none',
+                    cursor: 'pointer', textAlign: 'left'
+                }}
+            >
+                <span style={{ fontSize: 13 }}>📋</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#3b82f6', flex: 1 }}>
+                    {title || 'Execution Plan'} <span style={{ fontWeight: 400, color: '#6b7280' }}>({steps.length} steps)</span>
+                </span>
+                <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                    <ChevronDownIcon width={13} height={13} className="text-blue-400" />
+                </motion.span>
+            </button>
+            <AnimatePresence>
+                {expanded && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        style={{ overflow: 'hidden' }}
+                    >
+                        <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {steps.map((step, idx) => (
+                                <div key={step.id || idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                    <span style={{ fontSize: 11, color: '#9ca3af', minWidth: 18, paddingTop: 1 }}>{idx + 1}.</span>
+                                    <span style={{ fontSize: 12, color: '#374151', flex: 1, lineHeight: 1.5 }}>
+                                        {toolIcon(step.tool)} {step.description}
+                                    </span>
+                                    {step.tool && (
+                                        <span style={{
+                                            fontSize: 10, color: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)',
+                                            padding: '1px 6px', borderRadius: 4, whiteSpace: 'nowrap', flexShrink: 0
+                                        }}>
+                                            {step.tool}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
+    );
+};
+
 
 const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast, currentPhase }: {
     tc: ToolCallDisplay;
@@ -280,7 +359,7 @@ const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast, currentPhase }: {
     );
 };
 
-export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, currentPhase, currentNode }: AgentTimelineProps) => {
+export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, currentPhase, currentNode, planSteps, planTitle }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
 
     const nonWriteToolCalls = useMemo(
@@ -292,7 +371,7 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, c
         setExpandedToolId((prev) => (prev === id ? null : id));
     };
 
-    if (!isLive && nonWriteToolCalls.length === 0 && !thought?.trim() && !currentPhase) return null;
+    if (!isLive && nonWriteToolCalls.length === 0 && !thought?.trim() && !currentPhase && !planSteps?.length) return null;
 
     const runningCount = toolCalls.filter((t) => t.status === "running").length;
     const hasRunning = runningCount > 0 || isLive;
@@ -305,6 +384,11 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, c
         >
             {/* Phase Indicator */}
             <PhaseIndicator phase={currentPhase} currentNode={currentNode} />
+
+            {/* Plan Steps — shown during/after planning phase */}
+            {planSteps && planSteps.length > 0 && (
+                <PlanSteps steps={planSteps} title={planTitle} />
+            )}
 
             {thought && (
                 <div style={{ padding: '0 8px 8px' }}>

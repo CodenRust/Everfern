@@ -86,9 +86,9 @@ export const createJudgeNode = (
             return { taskPhase: 'executing' as const, shouldContinueIteration: false };
 
           case 'needs_hitl':
-            // HITL is handled by the validation → hitl_approval path.
-            // If brain signals needs_hitl here (no tool calls), surface to user and end.
-            integrator.completeNode('judge', 'HITL required — surfacing to user');
+            // HITL node already surfaced the approval form to the user and ended the turn.
+            // If we somehow reach judge with needs_hitl, just end cleanly.
+            integrator.completeNode('judge', 'HITL required — ending turn');
             return { taskPhase: 'executing' as const, shouldContinueIteration: false };
 
           case 'cannot_proceed':
