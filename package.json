@@ -34,7 +34,6 @@
     "files": [
       "dist-electron/**/*",
       "package.json",
-      "public/**/*",
       "!**/*.map",
       "!**/*.d.ts"
     ],
@@ -49,9 +48,6 @@
         "to": "out",
         "filter": ["**/*"]
       }
-    ],
-    "asarUnpack": [
-      "out/**/*"
     ],
     "win": {
       "target": [

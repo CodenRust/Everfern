@@ -246,39 +246,61 @@ app.whenReady().then(() => {
       if (filePath.startsWith('./')) filePath = filePath.substring(1);
       if (!filePath.startsWith('/')) filePath = '/' + filePath;
 
+      // In production, extraResources are in process.resourcesPath
+      // In dev, they're in the project root
       const baseDir = app.isPackaged
-        ? path.join(app.getAppPath(), 'out')
+        ? path.join(process.resourcesPath, 'out')
         : path.join(__dirname, '../../out');
 
-      const absPath = path.join(baseDir, filePath);
+      let absPath = path.join(baseDir, filePath);
       console.log(`[Protocol] Request: ${request.url} -> ${absPath} (baseDir: ${baseDir}, isPackaged: ${app.isPackaged})`);
 
-      // Try the requested file first
+      // Check if path exists
       if (fs.existsSync(absPath)) {
-        const extension = path.extname(absPath).toLowerCase();
-        const mimeTypes: Record<string, string> = {
-          '.html': 'text/html',
-          '.js':   'text/javascript',
-          '.css':  'text/css',
-          '.json': 'application/json',
-          '.png':  'image/png',
-          '.jpg':  'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.gif':  'image/gif',
-          '.svg':  'image/svg+xml',
-          '.ico':  'image/x-icon',
-          '.woff': 'font/woff',
-          '.woff2': 'font/woff2',
-          '.ttf':  'font/ttf',
-          '.otf':  'font/otf',
-        };
+        const stats = fs.statSync(absPath);
 
-        const contentType = mimeTypes[extension] || 'application/octet-stream';
-        const data = fs.readFileSync(absPath);
+        // If it's a directory, try to serve index.html from that directory
+        if (stats.isDirectory()) {
+          const dirIndexPath = path.join(absPath, 'index.html');
+          if (fs.existsSync(dirIndexPath)) {
+            console.log(`[Protocol] Directory detected, serving ${dirIndexPath}`);
+            const data = fs.readFileSync(dirIndexPath);
+            return new Response(data, {
+              headers: { 'Content-Type': 'text/html' }
+            });
+          }
+          // Directory exists but no index.html — fall back to root index.html for SPA routing
+          console.log(`[Protocol] Directory ${absPath} has no index.html, falling back to root index.html`);
+          absPath = path.join(baseDir, 'index.html');
+        }
 
-        return new Response(data, {
-          headers: { 'Content-Type': contentType }
-        });
+        // It's a file — serve it
+        if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {
+          const extension = path.extname(absPath).toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            '.html': 'text/html',
+            '.js':   'text/javascript',
+            '.css':  'text/css',
+            '.json': 'application/json',
+            '.png':  'image/png',
+            '.jpg':  'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif':  'image/gif',
+            '.svg':  'image/svg+xml',
+            '.ico':  'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf':  'font/ttf',
+            '.otf':  'font/otf',
+          };
+
+          const contentType = mimeTypes[extension] || 'application/octet-stream';
+          const data = fs.readFileSync(absPath);
+
+          return new Response(data, {
+            headers: { 'Content-Type': contentType }
+          });
+        }
       }
 
       // File not found — try index.html for client-side routing (SPA fallback)

@@ -253,45 +253,74 @@ electron_1.app.whenReady().then(() => {
                 filePath = filePath.substring(1);
             if (!filePath.startsWith('/'))
                 filePath = '/' + filePath;
+            // In production, extraResources are in process.resourcesPath
+            // In dev, they're in the project root
             const baseDir = electron_1.app.isPackaged
-                ? path.join(electron_1.app.getAppPath(), 'out')
+                ? path.join(process.resourcesPath, 'out')
                 : path.join(__dirname, '../../out');
-            const absPath = path.join(baseDir, filePath);
+            let absPath = path.join(baseDir, filePath);
             console.log(`[Protocol] Request: ${request.url} -> ${absPath} (baseDir: ${baseDir}, isPackaged: ${electron_1.app.isPackaged})`);
-            if (!fs.existsSync(absPath)) {
-                console.warn(`[Protocol] ⚠️ 404: ${absPath}, trying index.html for client-side routing`);
-                const indexPath = path.join(baseDir, 'index.html');
-                if (fs.existsSync(indexPath)) {
-                    const data = fs.readFileSync(indexPath);
+            // Check if path exists
+            if (fs.existsSync(absPath)) {
+                const stats = fs.statSync(absPath);
+                // If it's a directory, try to serve index.html from that directory
+                if (stats.isDirectory()) {
+                    const dirIndexPath = path.join(absPath, 'index.html');
+                    if (fs.existsSync(dirIndexPath)) {
+                        console.log(`[Protocol] Directory detected, serving ${dirIndexPath}`);
+                        const data = fs.readFileSync(dirIndexPath);
+                        return new Response(data, {
+                            headers: { 'Content-Type': 'text/html' }
+                        });
+                    }
+                    // Directory exists but no index.html — fall back to root index.html for SPA routing
+                    console.log(`[Protocol] Directory ${absPath} has no index.html, falling back to root index.html`);
+                    absPath = path.join(baseDir, 'index.html');
+                }
+                // It's a file — serve it
+                if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {
+                    const extension = path.extname(absPath).toLowerCase();
+                    const mimeTypes = {
+                        '.html': 'text/html',
+                        '.js': 'text/javascript',
+                        '.css': 'text/css',
+                        '.json': 'application/json',
+                        '.png': 'image/png',
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.gif': 'image/gif',
+                        '.svg': 'image/svg+xml',
+                        '.ico': 'image/x-icon',
+                        '.woff': 'font/woff',
+                        '.woff2': 'font/woff2',
+                        '.ttf': 'font/ttf',
+                        '.otf': 'font/otf',
+                    };
+                    const contentType = mimeTypes[extension] || 'application/octet-stream';
+                    const data = fs.readFileSync(absPath);
                     return new Response(data, {
-                        headers: { 'Content-Type': 'text/html' }
+                        headers: { 'Content-Type': contentType }
                     });
                 }
-                console.warn(`[Protocol] ❌ 404: ${absPath} and index.html not found`);
-                return new Response('Not Found', { status: 404 });
             }
-            const extension = path.extname(absPath).toLowerCase();
-            const mimeTypes = {
-                '.html': 'text/html',
-                '.js': 'text/javascript',
-                '.css': 'text/css',
-                '.json': 'application/json',
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.gif': 'image/gif',
-                '.svg': 'image/svg+xml',
-                '.ico': 'image/x-icon',
-                '.woff': 'font/woff',
-                '.woff2': 'font/woff2',
-                '.ttf': 'font/ttf',
-                '.otf': 'font/otf',
-            };
-            const contentType = mimeTypes[extension] || 'application/octet-stream';
-            const data = fs.readFileSync(absPath);
-            return new Response(data, {
-                headers: { 'Content-Type': contentType }
-            });
+            // File not found — try index.html for client-side routing (SPA fallback)
+            console.warn(`[Protocol] ⚠️ 404: ${absPath}, trying index.html for client-side routing`);
+            const indexPath = path.join(baseDir, 'index.html');
+            console.log(`[Protocol] Checking for index.html at: ${indexPath}`);
+            if (fs.existsSync(indexPath)) {
+                console.log(`[Protocol] ✅ Found index.html, serving for SPA routing`);
+                const data = fs.readFileSync(indexPath);
+                return new Response(data, {
+                    headers: { 'Content-Type': 'text/html' }
+                });
+            }
+            console.warn(`[Protocol] ❌ 404: ${absPath} and index.html not found`);
+            console.warn(`[Protocol] baseDir exists: ${fs.existsSync(baseDir)}`);
+            if (fs.existsSync(baseDir)) {
+                const files = fs.readdirSync(baseDir).slice(0, 10);
+                console.warn(`[Protocol] Files in baseDir: ${files.join(', ')}`);
+            }
+            return new Response('Not Found', { status: 404 });
         }
         catch (err) {
             console.error('[Protocol] ❌ Error handling request:', err);
