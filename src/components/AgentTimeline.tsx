@@ -362,8 +362,19 @@ const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast, currentPhase }: {
 export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, currentPhase, currentNode, planSteps, planTitle }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
 
+    // Debug: Log when toolCalls prop changes
+    React.useEffect(() => {
+        console.log('[AgentTimeline] toolCalls prop updated:', toolCalls.length, 'tools');
+        console.log('[AgentTimeline] toolCalls:', toolCalls.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label, status: tc.status })));
+    }, [toolCalls]);
+
     const nonWriteToolCalls = useMemo(
-        () => toolCalls.filter((tc) => tc.toolName !== "write" && tc.toolName !== "write_file"),
+        () => {
+            const filtered = toolCalls.filter((tc) => tc.toolName !== "write" && tc.toolName !== "write_file");
+            console.log('[AgentTimeline] Filtered out write tools. Original:', toolCalls.length, 'Filtered:', filtered.length);
+            console.log('[AgentTimeline] Filtered tools:', filtered.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label })));
+            return filtered;
+        },
         [toolCalls]
     );
 

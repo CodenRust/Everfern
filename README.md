@@ -1,115 +1,281 @@
-# EverFern Desktop
+<div align="center">
+  <img src="public/images/banner.jpg" alt="EverFern" width="100%" />
+</div>
 
-EverFern Desktop is a next-generation intelligent OS orchestration platform. It is an AI-first desktop application designed with an asynchronous executing graph (Agent Runner), providing autonomous system tools, robust high-fidelity telemetry, and intelligent context persistence.
+# EverFern
 
-The application relies on a dual-process architecture:
-- **Backend**: An Electron Main Process orchestrating the AGI graph, tools, and local OS-level operations.
-- **Frontend**: A Next.js (App Router) Renderer Process driving a highly dynamic, glassmorphic streaming UI.
+> Your autonomous AI workplace agent — intelligent OS orchestration at your fingertips.
 
-## Architecture Overview
+**EverFern** is a next-generation AI-first desktop application that brings autonomous intelligence to your workflow. Built on a sophisticated graph-based agent engine, it orchestrates complex tasks, manages system operations, and provides real-time streaming insights—all while keeping your data local and private.
 
-```mermaid
-graph TD
-    subgraph Frontend [Next.js Renderer Process]
-        UI[React / UI Components]
-        Chat[Chat Interface & Artifact Viewer]
-        Setup[Onboarding & Settings]
-    end
+[Website](https://everfern.vercel.app) • [Documentation](#documentation) • [Community](#community) • [License](LICENSE)
 
-    subgraph Backend [Electron Main Process]
-        IPC[IPC Bridge]
-        AgentRunner[Agent Orchestration Engine]
-        Store[Context & Settings Store]
-        Tools[OS & ACP Tools]
-    end
+---
 
-    subgraph Providers [AI Inference Providers]
-        Local[Local: Ollama, LMStudio]
-        Cloud[Cloud: EverFern, OpenAI, Anthropic, OpenRouter, Nvidia NIM, DeepSeek]
-    end
+## ✨ Features
 
-    UI <-->|IPC Events / Stream Signals| IPC
-    IPC <--> AgentRunner
-    AgentRunner <--> Store
-    AgentRunner <--> Tools
-    AgentRunner <--> Providers
-```
+- **🤖 Autonomous Agent Engine** — Graph-based orchestration with intelligent task decomposition, planning, and execution
+- **⚡ Real-time Streaming UI** — Next.js-powered glassmorphic interface with live token streaming and artifact rendering
+- **🛠️ Multi-Provider Support** — Seamless integration with local (Ollama, LMStudio) and cloud AI providers (OpenAI, Anthropic, DeepSeek, and more)
+- **📊 High-Fidelity Telemetry** — Detailed insights into agent behavior, node transitions, and resource utilization
+- **🔒 Privacy-First Architecture** — All data stays local; no secrets leave your desktop
+- **🎨 Rich Artifact Viewer** — Interactive visualization for diffs, code, execution plans, and more
+- **💾 Intelligent Context Persistence** — Semantic caching and conversation history management
 
-### Core Components
+---
 
-1. **Next.js Real-time Frontend (`src/app`)**
-    - **Streaming UI**: Leverages an SSE-like abstraction over Electron's IPC bridge to stream text tokens, logic fragments, and tool-call indicators seamlessly.
-    - **Artifact Rendering**: Contains a rich visualization engine (`ArtifactsPanel`, `DiffViewer`, `PlanViewerPanel`) allowing high-quality interactive preview formatting for diffs, code implementations, and execution walkthroughs.
-
-2. **Graph-Based Agent Engine (`main/agent/runner`)**
-    - The engine bypasses traditional simple loops in favor of a **LangGraph-inspired state-machine graph**. It decomposes abstract tasks, actively plans discrete execution steps, invokes dynamic models, and processes OS-side-effects resiliently across different nodes.
-    - Available nodes include:
-        - `Triage`: Classifies user intent, computes context window limits, and intelligently decomposes requirements.
-        - `Planner`: Compiles deterministic steps to generate actionable pipelines.
-        - `Execute Tools`: Resolves schema matches to invoke file, search, and OS shell commands iteratively and concurrently.
-        - `Call Model`: Evaluates active state boundaries across vision (VLM) or standard LLMs.
-
-3. **Telemetry Logger (`main/agent/helpers`)**
-    - An animated command-line proxy logger configured natively in `telemetry-logger.ts`. It provides high-fidelity insight into backend agent behavior (Node transitions, Cache lookup hits, Context Token pressure, Iteration timers, Resource checks).
-
-## AGI Execution Node Workflow
-
-```mermaid
-stateDiagram-v2
-    [*] --> SessionInitiate: User Request
-    
-    state SessionInitiate {
-        CacheCheck: Semantic Cache Verify
-        ToolDef: Load Tool Definitions
-        MsgCompile: Compile Context Messages
-        
-        CacheCheck --> ToolDef
-        ToolDef --> MsgCompile
-    }
-
-    SessionInitiate --> Triage: Booting Complete
-    
-    Triage --> Planner: Actionable intent derived
-    Triage --> CallModel: Informational intent derived
-    
-    Planner --> ExecuteTools: Executing strategy map
-    ExecuteTools --> CallModel: Process tool results
-    CallModel --> ExecuteTools: Model generates new tool specs
-    CallModel --> Output: Objective satisfied
-    
-    Output --> [*]
-```
-
-## Development & Build Instructions
+## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js (v18 or higher)
-- npm / yarn / pnpm
+- Node.js v18 or higher
+- npm, yarn, or pnpm
 
-### Getting Started
-
-Install modules and start the development cluster. Behind the scenes, the run script spawns the React rendering engine alongside the TS-monitored Electron main backend simultaneously.
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/everfern/desktop.git
+cd desktop
+
+# Install dependencies
 npm install
+
+# Start development server
 npm run dev
 ```
 
-There is an ongoing reliance on native environment settings (`NEXT_TELEMETRY_DISABLED=1` and `UV_THREADPOOL_SIZE`).
+The development environment will launch both the React frontend and Electron backend simultaneously.
 
-### Local Provider Mapping
-The application has built-in integration classes catering to multi-provider fallbacks. Current integrations managed within `main/lib/providers.ts` scale across:
-- **Local Targets:** Ollama, LMStudio.
-- **Remote Providers:** EverFern Native, OpenAI, Google Gemini, Anthropic, DeepSeek, OpenRouter, and Nvidia NIM.
+### Build for Production
 
-If you are expanding inference, register the new engine ID in the `ProviderType` configuration bound to `main/acp/types.ts`.
+```bash
+# Build Next.js and Electron
+npm run build
 
-## Privacy & Footprint
-The architecture treats local directories strictly. All key vaults, application statuses, and context history stores live in your localized filesystem footprint (primarily nested within `~/.everfern/store`). No secrets leave your desktop.
+# Create distributable packages
+npm run make
+```
 
-## License
+---
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 📚 Documentation
 
-Copyright (c) 2026 CodenRust
+### Architecture Overview
 
+EverFern uses a dual-process architecture optimized for AI workloads:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend (Next.js)                        │
+│  • React Components & Streaming UI                          │
+│  • Chat Interface & Artifact Viewer                         │
+│  • Settings & Onboarding                                    │
+└────────────────────┬────────────────────────────────────────┘
+                     │ IPC Bridge
+┌────────────────────▼────────────────────────────────────────┐
+│                   Backend (Electron)                         │
+│  • Agent Orchestration Engine (LangGraph)                   │
+│  • Tool Execution & OS Integration                          │
+│  • Context Store & Settings Management                      │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+    ┌───▼──┐    ┌───▼──┐    ┌───▼──┐
+    │Local │    │Cloud │    │Tools │
+    │AI    │    │AI    │    │& OS  │
+    └──────┘    └──────┘    └──────┘
+```
+
+### Agent Execution Flow
+
+The agent processes requests through a sophisticated state machine:
+
+1. **Triage** — Analyzes user intent, decomposes tasks, and computes context limits
+2. **Planner** — Generates deterministic execution strategies
+3. **Execute Tools** — Invokes file operations, searches, and shell commands
+4. **Call Model** — Evaluates state and generates responses
+5. **Output** — Returns results to the user
+
+### Supported AI Providers
+
+**Local:**
+- Ollama
+- LMStudio
+
+**Cloud:**
+- EverFern Native
+- OpenAI
+- Google Gemini
+- Anthropic Claude
+- DeepSeek
+- OpenRouter
+- Nvidia NIM
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+```bash
+NEXT_TELEMETRY_DISABLED=1    # Disable Next.js telemetry
+UV_THREADPOOL_SIZE=4         # Thread pool size for async operations
+```
+
+### Provider Setup
+
+Configure your AI provider in the application settings. EverFern automatically handles provider fallbacks and manages API keys securely in your local filesystem.
+
+---
+
+## 🏗️ Project Structure
+
+```
+everfern/
+├── src/
+│   ├── app/                    # Next.js App Router
+│   │   ├── chat/              # Chat interface & components
+│   │   ├── settings/          # Configuration UI
+│   │   └── layout.tsx         # Root layout
+│   └── components/            # Shared React components
+├── main/
+│   ├── agent/                 # Agent orchestration engine
+│   │   ├── runner/            # Graph execution & nodes
+│   │   ├── tools/             # Tool implementations
+│   │   └── helpers/           # Utilities & telemetry
+│   ├── acp/                   # AI provider management
+│   ├── lib/                   # Core libraries
+│   └── main.ts                # Electron entry point
+├── public/                    # Static assets
+└── package.json               # Dependencies & scripts
+```
+
+---
+
+## 🔐 Privacy & Security
+
+EverFern is built with privacy as a core principle:
+
+- **Local-First Storage** — All data, keys, and history stored in `~/.everfern/store`
+- **No Cloud Sync** — Your conversations and context never leave your machine
+- **Secure Credentials** — API keys encrypted and stored locally
+- **Transparent Telemetry** — Optional telemetry for debugging; disabled by default
+
+---
+
+## 🧪 Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+npm test
+
+# Run with UI
+npm test:ui
+
+# Generate coverage report
+npm test:coverage
+```
+
+Tests cover:
+- Agent node behavior and state transitions
+- Tool execution and error handling
+- Frontend component rendering and interactions
+- IPC communication and event handling
+
+---
+
+## 🐛 Troubleshooting
+
+### AI Provider Connection Issues
+
+If you see `ECONNREFUSED` errors:
+
+1. Verify your local AI provider is running (Ollama, LMStudio)
+2. Check the configured endpoint (default: `localhost:11434` for Ollama)
+3. Switch to a cloud provider in settings if local provider is unavailable
+
+### Performance Issues
+
+- Check telemetry logs for context window pressure
+- Reduce conversation history if needed
+- Verify system resources (CPU, memory)
+- Consider using a faster AI model
+
+### UI Not Updating
+
+- Restart the application
+- Clear browser cache: `~/.everfern/store/cache`
+- Check browser console for errors (DevTools: Ctrl+Shift+I)
+
+---
+
+## 📊 Development
+
+### Code Style
+
+- TypeScript for type safety
+- ESLint for code quality
+- Prettier for formatting
+
+```bash
+npm run lint
+```
+
+### Building Locally
+
+```bash
+# Development build
+npm run dev
+
+# Production build
+npm run build
+
+# Create installer
+npm run make
+```
+
+---
+
+## 🚀 Performance Optimization
+
+EverFern includes several optimizations:
+
+- **Semantic Caching** — Reduces redundant API calls
+- **Parallel Tool Execution** — Concurrent operations when possible
+- **Context Window Management** — Intelligent message pruning
+- **Graph Checkpointing** — Resume capability for long-running tasks
+
+---
+
+## 🤝 Community
+
+We welcome contributions! Whether it's bug reports, feature requests, or code contributions:
+
+- **Issues** — Report bugs or suggest features on GitHub
+- **Discussions** — Join our community conversations
+- **Contributing** — See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+**Copyright © 2026 EverFern Community**
+
+---
+
+## 🙏 Acknowledgments
+
+Built with:
+- [LangGraph](https://langchain-ai.github.io/langgraph/) — Agent orchestration
+- [Next.js](https://nextjs.org/) — Frontend framework
+- [Electron](https://www.electronjs.org/) — Desktop application framework
+- [TypeScript](https://www.typescriptlang.org/) — Type-safe development
+
+---
+
+**Made with ❤️ by the EverFern Community**

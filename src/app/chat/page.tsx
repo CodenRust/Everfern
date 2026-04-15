@@ -454,6 +454,18 @@ export default function ChatPage() {
 
     useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+    // Debug: Log when activeUserQuestions changes
+    useEffect(() => {
+        console.log('[Frontend] activeUserQuestions changed:', activeUserQuestions);
+        console.log('[Frontend] activeUserQuestions.length:', activeUserQuestions.length);
+        if (activeUserQuestions.length > 0) {
+            console.log('[Frontend] ✅ Approval form should be visible now');
+            console.log('[Frontend] First question:', activeUserQuestions[0]);
+        } else {
+            console.log('[Frontend] ⚠️ No active questions - form will not show');
+        }
+    }, [activeUserQuestions]);
+
     useEffect(() => {
         if (showSettings && config) {
             setSettingsEngine(config.engine || "everfern");
@@ -947,7 +959,22 @@ export default function ChatPage() {
         if (msgs.length === 0) return;
         const id = activeConversationId || crypto.randomUUID();
         if (!activeConversationId) setActiveConversationId(id);
-        const conversation = { id, title: msgs[0].content.slice(0, 60) + (msgs[0].content.length > 60 ? "..." : ""), messages: msgs.map(m => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, thinkingDuration: m.thinkingDuration, toolCalls: m.toolCalls ? m.toolCalls.map(({ icon, ...rest }) => rest) : undefined })), provider: config?.provider || "everfern", createdAt: msgs[0].timestamp.toISOString(), updatedAt: new Date().toISOString() };
+        const conversation = {
+            id,
+            title: msgs[0].content.slice(0, 60) + (msgs[0].content.length > 60 ? "..." : ""),
+            messages: msgs.map(m => ({
+                id: m.id || crypto.randomUUID(),
+                role: m.role,
+                content: m.content,
+                thought: m.thought,
+                thinkingDuration: m.thinkingDuration,
+                stopped: m.stopped, // Preserve stopped flag
+                toolCalls: m.toolCalls ? m.toolCalls.map(({ icon, ...rest }) => rest) : undefined
+            })),
+            provider: config?.provider || "everfern",
+            createdAt: msgs[0].timestamp.toISOString(),
+            updatedAt: new Date().toISOString()
+        };
         if ((window as any).electronAPI?.history?.save) await (window as any).electronAPI.history.save(conversation);
     }, [activeConversationId, config?.provider]);
 
@@ -972,6 +999,7 @@ export default function ChatPage() {
     }, [voiceOutputEnabled, voiceProvider, voiceElevenlabsKey, voiceVoiceId]);
 
     const handleSend = useCallback((overrideValue?: any) => {
+        console.log('[Frontend handleSend] CALLED - Starting new message send');
         const textToUse = typeof overrideValue === 'string' ? overrideValue : inputValue;
         if ((!textToUse.trim() && attachments.length === 0 && folderContexts.length === 0) || isLoading) return;
         const folderContextText = folderContexts.length > 0 ? `\n\n[Shared folder context]\n${folderContexts.map(f => `- ${f.path}`).join('\n')}\n\nNote: This folder structure is provided as passive context. You do not need to process, scan, or organize these files automatically. However, if the user explicitly asks you to take an action on these files in this message, you MUST fulfill their request using your tools immediately without asking for extra confirmation.` : '';
@@ -996,13 +1024,22 @@ export default function ChatPage() {
 
         const currentM = availableModels.find(m => m.id === selectedModel) || availableModels[0];
 
+        // CRITICAL: Remove old stream listeners BEFORE resetting the flag
+        // This prevents race condition where old handler sets flag to true after we reset it
+        const api = (window as any).electronAPI?.acp;
+        if (api?.removeStreamListeners) {
+            console.log('[Frontend handleSend] Removing old stream listeners');
+            api.removeStreamListeners();
+        }
+
+        // Now it's safe to reset the flag - no old handlers can interfere
+        console.log('[Frontend handleSend] Resetting isMessageCommittedRef to false');
+        isMessageCommittedRef.current = false;
+
         (async () => {
-            const api = (window as any).electronAPI?.acp;
-            isMessageCommittedRef.current = false;
             isHandlingPlanRef.current = false;
             try {
                 if (!api?.stream) throw new Error('No AI provider configured.');
-                api.removeStreamListeners();
                 api.onAgentPermissionRequest(() => {
                     const soundUrl = api?.getPermissionSoundUrl?.();
                     if (soundUrl) {
@@ -1015,15 +1052,33 @@ export default function ChatPage() {
                     setShowPermissionModal(true);
                 });
                 api.onToolStart(({ toolName, toolArgs }: { toolName: string; toolArgs: Record<string, unknown> }) => {
+                    console.log('[Frontend] 🔧 Received tool_start:', toolName, 'with args:', toolArgs);
+                    console.log('[Frontend] Current liveToolCalls length BEFORE adding:', liveToolCallsRef.current.length);
+                    console.log('[Frontend] Current liveToolCalls:', liveToolCallsRef.current.map(tc => ({ id: tc.id, toolName: tc.toolName, status: tc.status })));
+
                     if (toolName === 'ask_user_question') {
                         console.log('[Frontend] Received ask_user_question tool_start:', JSON.stringify({ toolName, toolArgs }, null, 2));
                     }
                     if (toolName === 'computer_use') { setIsComputerUseActive(true); setComputerUseStep('Starting...'); }
+
                     const display = resolveToolDisplay(toolName, toolArgs);
+                    console.log('[Frontend] Resolved display for', toolName, ':', display);
+
                     const newTc: ToolCallDisplay = { id: crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
-                    toolCallMap.current.set(toolName + '_running', newTc.id);
-                    liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
-                    setLiveToolCalls(liveToolCallsRef.current);
+                    const mapKey = toolName + '_running';
+
+                    console.log('[Frontend] Created new ToolCallDisplay:', { id: newTc.id, toolName: newTc.toolName, label: newTc.label, status: newTc.status });
+                    console.log('[Frontend] Adding to toolCallMap with key:', mapKey, 'id:', newTc.id);
+                    toolCallMap.current.set(mapKey, newTc.id);
+
+                    // CRITICAL: Create a new array to trigger React re-render
+                    const updatedToolCalls = [...liveToolCallsRef.current, newTc];
+                    liveToolCallsRef.current = updatedToolCalls;
+                    setLiveToolCalls(updatedToolCalls);
+
+                    console.log('[Frontend] ✅ Added tool to timeline:', toolName);
+                    console.log('[Frontend] Total tools AFTER adding:', liveToolCallsRef.current.length);
+                    console.log('[Frontend] Updated liveToolCalls:', liveToolCallsRef.current.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label, status: tc.status })));
 
                     // Handle ask_user_question tool start - questions are set in onToolCall
                     if (toolName === 'ask_user_question') {
@@ -1057,6 +1112,72 @@ export default function ChatPage() {
                     // Debug: Log the tool call structure
                     if (record.toolName === 'ask_user_question') {
                         console.log('[Frontend] 📥 Received ask_user_question tool call');
+                        console.log('[Frontend] Tool call data:', JSON.stringify(record, null, 2));
+                        console.log('[Frontend] Current activeUserQuestions length:', activeUserQuestions.length);
+                        console.log('[Frontend] Current __activeUserQuestion flag:', (window as any).__activeUserQuestion);
+                    }
+
+                    // CRITICAL: Handle ask_user_question FIRST, before checking existingId
+                    // HITL approval sends tool_call without tool_start, so existingId won't exist
+                    if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
+                        console.log('[Frontend] ✅ Processing ask_user_question (HITL or regular)');
+                        console.log('[Frontend] Result data:', JSON.stringify(record.result.data, null, 2));
+
+                        // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
+                        (window as any).__activeUserQuestion = true;
+                        console.log('[Frontend] Set __activeUserQuestion flag to true');
+
+                        const data = record.result.data;
+                        const normalizeOpts = (opts: any[]) => {
+                            console.log('[Frontend] Normalizing options:', opts);
+                            return (opts || []).map((opt: any) => ({
+                                label: typeof opt === 'string' ? opt : opt.label || opt.value || String(opt),
+                                value: typeof opt === 'string' ? opt : opt.value || opt.label || String(opt),
+                                isRecommended: typeof opt === 'object' ? (opt.isRecommended || false) : false
+                            }));
+                        };
+
+                        if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+                            console.log('[Frontend] Found questions array with', data.questions.length, 'questions');
+                            const normalized = data.questions.map((q: any) => {
+                                console.log('[Frontend] Normalizing question:', q);
+                                return {
+                                    question: q.question,
+                                    options: normalizeOpts(q.options),
+                                    multiSelect: q.multiSelect || false
+                                };
+                            });
+                            console.log('[Frontend] Normalized questions:', normalized);
+                            setActiveUserQuestions(normalized);
+                            console.log(`[Frontend] ✅ Called setActiveUserQuestions with ${normalized.length} questions`);
+
+                            // Force a re-render
+                            setIsLoading(false);
+                        } else if (data.question) {
+                            console.log('[Frontend] Found single question:', data.question);
+                            const normalized = [{
+                                question: typeof data.question === 'string' ? data.question : data.question.question,
+                                options: normalizeOpts(data.options),
+                                multiSelect: data.multiSelect || false
+                            }];
+                            console.log('[Frontend] Normalized single question:', normalized);
+                            setActiveUserQuestions(normalized);
+                            console.log('[Frontend] ✅ Called setActiveUserQuestions with 1 question');
+
+                            // Force a re-render
+                            setIsLoading(false);
+                        } else {
+                            console.error('[Frontend] ❌ No valid question data found in tool_call');
+                            console.error('[Frontend] Data structure:', data);
+                            (window as any).__activeUserQuestion = false;
+                        }
+
+                        // Don't process further for ask_user_question - it doesn't need timeline display
+                        console.log('[Frontend] Returning early from ask_user_question handler');
+                        return;
+                    } else if (record.toolName === 'ask_user_question') {
+                        console.error('[Frontend] ❌ ask_user_question tool_call missing required data');
+                        console.error('[Frontend] Record:', JSON.stringify(record, null, 2));
                     }
 
                     if (record.toolName === 'computer_use') { setIsComputerUseActive(false); setComputerUseStep(''); }
@@ -1115,40 +1236,6 @@ export default function ChatPage() {
                         toolCallMap.current.delete(key);
                         liveToolCallsRef.current = updatedToolCalls;
                         setLiveToolCalls(updatedToolCalls);
-
-                        // Handle ask_user_question tool specially
-                        if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
-                            // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
-                            (window as any).__activeUserQuestion = true;
-
-                            const data = record.result.data;
-                            const normalizeOpts = (opts: any[]) => (opts || []).map((opt: any) => ({
-                                label: typeof opt === 'string' ? opt : opt.label || opt.value || String(opt),
-                                value: typeof opt === 'string' ? opt : opt.value || opt.label || String(opt),
-                                isRecommended: typeof opt === 'object' ? (opt.isRecommended || false) : false
-                            }));
-
-                            if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-                                const normalized = data.questions.map((q: any) => ({
-                                    question: q.question,
-                                    options: normalizeOpts(q.options),
-                                    multiSelect: q.multiSelect || false
-                                }));
-                                setActiveUserQuestions(normalized);
-                                console.log(`[Frontend] Set ${normalized.length} questions`);
-                            } else if (data.question) {
-                                setActiveUserQuestions([{
-                                    question: typeof data.question === 'string' ? data.question : data.question.question,
-                                    options: normalizeOpts(data.options),
-                                    multiSelect: data.multiSelect || false
-                                }]);
-                            } else {
-                                console.error('[Frontend] ❌ No valid question data found in tool_call');
-                                (window as any).__activeUserQuestion = false;
-                            }
-                        } else if (record.toolName === 'ask_user_question') {
-                            console.error('[Frontend] ❌ ask_user_question tool_call missing required data');
-                        }
                     }
                 });
                 api.onThought(({ content }: { content: string }) => {
@@ -1206,12 +1293,18 @@ export default function ChatPage() {
                     api.removeStreamListeners();
                 });
 
+                console.log('[Frontend handleSend] Registering NEW onStreamChunk handler');
                 api.onStreamChunk(({ delta, done }: { delta: string; done: boolean }) => {
-                    if (isMessageCommittedRef.current) return;
+                    console.log(`[Frontend onStreamChunk] delta="${delta}", done=${done}, isMessageCommittedRef=${isMessageCommittedRef.current}`);
+                    if (isMessageCommittedRef.current) {
+                        console.log('[Frontend onStreamChunk] BLOCKED by isMessageCommittedRef guard');
+                        return;
+                    }
                     if (!done) {
                         accumulated += delta;
                         streamingContentRef.current = accumulated;
                         setStreamingContent(accumulated);
+                        console.log(`[Frontend onStreamChunk] Accumulated: "${accumulated.substring(0, 50)}..."`);
                     } else {
                         api.removeStreamListeners();
                         isMessageCommittedRef.current = true;
@@ -1222,15 +1315,20 @@ export default function ChatPage() {
                             t.status === 'running' ? { ...t, status: 'done' as const } : t
                         );
 
+                        // Check if the message was stopped by user
+                        const wasStopped = finalContent.includes('🛑 Stopped by user.');
+                        const cleanContent = wasStopped ? finalContent.replace(/\n\n🛑 Stopped by user\./g, '').trim() : finalContent;
+
                         // Only create assistant message if there's actual content or tool calls
-                        if (finalContent || finalThought || finalToolCalls.length > 0) {
+                        if (cleanContent || finalThought || finalToolCalls.length > 0 || wasStopped) {
                             const assistantMsg: Message = {
                                 id: crypto.randomUUID(),
                                 role: "assistant",
-                                content: finalContent,
+                                content: cleanContent || "Working...",
                                 thought: finalThought,
                                 timestamp: new Date(),
                                 toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                                stopped: wasStopped,
                             };
 
                             setStreamingContent("");
@@ -1240,7 +1338,7 @@ export default function ChatPage() {
                             setIsComputerUseActive(false);
                             setMessages(prev => {
                                 // Prevent duplicate message if the last message is identical
-                                if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                                if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content && !wasStopped) {
                                     console.warn('[Chat] Duplicate message prevented:', assistantMsg.content.substring(0, 50));
                                     return prev;
                                 }
@@ -1249,7 +1347,7 @@ export default function ChatPage() {
                                 return final;
                             });
 
-                            if (voiceOutputEnabled && voiceProvider === "elevenlabs" && voiceElevenlabsKey)
+                            if (voiceOutputEnabled && voiceProvider === "elevenlabs" && voiceElevenlabsKey && !wasStopped)
                                 handlePlayVoiceResponse(assistantMsg.content);
                         } else {
                             // No content at all - just clean up
@@ -1568,12 +1666,39 @@ export default function ChatPage() {
 
             {isLoading ? (
                 <button onClick={() => {
+                    console.log('[Frontend] Stop button clicked - aborting agent');
                     (window as any).electronAPI?.acp?.stop?.();
+
+                    // Commit the current streaming content as a stopped message
+                    const stoppedContent = streamingContent || "Working...";
+                    const finalToolCalls = liveToolCalls.map(t =>
+                        t.status === 'running' ? { ...t, status: 'done' as const } : t
+                    );
+
+                    const assistantMsg: Message = {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content: stoppedContent,
+                        thought: streamingThought || undefined,
+                        timestamp: new Date(),
+                        toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                        stopped: true, // Mark as stopped by user
+                    };
+
+                    setMessages(prev => {
+                        const final = [...prev, assistantMsg];
+                        saveConversation(final);
+                        return final;
+                    });
+
+                    // Clean up state
                     setIsLoading(false);
                     isMessageCommittedRef.current = true;
                     setStreamingContent("");
                     setStreamingThought("");
                     setLiveToolCalls([]);
+
+                    console.log('[Frontend] Agent stopped and message saved to history');
                 }}
                     style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(239, 68, 68, 0.15)", border: "none", color: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                     <StopIcon width={16} height={16} />
@@ -2024,6 +2149,24 @@ export default function ChatPage() {
                                                                 currentPhase={currentPhase}
                                                                 currentNode={currentNode}
                                                             />
+                                                            {msg.stopped && (
+                                                                <div style={{
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: 8,
+                                                                    padding: '10px 14px',
+                                                                    marginTop: 12,
+                                                                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                                                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                                                                    borderRadius: 10,
+                                                                    fontSize: 13,
+                                                                    color: '#ef4444',
+                                                                    fontWeight: 500
+                                                                }}>
+                                                                    <StopIcon width={14} height={14} />
+                                                                    <span>Stopped by user</span>
+                                                                </div>
+                                                            )}
                                                             {(() => {
                                                                 const { cleanContent, artifacts } = extractFileArtifacts(msg.content || '');
                                                                 const hasContent = cleanContent && cleanContent.trim().length > 0;

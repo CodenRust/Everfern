@@ -27,6 +27,7 @@ export interface Message {
     timestamp: Date;
     toolCalls?: ToolCallDisplay[];
     attachments?: FileAttachment[];
+    stopped?: boolean; // True if the agent was stopped by the user
 }
 
 export interface FileAttachment {

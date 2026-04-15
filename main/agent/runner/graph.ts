@@ -25,16 +25,28 @@ export const buildGraph = (
   missionTracker?: MissionTracker,
   shouldAbort?: () => boolean,
 ) => {
+  // CRITICAL FIX: Disable graph caching to prevent eventQueue stale reference bug
+  // The cached graph captures the eventQueue from the first invocation in closure.
+  // On subsequent invocations (resume flow), a new eventQueue is created but the
+  // cached graph nodes still reference the old one, causing chunks to be lost.
+  //
+  // Previous behavior:
+  // - First message: new eventQueue → graph built → chunks flow correctly
+  // - Second message: new eventQueue created BUT cached graph uses old eventQueue
+  //   → backend pushes to new queue, graph nodes push to old queue → chunks lost
+  //
+  // Solution: Always rebuild graph to ensure nodes reference the current eventQueue
+
   // Create cache key based on runner configuration + graph version
   const cacheKey = `graph_v2_${runner.config?.maxIterations || 50}`;
 
-  // Return cached graph if available
-  if (graphCache.has(cacheKey)) {
-    console.log('\n╔════════════════════════════════════════════════════════════╗');
-    console.log('║  📦 GRAPH CACHE HIT                                        ║');
-    console.log('╚════════════════════════════════════════════════════════════╝');
-    return graphCache.get(cacheKey);
-  }
+  // DISABLED: Graph caching causes eventQueue stale reference bug
+  // if (graphCache.has(cacheKey)) {
+  //   console.log('\n╔════════════════════════════════════════════════════════════╗');
+  //   console.log('║  📦 GRAPH CACHE HIT                                        ║');
+  //   console.log('╚════════════════════════════════════════════════════════════╝');
+  //   return graphCache.get(cacheKey);
+  // }
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
   console.log('║  🏗️  BUILDING AGENT EXECUTION GRAPH                        ║');
@@ -325,13 +337,14 @@ export const buildGraph = (
   console.log('\n╔════════════════════════════════════════════════════════════╗');
   console.log('║  ✅ GRAPH COMPILED SUCCESSFULLY                            ║');
   console.log('╠════════════════════════════════════════════════════════════╣');
-  console.log('║  Nodes: 7 | Edges: 9 | Cache: Enabled                     ║');
+  console.log('║  Nodes: 7 | Edges: 9 | Cache: DISABLED (eventQueue fix)   ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
+  // DISABLED: Graph caching causes eventQueue stale reference bug
   // Cache the compiled graph
-  console.log('[Graph] 💾 Caching compiled graph...');
-  graphCache.set(cacheKey, finalGraph);
-  console.log('[Graph] ✅ Graph cached successfully');
+  // console.log('[Graph] 💾 Caching compiled graph...');
+  // graphCache.set(cacheKey, finalGraph);
+  // console.log('[Graph] ✅ Graph cached successfully');
 
   return finalGraph;
 };

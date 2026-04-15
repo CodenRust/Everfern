@@ -24,7 +24,7 @@ export async function runAgentStep(
   options: AgentStepOptions
 ): Promise<Partial<GraphStateType>> {
   const { runner, toolDefs, eventQueue, maxVerifyRetries = 3, systemPromptOverride, nodeName } = options;
-  
+
   runner.telemetry.transition(nodeName);
   const iterations = state.iterations || 0;
   runner.telemetry.metrics(iterations);
@@ -52,7 +52,7 @@ export async function runAgentStep(
 
     // Optima: Normalization
     const normalizedMessages = normalizeMessages(state.messages);
-    
+
     // Inject system prompt override if provided
     if (systemPromptOverride && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
       normalizedMessages[0].content = systemPromptOverride;
@@ -84,7 +84,7 @@ export async function runAgentStep(
 
     // Limit message history for performance (keep last 20 messages)
     const maxMessages = 20;
-    const limitedMessages = prunedMessages.length > maxMessages 
+    const limitedMessages = prunedMessages.length > maxMessages
       ? [prunedMessages[0], ...prunedMessages.slice(-maxMessages + 1)]
       : prunedMessages;
 
@@ -92,6 +92,7 @@ export async function runAgentStep(
       messages: limitedMessages,
       tools: toolDefs,
       onStreamChunk: (chunk: string) => {
+        console.log(`[Stream] Received chunk: "${chunk}" (buffer: ${thoughtBuffer.length} chars)`);
         thoughtBuffer += chunk;
         const hasStart = thoughtBuffer.includes('<think>') || thoughtBuffer.includes('<thought>');
         const hasEnd = thoughtBuffer.includes('</think>') || thoughtBuffer.includes('</thought>');
@@ -101,40 +102,63 @@ export async function runAgentStep(
           const tag = thoughtBuffer.includes('<think>') ? '<think>' : '<thought>';
           const parts = thoughtBuffer.split(tag);
           if (parts[0]) {
+            console.log(`[Stream] Sending chunk before <think>: "${parts[0]}"`);
             eventQueue?.push({ type: 'chunk', content: parts[0] });
             streamedText += parts[0];
           }
-          if (parts[1]) eventQueue?.push({ type: 'thought', content: parts[1] });
+          if (parts[1]) {
+            console.log(`[Stream] Sending thought: "${parts[1].slice(0, 50)}..."`);
+            eventQueue?.push({ type: 'thought', content: parts[1] });
+          }
           thoughtBuffer = '';
         } else if (isThinking && hasEnd) {
           isThinking = false;
           const tag = thoughtBuffer.includes('</think>') ? '</think>' : '</thought>';
           const parts = thoughtBuffer.split(tag);
-          if (parts[0]) eventQueue?.push({ type: 'thought', content: parts[0] });
+          if (parts[0]) {
+            console.log(`[Stream] Sending thought end: "${parts[0].slice(0, 50)}..."`);
+            eventQueue?.push({ type: 'thought', content: parts[0] });
+          }
           if (parts[1]) {
+            console.log(`[Stream] Sending chunk after </think>: "${parts[1]}"`);
             eventQueue?.push({ type: 'chunk', content: parts[1] });
             streamedText += parts[1];
           }
           thoughtBuffer = '';
         } else if (isThinking) {
+          console.log(`[Stream] In thinking mode, sending as thought`);
           eventQueue?.push({ type: 'thought', content: chunk });
           thoughtBuffer = '';
         } else {
           const trimmed = thoughtBuffer.trim();
           if (!trimmed.startsWith('{') && !trimmed.startsWith('<')) {
+            console.log(`[Stream] Sending regular chunk: "${thoughtBuffer}"`);
             eventQueue?.push({ type: 'chunk', content: thoughtBuffer });
             streamedText += thoughtBuffer;
             thoughtBuffer = '';
           } else if (thoughtBuffer.length > 20) {
+            console.log(`[Stream] Buffer > 20 chars, sending: "${thoughtBuffer.slice(0, 50)}..."`);
             eventQueue?.push({ type: 'chunk', content: thoughtBuffer });
             streamedText += thoughtBuffer;
             thoughtBuffer = '';
+          } else {
+            console.log(`[Stream] Buffering (starts with { or <, length: ${thoughtBuffer.length})`);
           }
         }
       },
     };
 
     const response = await client.chat(request);
+
+    // Flush any remaining content in thoughtBuffer after streaming completes
+    if (thoughtBuffer.trim()) {
+      console.log(`[Stream] Flushing remaining buffer: "${thoughtBuffer}"`);
+      eventQueue?.push({ type: 'chunk', content: thoughtBuffer });
+      streamedText += thoughtBuffer;
+      thoughtBuffer = '';
+    }
+
+    console.log(`[Stream] Total streamed text length: ${streamedText.length} chars`);
 
     if (response.usage) {
       const usage = response.usage;
@@ -149,7 +173,7 @@ export async function runAgentStep(
     }
 
     const scrubbed = textContent.replace(/<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>/ig, '').trim();
-    
+
     // If model didn't provide tool calls but intent requires them, parse or nudge
     if (!response.toolCalls || response.toolCalls.length === 0) {
       const parserResult = parseTextToToolCalls(textContent, (runner as any).tools);
@@ -168,8 +192,10 @@ export async function runAgentStep(
     // Always send the final response to frontend if it's not a tool call
     // This ensures the AI's message is displayed even if streaming already happened
     if (response.finishReason !== 'tool_calls' && scrubbed) {
-      // Only send if we haven't already streamed this exact content
-      if (!streamedText || !streamedText.includes(scrubbed)) {
+      // Send the scrubbed content if we haven't streamed anything yet,
+      // or if the scrubbed content is different from what was streamed
+      const needsFinalChunk = !streamedText || streamedText.trim() !== scrubbed.trim();
+      if (needsFinalChunk) {
         eventQueue?.push({ type: 'chunk', content: scrubbed });
       }
     }
