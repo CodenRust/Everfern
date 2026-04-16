@@ -70,9 +70,14 @@ Respond with JSON:
   }
 }
 
-export const createPlannerNode = (runner: AgentRunner, eventQueue?: StreamEvent[], missionTracker?: MissionTracker) => {
+export const createPlannerNode = (runner: AgentRunner, eventQueue?: StreamEvent[], missionTracker?: MissionTracker, shouldAbort?: () => boolean) => {
   const integrator = createMissionIntegrator(missionTracker);
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
+    // Check for abort signal before processing
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     integrator.startNode('planner', 'Compiling execution pipeline');
 
     // Emit phase change event for planning phase

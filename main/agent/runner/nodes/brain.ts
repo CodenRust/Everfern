@@ -100,11 +100,17 @@ export const createBrainNode = (
   runner: AgentRunner,
   eventQueue?: StreamEvent[],
   missionTracker?: MissionTracker,
-  toolDefs?: ToolDefinition[]
+  toolDefs?: ToolDefinition[],
+  shouldAbort?: () => boolean
 ) => {
   const integrator = createMissionIntegrator(missionTracker);
 
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
+    // Check for abort signal before processing
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     const tools = toolDefs || (runner as any)._buildToolDefinitions();
 
     // Emit phase change event for execution phase (only on first brain call)

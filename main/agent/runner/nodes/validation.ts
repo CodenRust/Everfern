@@ -19,7 +19,7 @@ async function assessToolRisk(toolCalls: any[], client?: AIClient): Promise<bool
 
   try {
     const toolSummary = toolCalls.map(tc => `${tc.name}(${JSON.stringify(tc.arguments).slice(0, 100)})`).join(', ');
-    
+
     const prompt = `Analyze these tool calls and determine if they pose high risk (destructive operations, system modifications, data loss potential).
 
 Tool calls: ${toolSummary}
@@ -66,9 +66,9 @@ Respond with JSON:
 
 /**
  * Evaluates whether the task objective has been achieved and the mission should complete.
- * 
+ *
  * Uses AI-based semantic analysis instead of keyword matching to determine completion.
- * 
+ *
  * @param state - Current graph state
  * @param client - AI client for semantic analysis
  * @returns true if task should complete (route to END), false if should continue iterating
@@ -100,12 +100,12 @@ async function shouldCompleteTask(state: GraphStateType, client?: any): Promise<
     const role = (m as any).role || (m as any)._getType?.();
     return role === 'assistant' || role === 'ai';
   });
-  
+
   if (lastAssistantMessage && client) {
-    const content = typeof lastAssistantMessage.content === 'string' 
-      ? lastAssistantMessage.content 
+    const content = typeof lastAssistantMessage.content === 'string'
+      ? lastAssistantMessage.content
       : (lastAssistantMessage.content as any)?.text || '';
-    
+
     if (content && content.length > 10) {
       try {
         // Use AI to determine if the task is complete
@@ -154,13 +154,18 @@ Respond with JSON:
   return false;
 }
 
-export const createValidationNode = (runner: AgentRunner, missionTracker?: MissionTracker) => {
+export const createValidationNode = (runner: AgentRunner, missionTracker?: MissionTracker, shouldAbort?: () => boolean) => {
   const integrator = createMissionIntegrator(missionTracker);
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
+    // Check for abort signal before processing
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     integrator.startNode('validation', 'Validating tool calls for safety');
     try {
       runner.telemetry.transition('validation');
-      
+
       // Use AI to assess tool risk instead of keyword matching
       const isHighRisk = await assessToolRisk(state.pendingToolCalls || [], runner.client);
 

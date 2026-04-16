@@ -21,9 +21,13 @@ const MAX_ITERATIONS = 50;
  *   - No signal AND AI/heuristic says the response has zero substance
  *   - Max iterations not yet reached
  */
-const createJudgeNode = (runner, eventQueue, missionTracker) => {
+const createJudgeNode = (runner, eventQueue, missionTracker, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
+        // Check for abort signal before processing
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const startTime = Date.now();
         integrator.startNode('judge', 'Evaluating mission completion');
         // Emit phase change event for validation phase

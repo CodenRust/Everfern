@@ -39,6 +39,27 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('system:ollama-pull-line');
         }
     },
+    // ── System Tray ──────────────────────────────────────────────────
+    tray: {
+        showWindow: () => electron_1.ipcRenderer.invoke('tray:show-window'),
+        hideToTray: () => electron_1.ipcRenderer.invoke('tray:hide-to-tray'),
+        isSupported: () => electron_1.ipcRenderer.invoke('tray:is-supported'),
+        updateMenu: () => electron_1.ipcRenderer.invoke('tray:update-menu'),
+        onOpenSettings: (cb) => {
+            electron_1.ipcRenderer.on('tray:open-settings', () => cb());
+        },
+        removeListeners: () => {
+            electron_1.ipcRenderer.removeAllListeners('tray:open-settings');
+        }
+    },
+    // ── Auto-Start ────────────────────────────────────────────────────
+    autoStart: {
+        getStatus: () => electron_1.ipcRenderer.invoke('autostart:get-status'),
+        enable: () => electron_1.ipcRenderer.invoke('autostart:enable'),
+        disable: () => electron_1.ipcRenderer.invoke('autostart:disable'),
+        getInfo: () => electron_1.ipcRenderer.invoke('autostart:get-info'),
+        validateSupport: () => electron_1.ipcRenderer.invoke('autostart:validate-support'),
+    },
     // ── Config Store ───────────────────────────────────────────────
     saveConfig: (config) => electron_1.ipcRenderer.invoke('save-config', config),
     loadConfig: () => electron_1.ipcRenderer.invoke('load-config'),
@@ -127,6 +148,17 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
                 cb(data);
             });
         },
+        sendHitlResponse: (response) => {
+            console.log('[Preload] 📤 Sending HITL response to main process:', response);
+            electron_1.ipcRenderer.send('acp:hitl-response', response);
+        },
+        onHitlResponseProcessed: (cb) => {
+            console.log('[Preload] 🔧 Setting up HITL response processed listener');
+            electron_1.ipcRenderer.on('acp:hitl-response-processed', (_e, data) => {
+                console.log('[Preload] ✅ HITL response processed received from main process:', data);
+                cb(data);
+            });
+        },
         removeStreamListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:stream-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:thought');
@@ -146,6 +178,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:mission-complete');
             electron_1.ipcRenderer.removeAllListeners('acp:plan-created');
             electron_1.ipcRenderer.removeAllListeners('acp:hitl-request');
+            electron_1.ipcRenderer.removeAllListeners('acp:hitl-response-processed');
         },
     },
     // ── Chat History ───────────────────────────────────────────────
@@ -208,5 +241,16 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     debug: {
         getLastEvent: () => electron_1.ipcRenderer.invoke('debug:get-last-event'),
         getChatHistory: () => electron_1.ipcRenderer.invoke('debug:get-chat-history'),
+    },
+    // ── Integration Management ─────────────────────────────────────────
+    integration: {
+        getConfig: () => electron_1.ipcRenderer.invoke('integration:get-config'),
+        saveConfig: (config) => electron_1.ipcRenderer.invoke('integration:save-config', config),
+        testConnection: (platform) => electron_1.ipcRenderer.invoke('integration:test-connection', platform),
+    },
+    // ── Providers ──────────────────────────────────────────────────────
+    providers: {
+        getAll: () => electron_1.ipcRenderer.invoke('providers:get-all'),
+        getModels: (providerType) => electron_1.ipcRenderer.invoke('providers:get-models', providerType),
     },
 });

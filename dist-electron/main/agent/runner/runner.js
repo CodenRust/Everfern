@@ -48,6 +48,7 @@ const skills_loader_1 = require("./skills-loader");
 const tools_manager_1 = require("./tools_manager");
 const telemetry_logger_1 = require("../helpers/telemetry-logger");
 const state_manager_1 = require("./state-manager");
+const abort_manager_1 = require("./abort-manager");
 const pi_tools_1 = require("../tools/pi-tools");
 // Lifecycle/Infra
 const agent_events_1 = require("../infra/agent-events");
@@ -198,6 +199,26 @@ class AgentRunner {
             }
         };
     }
+    /**
+     * Abort the current execution
+     * Requirement 1.1: Stop button shall immediately set the Stream_Abort_Flag to true
+     */
+    abort() {
+        abort_manager_1.globalAbortManager.setAborted();
+        console.log('[AgentRunner] 🛑 Abort requested - execution will be terminated');
+    }
+    /**
+     * Check if execution is currently aborted
+     */
+    isAborted() {
+        return abort_manager_1.globalAbortManager.streamAborted;
+    }
+    /**
+     * Get abort timing information for debugging
+     */
+    getAbortTiming() {
+        return abort_manager_1.globalAbortManager.getAbortTiming();
+    }
     shouldCaptureScreenshot(userInput) {
         const text = typeof userInput === 'string' ? userInput : JSON.stringify(userInput);
         const explicitVisionKeywords = /take.*screenshot|capture.*screen|see.*screen|show.*screen|look.*at.*screen|view.*screen|desktop|click|open.*app|find.*icon|locate.*button|open.*window|minimize|maximize|close.*window|browser|gui automation|computer use/i;
@@ -320,8 +341,12 @@ class AgentRunner {
         await new Promise(resolve => setImmediate(resolve));
         this.telemetry.updateSpinner('Building execution graph...');
         console.log('[AgentRunner] 🔄 Building execution graph...');
+        // Reset abort state for new execution
+        abort_manager_1.globalAbortManager.reset();
+        // Create shouldAbort callback for graph nodes
+        const shouldAbort = abort_manager_1.globalAbortManager.createShouldAbortCallback();
         // Build graph asynchronously to avoid blocking the event loop
-        const graph = await Promise.resolve().then(() => (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, missionTracker, this.config.shouldAbort));
+        const graph = await Promise.resolve().then(() => (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, missionTracker, shouldAbort));
         console.log('[AgentRunner] ✅ Graph built successfully');
         await new Promise(resolve => setImmediate(resolve));
         this.telemetry.updateSpinner('Starting agent...');
@@ -331,11 +356,16 @@ class AgentRunner {
         let graphDone = false;
         (async () => {
             try {
+                // Check abort before starting graph execution
+                // Requirement 1.2: Agent_Runner shall check the flag before each node execution
+                abort_manager_1.globalAbortManager.checkAbort();
                 console.log('[AgentRunner] 🔄 Getting graph state...');
                 const threadConfig = { configurable: { thread_id: convId }, recursionLimit: 100 };
                 const currentState = await graph.getState(threadConfig);
                 console.log('[AgentRunner] ✅ Graph state retrieved');
                 const { Command } = await Promise.resolve().then(() => __importStar(require('@langchain/langgraph')));
+                // Check abort before graph invocation
+                abort_manager_1.globalAbortManager.checkAbort();
                 if (currentState && currentState.next && currentState.next.length > 0) {
                     console.log('[AgentRunner] 🔄 Resuming interrupted session...');
                     this.telemetry.info(`Resuming session ${convId} from interrupted state...`);
@@ -365,8 +395,19 @@ class AgentRunner {
             catch (err) {
                 console.error('[AgentRunner] Graph Error:', err);
                 const errorMsg = err instanceof Error ? err.message : String(err);
+                // Handle abort errors specially
+                if (err instanceof abort_manager_1.AbortError || errorMsg.includes('Execution aborted by user')) {
+                    console.log('[AgentRunner] 🛑 Execution aborted by user');
+                    eventQueue.push({
+                        type: 'chunk',
+                        content: '\n\n🛑 Stopped by user.'
+                    });
+                    missionTracker.fail('Execution stopped by user');
+                    this.telemetry.warn('Execution aborted by user (stop button clicked)');
+                    this.telemetry.terminate(false, 'User abort');
+                }
                 // Specialized handling for rate limits
-                if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit')) {
+                else if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit')) {
                     eventQueue.push({
                         type: 'chunk',
                         content: `\n\n⚠️ **Rate Limit Reached**: The AI provider (Gemini) is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.`

@@ -8,6 +8,29 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+// ── Type Definitions for Providers ────────────────────────────────
+
+export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'ollama' | 'ollama-cloud' | 'lmstudio' | 'everfern' | 'gemini' | 'nvidia' | 'openrouter';
+
+export interface ProviderMeta {
+  type: ProviderType;
+  name: string;
+  description: string;
+  requiresApiKey: boolean;
+  isLocal: boolean;
+  defaultModel: string;
+  engine: 'local' | 'online' | 'everfern';
+  baseUrl?: string;
+  enabled?: boolean;  // Whether the provider is configured and available
+}
+
+export interface FlatModelEntry {
+  id: string;           // model ID passed to API calls
+  name: string;         // human-readable display name
+  provider: string;     // display name of provider
+  providerType: ProviderType;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── Window Controls ────────────────────────────────────────────
   window: {
@@ -39,6 +62,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('system:ollama-install-line');
       ipcRenderer.removeAllListeners('system:ollama-pull-line');
     }
+  },
+
+  // ── System Tray ──────────────────────────────────────────────────
+  tray: {
+    showWindow:   () => ipcRenderer.invoke('tray:show-window'),
+    hideToTray:   () => ipcRenderer.invoke('tray:hide-to-tray'),
+    isSupported:  () => ipcRenderer.invoke('tray:is-supported'),
+    updateMenu:   () => ipcRenderer.invoke('tray:update-menu'),
+    onOpenSettings: (cb: () => void) => {
+      ipcRenderer.on('tray:open-settings', () => cb());
+    },
+    removeListeners: () => {
+      ipcRenderer.removeAllListeners('tray:open-settings');
+    }
+  },
+
+  // ── Auto-Start ────────────────────────────────────────────────────
+  autoStart: {
+    getStatus:        () => ipcRenderer.invoke('autostart:get-status'),
+    enable:           () => ipcRenderer.invoke('autostart:enable'),
+    disable:          () => ipcRenderer.invoke('autostart:disable'),
+    getInfo:          () => ipcRenderer.invoke('autostart:get-info'),
+    validateSupport:  () => ipcRenderer.invoke('autostart:validate-support'),
   },
 
   // ── Config Store ───────────────────────────────────────────────
@@ -132,6 +178,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
         cb(data);
       });
     },
+    sendHitlResponse: (response: string) => {
+      console.log('[Preload] 📤 Sending HITL response to main process:', response);
+      ipcRenderer.send('acp:hitl-response', response);
+    },
+    onHitlResponseProcessed: (cb: (data: { message: string; shouldSendAsMessage: boolean }) => void) => {
+      console.log('[Preload] 🔧 Setting up HITL response processed listener');
+      ipcRenderer.on('acp:hitl-response-processed', (_e, data) => {
+        console.log('[Preload] ✅ HITL response processed received from main process:', data);
+        cb(data);
+      });
+    },
 
     removeStreamListeners: () => {
       ipcRenderer.removeAllListeners('acp:stream-chunk');
@@ -152,6 +209,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:mission-complete');
       ipcRenderer.removeAllListeners('acp:plan-created');
       ipcRenderer.removeAllListeners('acp:hitl-request');
+      ipcRenderer.removeAllListeners('acp:hitl-response-processed');
     },
   },
 
@@ -225,6 +283,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLastEvent: () => ipcRenderer.invoke('debug:get-last-event'),
     getChatHistory: () => ipcRenderer.invoke('debug:get-chat-history'),
   },
+
+  // ── Integration Management ─────────────────────────────────────────
+  integration: {
+    getConfig: () => ipcRenderer.invoke('integration:get-config'),
+    saveConfig: (config: any) => ipcRenderer.invoke('integration:save-config', config),
+    testConnection: (platform: string) => ipcRenderer.invoke('integration:test-connection', platform),
+  },
+
+  // ── Providers ──────────────────────────────────────────────────────
+  providers: {
+    getAll: () => ipcRenderer.invoke('providers:get-all'),
+    getModels: (providerType: string) => ipcRenderer.invoke('providers:get-models', providerType),
+  },
 });
 
 // ── Type Export (for renderer use) ────────────────────────────────
@@ -249,6 +320,21 @@ export type ElectronAPI = {
     ollamaPull:          (modelName: string) => Promise<{ success: boolean; code: number }>;
     onOllamaInstallLine: (cb: (data: { line: string, type: 'stdout'|'stderr' }) => void) => void;
     removeOllamaListeners: () => void;
+  };
+  tray: {
+    showWindow:   () => Promise<{ success: boolean }>;
+    hideToTray:   () => Promise<{ success: boolean }>;
+    isSupported:  () => Promise<{ supported: boolean }>;
+    updateMenu:   () => Promise<{ success: boolean }>;
+    onOpenSettings: (cb: () => void) => void;
+    removeListeners: () => void;
+  };
+  autoStart: {
+    getStatus:        () => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
+    enable:           () => Promise<{ success: boolean; error?: string }>;
+    disable:          () => Promise<{ success: boolean; error?: string }>;
+    getInfo:          () => Promise<{ success: boolean; info?: { platform: string; method: string; location: string }; error?: string }>;
+    validateSupport:  () => Promise<{ success: boolean; validation?: { supported: boolean; reason?: string }; error?: string }>;
   };
   saveConfig: (config: any) => Promise<{ success: boolean; error?: string }>;
   loadConfig: ()            => Promise<{ success: boolean; config: any; error?: string }>;
@@ -279,6 +365,8 @@ export type ElectronAPI = {
     onMissionComplete: (cb: (data: { timeline: any; steps: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => void) => void;
     onPlanCreated: (cb: (data: { plan: any }) => void) => void;
     onHitlRequest: (cb: (data: any) => void) => void;
+    sendHitlResponse: (response: string) => void;
+    onHitlResponseProcessed: (cb: (data: { message: string; shouldSendAsMessage: boolean }) => void) => void;
     removeStreamListeners: () => void;
   };
   history: {
@@ -336,5 +424,28 @@ export type ElectronAPI = {
   debug: {
     getLastEvent: () => Promise<any>;
     getChatHistory: () => Promise<any>;
+  };
+  integration: {
+    getConfig: () => Promise<{
+      telegram: {
+        enabled: boolean;
+        botToken: string;
+        webhookUrl?: string;
+        connected: boolean;
+      };
+      discord: {
+        enabled: boolean;
+        botToken: string;
+        applicationId: string;
+        webhookUrl?: string;
+        connected: boolean;
+      };
+    }>;
+    saveConfig: (config: any) => Promise<void>;
+    testConnection: (platform: string) => Promise<boolean>;
+  };
+  providers: {
+    getAll: () => Promise<ProviderMeta[]>;
+    getModels: (providerType: string) => Promise<FlatModelEntry[]>;
   };
 };

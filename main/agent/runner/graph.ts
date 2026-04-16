@@ -55,6 +55,11 @@ export const buildGraph = (
   const config = (runner as any).config;
 
   const hitlNode = async (state: GraphStateType) => {
+    // Check for abort signal before processing
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     runner.telemetry.transition('hitl');
     if (missionTracker) missionTracker.startStep('step:hitl');
 
@@ -150,8 +155,8 @@ export const buildGraph = (
   };
 
   const orchestrator = createExecuteToolsNode(runner, tools, config, eventQueue, conversationId, missionTracker, shouldAbort, (runner as any).client);
-  const validator = createValidationNode(runner, missionTracker);
-  const judge = createJudgeNode(runner, eventQueue, missionTracker);
+  const validator = createValidationNode(runner, missionTracker, shouldAbort);
+  const judge = createJudgeNode(runner, eventQueue, missionTracker, shouldAbort);
 
   console.log('\n┌─────────────────────────────────────────────────────────────┐');
   console.log('│  🧠 CORE NODES                                              │');
@@ -165,7 +170,7 @@ export const buildGraph = (
   console.log('└─────────────────────────────────────────────────────────────┘');
 
   // Create the Brain node - central orchestrator
-  const brain = createBrainNode(runner, eventQueue, missionTracker, toolDefs);
+  const brain = createBrainNode(runner, eventQueue, missionTracker, toolDefs, shouldAbort);
 
   console.log('\n┌─────────────────────────────────────────────────────────────┐');
   console.log('│  🤖 SPECIALIST AGENTS                                       │');
@@ -204,7 +209,7 @@ export const buildGraph = (
   console.log('[Graph] ✅ Created node: intent_classifier');
 
   console.log('[Graph] 🔄 Creating node: global_planner...');
-  const plannerNode = createPlannerNode(runner, eventQueue, missionTracker);
+  const plannerNode = createPlannerNode(runner, eventQueue, missionTracker, shouldAbort);
   console.log('[Graph] ✅ Created node: global_planner');
 
   console.log('[Graph] 🔄 Creating node: brain...');

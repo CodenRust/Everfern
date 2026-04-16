@@ -74,6 +74,10 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     console.log('╚════════════════════════════════════════════════════════════╝');
     const config = runner.config;
     const hitlNode = async (state) => {
+        // Check for abort signal before processing
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         runner.telemetry.transition('hitl');
         if (missionTracker)
             missionTracker.startStep('step:hitl');
@@ -159,8 +163,8 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
         }
     };
     const orchestrator = (0, execute_tools_1.createExecuteToolsNode)(runner, tools, config, eventQueue, conversationId, missionTracker, shouldAbort, runner.client);
-    const validator = (0, validation_1.createValidationNode)(runner, missionTracker);
-    const judge = (0, judge_1.createJudgeNode)(runner, eventQueue, missionTracker);
+    const validator = (0, validation_1.createValidationNode)(runner, missionTracker, shouldAbort);
+    const judge = (0, judge_1.createJudgeNode)(runner, eventQueue, missionTracker, shouldAbort);
     console.log('\n┌─────────────────────────────────────────────────────────────┐');
     console.log('│  🧠 CORE NODES                                              │');
     console.log('├─────────────────────────────────────────────────────────────┤');
@@ -172,7 +176,7 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     console.log('│  └─ ⚙️  Multi-Tool Orchestrator                             │');
     console.log('└─────────────────────────────────────────────────────────────┘');
     // Create the Brain node - central orchestrator
-    const brain = (0, brain_1.createBrainNode)(runner, eventQueue, missionTracker, toolDefs);
+    const brain = (0, brain_1.createBrainNode)(runner, eventQueue, missionTracker, toolDefs, shouldAbort);
     console.log('\n┌─────────────────────────────────────────────────────────────┐');
     console.log('│  🤖 SPECIALIST AGENTS                                       │');
     console.log('├─────────────────────────────────────────────────────────────┤');
@@ -206,7 +210,7 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     const triageNode = (0, triage_1.createTriageNode)(runner, eventQueue, missionTracker, shouldAbort);
     console.log('[Graph] ✅ Created node: intent_classifier');
     console.log('[Graph] 🔄 Creating node: global_planner...');
-    const plannerNode = (0, planner_1.createPlannerNode)(runner, eventQueue, missionTracker);
+    const plannerNode = (0, planner_1.createPlannerNode)(runner, eventQueue, missionTracker, shouldAbort);
     console.log('[Graph] ✅ Created node: global_planner');
     console.log('[Graph] 🔄 Creating node: brain...');
     // brain is already created above

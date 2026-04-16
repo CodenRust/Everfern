@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import { PlusIcon, ChatBubbleLeftIcon, MagnifyingGlassIcon, Cog6ToothIcon, ChatBubbleLeftRightIcon, FolderIcon, SparklesIcon, CodeBracketIcon, EllipsisHorizontalIcon, TrashIcon, Bars3Icon, BriefcaseIcon, ArchiveBoxIcon, SquaresPlusIcon, UserCircleIcon } from "@heroicons/react/24/outline";
+import { PlusIcon, ChatBubbleLeftIcon, MagnifyingGlassIcon, Cog6ToothIcon, ChatBubbleLeftRightIcon, FolderIcon, SparklesIcon, CodeBracketIcon, EllipsisHorizontalIcon, TrashIcon, Bars3Icon, BriefcaseIcon, ArchiveBoxIcon, SquaresPlusIcon, UserCircleIcon, LinkIcon } from "@heroicons/react/24/outline";
 import SearchPopup from "./SearchPopup";
 
 interface SidebarProps {
@@ -15,6 +15,7 @@ interface SidebarProps {
     onSettingsClick?: () => void;
     onArtifactsClick?: () => void;
     onCustomizeClick?: () => void;
+    onIntegrationClick?: () => void; // Integration settings callback
 }
 
 interface ConversationSummary {
@@ -24,7 +25,7 @@ interface ConversationSummary {
     updatedAt: string;
 }
 
-export default function Sidebar({ isOpen, onToggle, activeConversationId, onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick }: SidebarProps) {
+export default function Sidebar({ isOpen, onToggle, activeConversationId, onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick, onIntegrationClick }: SidebarProps) {
     const [showOptionsId, setShowOptionsId] = useState<string | null>(null);
     const [username, setUsername] = useState<string>("User");
     const [showSearch, setShowSearch] = useState<boolean>(false);
@@ -188,6 +189,7 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, onSele
                     {[
                         { icon: MagnifyingGlassIcon, label: "Search" },
                         { icon: BriefcaseIcon, label: "Customize" },
+                        { icon: LinkIcon, label: "Integrations" },
                         { icon: ChatBubbleLeftRightIcon, label: "Chats" },
                         { icon: ArchiveBoxIcon, label: "Projects" },
                         { icon: SquaresPlusIcon, label: "Artifacts" },
@@ -218,6 +220,7 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, onSele
                                 if (item.label === "Search") setShowSearch(true);
                                 else if (item.label === "Artifacts" && onArtifactsClick) onArtifactsClick();
                                 else if (item.label === "Customize" && onCustomizeClick) onCustomizeClick();
+                                else if (item.label === "Integrations" && onIntegrationClick) onIntegrationClick();
                             }}
                             title={!isOpen ? item.label : undefined}
                         >

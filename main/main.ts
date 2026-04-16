@@ -17,12 +17,17 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ACPManager } from './acp/manager';
+import type { ProviderType } from './acp/types';
 import { ChatHistoryStore } from './store/history';
 import { AgentRunner } from './agent/runner/runner';
 import { ensureShowUIServer, killShowUIServer } from './agent/runner/showui-server';
 import { AIClient } from './lib/ai-client';
-import { getAllModelsFlat, FlatModelEntry } from './lib/providers';
+import { getAllModelsFlat, FlatModelEntry, PROVIDER_REGISTRY, getModelsForProvider, formatModelName } from './lib/providers';
 import { toggleDebugWindow, setupLogging } from './lib/debug';
+import { systemTrayManager } from './lib/system-tray-manager';
+import { autoStartManager } from './lib/auto-start-manager';
+import { integrationService } from './integrations/integration-service';
+import { MessageHandler } from './integrations/message-handler';
 
 // ── Initialize Logging ──────────────────────────────────────────────
 setupLogging();
@@ -31,6 +36,10 @@ console.log('[Startup] Platform:', process.platform);
 console.log('[Startup] Node version:', process.version);
 console.log('[Startup] App path:', app.getAppPath());
 console.log('[Startup] User data:', app.getPath('userData'));
+
+// ── Check for Auto-Start Mode ───────────────────────────────────────
+const isAutoStartMode = process.argv.includes('--auto-start');
+console.log('[Startup] Auto-start mode:', isAutoStartMode);
 
 import { globalShortcut } from 'electron';
 import { memorySaveTool } from './agent/tools/memory-save';
@@ -101,6 +110,9 @@ let mainWindow: BrowserWindow | null = null;
 // Tracks the ShowUI install/run process so we can kill it on app quit
 let installProc: import('child_process').ChildProcess | null = null;
 
+// Message handler for bot integrations
+let messageHandler: MessageHandler | null = null;
+
 // ── Window ──────────────────────────────────────────────────────────
 
 function createWindow(): void {
@@ -120,7 +132,7 @@ function createWindow(): void {
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#1a1a1a',
-    show: false,
+    show: !isAutoStartMode, // Don't show window immediately in auto-start mode
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       nodeIntegration: false,
@@ -130,9 +142,9 @@ function createWindow(): void {
     },
   });
 
-  // Fallback: Show window after 5 seconds if ready-to-show never fires
+  // Fallback: Show window after 5 seconds if ready-to-show never fires (only in normal mode)
   const showFallback = setTimeout(() => {
-    if (mainWindow && !mainWindow.isVisible()) {
+    if (mainWindow && !mainWindow.isVisible() && !isAutoStartMode) {
       console.warn('[Window] ready-to-show timed out, forcing show()');
       mainWindow.show();
     }
@@ -141,7 +153,34 @@ function createWindow(): void {
   mainWindow.once('ready-to-show', () => {
     console.log('[Window] ready-to-show received');
     clearTimeout(showFallback);
-    mainWindow?.show();
+
+    // Initialize system tray first
+    try {
+      if (systemTrayManager.isSupported() && mainWindow) {
+        systemTrayManager.createTray(mainWindow);
+        systemTrayManager.setupWindowEvents();
+        console.log('[Window] System tray initialized');
+      } else {
+        console.warn('[Window] System tray not supported on this platform or window not available');
+      }
+    } catch (error) {
+      console.error('[Window] Failed to initialize system tray:', error);
+    }
+
+    // Handle auto-start mode
+    if (isAutoStartMode) {
+      console.log('[Window] Auto-start mode: minimizing to tray');
+      if (systemTrayManager.isSupported()) {
+        // Hide to tray instead of showing window
+        systemTrayManager.hideToTray();
+      } else {
+        // If tray not supported, minimize window
+        mainWindow?.minimize();
+      }
+    } else {
+      // Normal startup: show window
+      mainWindow?.show();
+    }
   });
 
   if (isDev) {
@@ -228,9 +267,122 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'everfern-site', privileges: { standard: true, secure: true, supportFetchAPI: true, allowServiceWorkers: true } }
 ]);
 
+// ── Auto-start enabled bots ──────────────────────────────────────────────
+
+/**
+ * Auto-start enabled bots on app launch
+ * Requirements: 8.1, 8.2, 8.3
+ */
+async function autoStartEnabledBots(): Promise<void> {
+  try {
+    console.log('[Integration] Checking for bots to auto-start...');
+
+    // Get the bot integration manager from the integration service
+    const botManager = integrationService.getService<any>('bot-integration-manager');
+
+    if (!botManager) {
+      console.warn('[Integration] Bot integration manager not available');
+      return;
+    }
+
+    // Check Discord - start if enabled and has bot token
+    if (integrationConfig.discord.enabled && integrationConfig.discord.botToken) {
+      // Requirement 8.1: Check for configured model and provider
+      if (!integrationConfig.discord.model || !integrationConfig.discord.provider) {
+        // Requirement 8.2: Log warning for enabled bot without model configuration
+        console.warn('[Integration] Discord bot is enabled but missing model/provider configuration. Message handler will not be initialized.');
+        console.warn('[Integration] Please configure a model and provider in Discord settings.');
+      }
+
+      console.log('[Integration] Auto-starting Discord bot...');
+      try {
+        // Check if Discord platform is already registered
+        const discordPlatform = botManager.getPlatform?.('discord');
+        if (!discordPlatform) {
+          // Platform needs to be configured and registered
+          const { DiscordPlatform } = await import('./integrations/discord-platform');
+          const platform = new DiscordPlatform({
+            enabled: true,
+            config: {
+              botToken: integrationConfig.discord.botToken,
+              applicationId: integrationConfig.discord.applicationId,
+              respondToDMs: true,
+              respondToGuilds: true,
+              guildMentionOnly: true,
+              allowedGuilds: integrationConfig.discord.allowedGuilds || [],
+              allowedUsers: integrationConfig.discord.allowedUsers || []
+            }
+          });
+          await platform.initialize();
+          botManager.registerPlatform('discord', platform);
+
+          // Update connected status
+          integrationConfig.discord.connected = true;
+          saveIntegrationConfig(integrationConfig);
+
+          console.log('[Integration] Discord bot auto-started successfully');
+        } else {
+          console.log('[Integration] Discord bot already running');
+        }
+      } catch (error) {
+        console.error('[Integration] Failed to auto-start Discord bot:', error);
+        integrationConfig.discord.connected = false;
+        saveIntegrationConfig(integrationConfig);
+      }
+    }
+
+    // Check Telegram - start if enabled and has bot token
+    if (integrationConfig.telegram.enabled && integrationConfig.telegram.botToken) {
+      // Requirement 8.1: Check for configured model and provider
+      if (!integrationConfig.telegram.model || !integrationConfig.telegram.provider) {
+        // Requirement 8.2: Log warning for enabled bot without model configuration
+        console.warn('[Integration] Telegram bot is enabled but missing model/provider configuration. Message handler will not be initialized.');
+        console.warn('[Integration] Please configure a model and provider in Telegram settings.');
+      }
+
+      console.log('[Integration] Auto-starting Telegram bot...');
+      try {
+        // Check if Telegram platform is already registered
+        const telegramPlatform = botManager.getPlatform?.('telegram');
+        if (!telegramPlatform) {
+          // Platform needs to be configured and registered
+          const { TelegramPlatform } = await import('./integrations/telegram-platform');
+          const platform = new TelegramPlatform({
+            enabled: true,
+            config: {
+              botToken: integrationConfig.telegram.botToken,
+              webhookUrl: integrationConfig.telegram.webhookUrl,
+              respondToGroups: true,
+              groupMentionOnly: true
+            }
+          });
+          await platform.initialize();
+          botManager.registerPlatform('telegram', platform);
+
+          // Update connected status
+          integrationConfig.telegram.connected = true;
+          saveIntegrationConfig(integrationConfig);
+
+          console.log('[Integration] Telegram bot auto-started successfully');
+        } else {
+          console.log('[Integration] Telegram bot already running');
+        }
+      } catch (error) {
+        console.error('[Integration] Failed to auto-start Telegram bot:', error);
+        integrationConfig.telegram.connected = false;
+        saveIntegrationConfig(integrationConfig);
+      }
+    }
+
+    console.log('[Integration] Auto-start check complete');
+  } catch (error) {
+    console.error('[Integration] Error during auto-start:', error);
+  }
+}
+
 // ── App lifecycle ───────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   console.log('[App] App ready, starting initialization...');
 
   // ── Protocol Handlers ──────────────────────────────────────────────
@@ -363,6 +515,41 @@ app.whenReady().then(() => {
 
   // ── Create Main Window ─────────────────────────────────────────────
   createWindow();
+
+  // ── Initialize Integration Services ─────────────────────────────────
+  try {
+    console.log('[App] Initializing integration services...');
+    await integrationService.initialize();
+    console.log('[App] Integration services initialized successfully');
+
+    // Auto-start enabled and connected bots
+    await autoStartEnabledBots();
+
+    // Requirement 7.1, 8.3: Initialize MessageHandler after bot integration manager is ready
+    const botManager = integrationService.getService<any>('bot-integration-manager');
+    if (botManager) {
+      // Check if at least one bot has model/provider configured
+      const hasConfiguredBot =
+        (integrationConfig.discord.enabled && integrationConfig.discord.connected &&
+         integrationConfig.discord.model && integrationConfig.discord.provider) ||
+        (integrationConfig.telegram.enabled && integrationConfig.telegram.connected &&
+         integrationConfig.telegram.model && integrationConfig.telegram.provider);
+
+      if (hasConfiguredBot) {
+        messageHandler = new MessageHandler({
+          integrationConfig,
+          acpManager,
+          botManager
+        });
+        console.log('[App] MessageHandler initialized successfully');
+      } else {
+        console.log('[App] No configured bots found, MessageHandler not initialized');
+      }
+    }
+  } catch (error) {
+    console.error('[App] Failed to initialize integration services:', error);
+    // Don't block app startup if integration services fail
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -377,7 +564,28 @@ app.on('activate', () => {
 });
 
 // ── ShowUI process cleanup on quit ──────────────────────────────────
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  // Requirement 7.2: Clean up MessageHandler
+  if (messageHandler) {
+    try {
+      console.log('[App] Shutting down MessageHandler...');
+      await messageHandler.shutdown();
+      messageHandler = null;
+      console.log('[App] MessageHandler shutdown complete');
+    } catch (error) {
+      console.error('[App] Error shutting down MessageHandler:', error);
+    }
+  }
+
+  // Stop integration services
+  try {
+    console.log('[App] Stopping integration services...');
+    await integrationService.stop();
+    console.log('[App] Integration services stopped successfully');
+  } catch (error) {
+    console.error('[App] Error stopping integration services:', error);
+  }
+
   // Kill the install/run process spawned by showui:install
   if (installProc) {
     try { installProc.kill('SIGTERM'); } catch { /* ignore */ }
@@ -385,6 +593,9 @@ app.on('before-quit', () => {
   }
   // Kill the server managed by showui-server.ts (e.g. from showui:launch)
   killShowUIServer();
+
+  // Clean up system tray
+  systemTrayManager.destroy();
 });
 
 
@@ -394,6 +605,81 @@ ipcMain.handle('window:minimize',    () => { mainWindow?.minimize(); });
 ipcMain.handle('window:maximize',    () => { mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize(); });
 ipcMain.handle('window:close',       () => { mainWindow?.close(); });
 ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() || false);
+
+// ── IPC: System Tray ────────────────────────────────────────────────
+
+ipcMain.handle('tray:show-window', () => {
+  systemTrayManager.showWindow();
+  return { success: true };
+});
+
+ipcMain.handle('tray:hide-to-tray', () => {
+  systemTrayManager.hideToTray();
+  return { success: true };
+});
+
+ipcMain.handle('tray:is-supported', () => {
+  return { supported: systemTrayManager.isSupported() };
+});
+
+ipcMain.handle('tray:update-menu', () => {
+  systemTrayManager.updateTrayMenu();
+  return { success: true };
+});
+
+// ── IPC: Auto-Start ─────────────────────────────────────────────────
+
+ipcMain.handle('autostart:get-status', async () => {
+  try {
+    const enabled = await autoStartManager.isEnabled();
+    return { success: true, enabled };
+  } catch (error) {
+    console.error('[AutoStart] Failed to get status:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('autostart:enable', async () => {
+  try {
+    await autoStartManager.enable();
+    console.log('[AutoStart] Auto-start enabled via IPC');
+    return { success: true };
+  } catch (error) {
+    console.error('[AutoStart] Failed to enable:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('autostart:disable', async () => {
+  try {
+    await autoStartManager.disable();
+    console.log('[AutoStart] Auto-start disabled via IPC');
+    return { success: true };
+  } catch (error) {
+    console.error('[AutoStart] Failed to disable:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('autostart:get-info', () => {
+  try {
+    const info = autoStartManager.getPlatformInfo();
+    return { success: true, info };
+  } catch (error) {
+    console.error('[AutoStart] Failed to get platform info:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('autostart:validate-support', async () => {
+  try {
+    const validation = await autoStartManager.validatePlatformSupport();
+    return { success: true, validation };
+  } catch (error) {
+    console.error('[AutoStart] Failed to validate platform support:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
 
 // ── IPC: Audio ──────────────────────────────────────────────────────
 
@@ -941,7 +1227,8 @@ ipcMain.handle('acp:chat', async (_event, request: {
  * Renderer listens on 'acp:stream-chunk' and 'acp:tool-call'.
  * Supports cancellation via 'acp:stop'.
  */
-let streamAborted = false;
+import { globalAbortManager } from './agent/runner/abort-manager';
+let streamAborted = false; // Keep for backward compatibility
 let agentPermissionResolver: ((granted: boolean) => void) | null = null;
 
 ipcMain.removeHandler('agent:permission-response');
@@ -976,11 +1263,31 @@ ipcMain.handle('acp:validate-nvidia-model', async (_event, modelId: string, apiK
 
 
 ipcMain.handle('acp:stop', () => {
-  streamAborted = true;
+  // Use the new AbortSignalManager for centralized abort handling
+  globalAbortManager.setAborted();
+  streamAborted = true; // Keep for backward compatibility
+
   // Also abort any running computer-use tool
   const { abortComputerUse } = require('./agent/tools/computer-use');
   abortComputerUse();
+
   return { success: true };
+});
+
+// Handle HITL responses from frontend
+ipcMain.on('acp:hitl-response', (event, response: string) => {
+  console.log('[Main] 📥 HITL response received from frontend:', response);
+
+  // Forward the HITL response to the frontend as a new user message
+  // This will trigger the normal chat flow and be processed by the runner's HITL detection logic
+  console.log('[Main] 🔄 Forwarding HITL response as user message to frontend');
+
+  // Send the HITL response back to the frontend as a synthetic user message
+  // The frontend will then send it through the normal streaming flow
+  event.sender.send('acp:hitl-response-processed', {
+    message: response,
+    shouldSendAsMessage: true
+  });
 });
 
 ipcMain.handle('acp:stream', async (event, request: {
@@ -990,7 +1297,9 @@ ipcMain.handle('acp:stream', async (event, request: {
   conversationId?: string;
 }) => {
   const streamSender = event.sender;
-  streamAborted = false; // RESET STOP STATE FOR NEW MISSION
+  // Reset abort state for new mission using AbortSignalManager
+  globalAbortManager.reset();
+  streamAborted = false; // Keep for backward compatibility
 
   let client = acpManager.getClient();
   const config = loadConfigSync();
@@ -1054,7 +1363,7 @@ ipcMain.handle('acp:stream', async (event, request: {
     },
     checkPermission: () => sessionPermissionGranted, // Security: Ask once per chat request
     vlm: config?.vlm,
-    shouldAbort: () => streamAborted,
+    shouldAbort: globalAbortManager.createShouldAbortCallback(),
   };
 
   const runner    = new AgentRunner(client, runnerConfig);
@@ -1070,7 +1379,9 @@ ipcMain.handle('acp:stream', async (event, request: {
   // ── Register Global Shortcuts ─────────────────────────────────────────
   const abortKey = 'CommandOrControl+Shift+X';
   const abortHandler = () => {
-    streamAborted = true;
+    // Use AbortSignalManager for centralized abort handling
+    globalAbortManager.setAborted();
+    streamAborted = true; // Keep for backward compatibility
     const { abortComputerUse } = require('./agent/tools/computer-use');
     abortComputerUse();
   };
@@ -1131,7 +1442,8 @@ ipcMain.handle('acp:stream', async (event, request: {
       // Store last event for JSON viewer
       lastStreamEvent = streamEvent;
 
-      if (streamAborted) {
+      // Check abort using both old and new systems for compatibility
+      if (streamAborted || globalAbortManager.streamAborted) {
         streamSender.send('acp:stream-chunk', { delta: '\n\n🛑 Stopped by user.', done: true });
         break;
       }
@@ -1666,6 +1978,454 @@ ipcMain.handle('skills:delete-custom', async (_event, name: string) => {
 
 ipcMain.handle('skills:get-custom-path', async () => {
   return getCustomSkillsPath();
+});
+
+// ── IPC: Integration Management ─────────────────────────────────────────────
+
+interface IntegrationConfig {
+  telegram: {
+    enabled: boolean;
+    botToken: string;
+    webhookUrl?: string;
+    connected: boolean;
+    model?: string;
+    provider?: string;
+  };
+  discord: {
+    enabled: boolean;
+    botToken: string;
+    applicationId: string;
+    connected: boolean;
+    model?: string;
+    provider?: string;
+    allowedGuilds?: string[];
+    allowedUsers?: string[];
+  };
+}
+
+// Store integration config in memory (will be persisted to file later)
+let integrationConfig: IntegrationConfig = {
+  telegram: {
+    enabled: false,
+    botToken: '',
+    webhookUrl: '',
+    connected: false,
+  },
+  discord: {
+    enabled: false,
+    botToken: '',
+    applicationId: '',
+    connected: false,
+  },
+};
+
+// Load integration config from file
+const loadIntegrationConfig = (): IntegrationConfig => {
+  try {
+    const configPath = path.join(os.homedir(), '.everfern', 'integration-config.json');
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf8');
+      const loaded = JSON.parse(data);
+
+      // Deep merge to ensure backward compatibility with configs missing model/provider fields
+      return {
+        telegram: {
+          ...integrationConfig.telegram,
+          ...loaded.telegram,
+        },
+        discord: {
+          ...integrationConfig.discord,
+          ...loaded.discord,
+        },
+      };
+    }
+  } catch (error) {
+    console.warn('[Integration] Failed to load config:', error);
+  }
+  return integrationConfig;
+};
+
+// Save integration config to file
+const saveIntegrationConfig = (config: IntegrationConfig): void => {
+  try {
+    const configDir = path.join(os.homedir(), '.everfern');
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    const configPath = path.join(configDir, 'integration-config.json');
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch (error) {
+    console.error('[Integration] Failed to save config:', error);
+    throw error;
+  }
+};
+
+// Test Telegram bot connection
+const testTelegramConnection = async (botToken: string): Promise<boolean> => {
+  try {
+    if (!botToken || !botToken.trim()) {
+      return false;
+    }
+
+    // Test the bot token by calling getMe API
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[Integration] Telegram API error:', response.status, response.statusText);
+      return false;
+    }
+
+    const data = await response.json();
+    if (data.ok && data.result) {
+      console.log('[Integration] Telegram bot connected:', data.result.username);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('[Integration] Telegram connection test failed:', error);
+    return false;
+  }
+};
+
+// Test Discord bot connection
+const testDiscordConnection = async (botToken: string, applicationId: string): Promise<boolean> => {
+  try {
+    if (!botToken || !botToken.trim() || !applicationId || !applicationId.trim()) {
+      return false;
+    }
+
+    // Test the bot token by calling Discord API to get application info
+    const response = await fetch(`https://discord.com/api/v10/applications/${applicationId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bot ${botToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[Integration] Discord API error:', response.status, response.statusText);
+      return false;
+    }
+
+    const data = await response.json();
+    if (data.id && data.name) {
+      console.log('[Integration] Discord bot connected:', data.name);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('[Integration] Discord connection test failed:', error);
+    return false;
+  }
+};
+
+// Load config on startup
+integrationConfig = loadIntegrationConfig();
+
+ipcMain.handle('integration:get-config', (): Promise<IntegrationConfig> => {
+  return Promise.resolve(integrationConfig);
+});
+
+ipcMain.handle('integration:save-config', async (_event, config: IntegrationConfig): Promise<void> => {
+  try {
+    integrationConfig = { ...config };
+    saveIntegrationConfig(integrationConfig);
+    console.log('[Integration] Configuration saved successfully');
+
+    // Reinitialize MessageHandler if config changed
+    const botManager = integrationService.getService<any>('bot-integration-manager');
+    if (botManager) {
+      // Check if at least one bot has model/provider configured
+      const hasConfiguredBot =
+        (integrationConfig.discord.enabled && integrationConfig.discord.connected &&
+         integrationConfig.discord.model && integrationConfig.discord.provider) ||
+        (integrationConfig.telegram.enabled && integrationConfig.telegram.connected &&
+         integrationConfig.telegram.model && integrationConfig.telegram.provider);
+
+      if (hasConfiguredBot) {
+        // Shutdown existing MessageHandler if it exists
+        if (messageHandler) {
+          console.log('[Integration] Shutting down existing MessageHandler...');
+          await messageHandler.shutdown();
+          messageHandler = null;
+        }
+
+        // Create new MessageHandler with updated config
+        messageHandler = new MessageHandler({
+          integrationConfig,
+          acpManager,
+          botManager
+        });
+        console.log('[Integration] MessageHandler reinitialized with updated config');
+      } else if (messageHandler) {
+        // No configured bots, shutdown MessageHandler
+        console.log('[Integration] No configured bots, shutting down MessageHandler...');
+        await messageHandler.shutdown();
+        messageHandler = null;
+      }
+
+      // Update Discord platform config if it's running
+      const discordPlatform = botManager.getPlatform?.('discord');
+      if (discordPlatform && integrationConfig.discord.enabled) {
+        console.log('[Integration] Updating Discord platform configuration...');
+        // Disconnect and reconnect with new config
+        await discordPlatform.disconnect();
+        const { DiscordPlatform } = await import('./integrations/discord-platform');
+        const newPlatform = new DiscordPlatform({
+          enabled: true,
+          config: {
+            botToken: integrationConfig.discord.botToken,
+            applicationId: integrationConfig.discord.applicationId,
+            respondToDMs: true,
+            respondToGuilds: true,
+            guildMentionOnly: true,
+            allowedGuilds: integrationConfig.discord.allowedGuilds || [],
+            allowedUsers: integrationConfig.discord.allowedUsers || []
+          }
+        });
+        await newPlatform.initialize();
+        botManager.registerPlatform('discord', newPlatform);
+        console.log('[Integration] Discord platform updated with new config');
+      }
+    }
+  } catch (error) {
+    console.error('[Integration] Failed to save configuration:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('integration:test-connection', async (_event, platform: string): Promise<boolean> => {
+  try {
+    console.log(`[Integration] Testing ${platform} connection...`);
+
+    let result = false;
+
+    if (platform === 'telegram') {
+      result = await testTelegramConnection(integrationConfig.telegram.botToken);
+      console.log(`[Integration] Telegram test result: ${result}`);
+    } else if (platform === 'discord') {
+      result = await testDiscordConnection(
+        integrationConfig.discord.botToken,
+        integrationConfig.discord.applicationId
+      );
+      console.log(`[Integration] Discord test result: ${result}`);
+    } else {
+      console.warn(`[Integration] Unknown platform: ${platform}`);
+      return false;
+    }
+
+    // Update the connected status based on test result
+    if (platform === 'telegram') {
+      integrationConfig.telegram.connected = result;
+    } else if (platform === 'discord') {
+      integrationConfig.discord.connected = result;
+    }
+
+    // Persist the updated configuration to disk
+    saveIntegrationConfig(integrationConfig);
+    console.log(`[Integration] Updated ${platform} connected status to: ${result}`);
+
+    // If test succeeded and platform is enabled, start the bot
+    if (result) {
+      const botManager = integrationService.getService<any>('bot-integration-manager');
+
+      if (botManager) {
+        try {
+          if (platform === 'discord' && integrationConfig.discord.enabled) {
+            // Check if Discord platform is already registered
+            const existingPlatform = botManager.getPlatform?.('discord');
+            if (!existingPlatform) {
+              console.log('[Integration] Starting Discord bot after successful test...');
+              const { DiscordPlatform } = await import('./integrations/discord-platform');
+              const discordPlatform = new DiscordPlatform({
+                enabled: true,
+                config: {
+                  botToken: integrationConfig.discord.botToken,
+                  applicationId: integrationConfig.discord.applicationId,
+                  respondToDMs: true,
+                  respondToGuilds: true,
+                  guildMentionOnly: true,
+                  allowedGuilds: integrationConfig.discord.allowedGuilds || [],
+                  allowedUsers: integrationConfig.discord.allowedUsers || []
+                }
+              });
+              await discordPlatform.initialize();
+              botManager.registerPlatform('discord', discordPlatform);
+              console.log('[Integration] Discord bot started and registered');
+            } else {
+              console.log('[Integration] Discord bot already running');
+            }
+          } else if (platform === 'telegram' && integrationConfig.telegram.enabled) {
+            // Check if Telegram platform is already registered
+            const existingPlatform = botManager.getPlatform?.('telegram');
+            if (!existingPlatform) {
+              console.log('[Integration] Starting Telegram bot after successful test...');
+              const { TelegramPlatform } = await import('./integrations/telegram-platform');
+              const telegramPlatform = new TelegramPlatform({
+                enabled: true,
+                config: {
+                  botToken: integrationConfig.telegram.botToken,
+                  webhookUrl: integrationConfig.telegram.webhookUrl,
+                  respondToGroups: true,
+                  groupMentionOnly: false
+                }
+              });
+              await telegramPlatform.initialize();
+              botManager.registerPlatform('telegram', telegramPlatform);
+              console.log('[Integration] Telegram bot started and registered');
+            } else {
+              console.log('[Integration] Telegram bot already running');
+            }
+          }
+        } catch (startError) {
+          console.error(`[Integration] Failed to start ${platform} bot after test:`, startError);
+          // Don't fail the test connection, just log the error
+        }
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error(`[Integration] Connection test failed for ${platform}:`, error);
+
+    // Set connected to false on error
+    if (platform === 'telegram') {
+      integrationConfig.telegram.connected = false;
+    } else if (platform === 'discord') {
+      integrationConfig.discord.connected = false;
+    }
+    saveIntegrationConfig(integrationConfig);
+
+    return false;
+  }
+});
+
+ipcMain.handle('integration:get-service-status', (_event, serviceName?: string) => {
+  try {
+    return integrationService.getServiceStatus(serviceName);
+  } catch (error) {
+    console.error('[Integration] Failed to get service status:', error);
+    return { name: serviceName || 'unknown', status: 'error', error: String(error) };
+  }
+});
+
+ipcMain.handle('integration:get-system-status', () => {
+  try {
+    return integrationService.getSystemStatus();
+  } catch (error) {
+    console.error('[Integration] Failed to get system status:', error);
+    return {
+      initialized: false,
+      started: false,
+      servicesRunning: 0,
+      servicesTotal: 0,
+      errors: [String(error)]
+    };
+  }
+});
+
+ipcMain.handle('integration:start-service', async (_event, serviceName: string) => {
+  try {
+    const service = integrationService.getService(serviceName);
+    if (service && typeof service.start === 'function') {
+      await service.start();
+      return { success: true };
+    }
+    return { success: false, error: 'Service not found or not startable' };
+  } catch (error) {
+    console.error(`[Integration] Failed to start service ${serviceName}:`, error);
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('integration:stop-service', async (_event, serviceName: string) => {
+  try {
+    const service = integrationService.getService(serviceName);
+    if (service && typeof service.stop === 'function') {
+      await service.stop();
+      return { success: true };
+    }
+    return { success: false, error: 'Service not found or not stoppable' };
+  } catch (error) {
+    console.error(`[Integration] Failed to stop service ${serviceName}:`, error);
+    return { success: false, error: String(error) };
+  }
+});
+
+ipcMain.handle('integration:restart-service', async (_event, serviceName: string) => {
+  try {
+    const service = integrationService.getService(serviceName);
+    if (service) {
+      if (typeof service.stop === 'function') {
+        await service.stop();
+      }
+      if (typeof service.start === 'function') {
+        await service.start();
+      }
+      return { success: true };
+    }
+    return { success: false, error: 'Service not found' };
+  } catch (error) {
+    console.error(`[Integration] Failed to restart service ${serviceName}:`, error);
+    return { success: false, error: String(error) };
+  }
+});
+
+// ── IPC: Providers ──────────────────────────────────────────────────
+
+ipcMain.handle('providers:get-all', () => {
+  const providers = Object.values(PROVIDER_REGISTRY);
+
+  // Check which providers have API keys configured
+  const providersWithStatus = providers.map((provider) => {
+    let enabled = true;
+
+    // For providers that require API keys, check if they're configured
+    if (provider.requiresApiKey) {
+      try {
+        const config = loadConfigSync();
+        if (config && config.keys) {
+          // Check if the provider has an API key in the keys object
+          const apiKey = config.keys[provider.type];
+          enabled = !!apiKey && apiKey.trim().length > 0;
+        } else {
+          enabled = false;
+        }
+      } catch {
+        enabled = false;
+      }
+    }
+    // Local providers (ollama, lmstudio) are always enabled
+    // everfern is always enabled (no API key required)
+
+    return {
+      ...provider,
+      enabled
+    };
+  });
+
+  return providersWithStatus;
+});
+
+ipcMain.handle('providers:get-models', (_event, providerType: string): FlatModelEntry[] => {
+  const type = providerType as ProviderType;
+  const models = getModelsForProvider(type);
+  const providerMeta = PROVIDER_REGISTRY[type];
+
+  return models.map(modelId => ({
+    id: modelId,
+    name: formatModelName(modelId),
+    provider: providerMeta?.name || providerType,
+    providerType: type
+  }));
 });
 
 export function isPermissionGranted() { return permissionsGranted; }

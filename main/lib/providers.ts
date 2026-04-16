@@ -93,6 +93,7 @@ export interface ProviderMeta {
   defaultModel: string;
   engine: 'local' | 'online' | 'everfern';
   baseUrl?: string;
+  enabled?: boolean;  // Whether the provider is configured and available
 }
 
 export const PROVIDER_REGISTRY: Record<ProviderType, ProviderMeta> = {
@@ -274,7 +275,7 @@ export function getModelsForConfig(engine: string, provider?: string): FlatModel
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function formatModelName(id: string): string {
+export function formatModelName(id: string): string {
   const knownNames: Record<string, string> = {
     'gpt-4o': 'GPT-4o',
     'gpt-4o-mini': 'GPT-4o mini',

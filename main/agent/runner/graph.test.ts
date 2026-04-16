@@ -19,7 +19,7 @@ vi.mock('./nodes/planner', () => ({
 
 vi.mock('./nodes/call_model', () => ({
   createCallModelNode: vi.fn(() => async (state: any) => {
-    return { 
+    return {
         messages: [{ role: 'assistant', content: 'done' }],
         pendingToolCalls: []
     };
@@ -71,7 +71,7 @@ describe('Modern LangGraph HITL Architecture', () => {
 
   it('should pause execution at interrupt() and resume with user feedback using Command', async () => {
     const threadId = 'test-hitl-thread-' + Date.now();
-    const graph = buildGraph(mockRunner, [], [], [], 'test-conv-id', [], false);
+    const graph = buildGraph(mockRunner, [], [], [], 'test-conv-id', [], () => false);
     const threadConfig = { configurable: { thread_id: threadId }, recursionLimit: 100 };
 
     const initialState = {
@@ -90,7 +90,7 @@ describe('Modern LangGraph HITL Architecture', () => {
     // Verify graph is paused
     expect(firstResult.__interrupt__).toBeDefined();
     expect(firstResult.__interrupt__[0].value.question).toBe("Approve plan?");
-    
+
     // Check internal state via thread config
     const stateSnapshot = await graph.getState(threadConfig);
     expect(stateSnapshot.next).toContain('global_planner');
@@ -101,7 +101,7 @@ describe('Modern LangGraph HITL Architecture', () => {
 
     // Verify it resumed and finished
     expect(secondResult.__interrupt__).toBeUndefined();
-    
+
     // Verify messages were processed (the exact format may vary)
     expect(secondResult.messages).toBeDefined();
     expect(Array.isArray(secondResult.messages) || typeof secondResult.messages === 'object').toBe(true);

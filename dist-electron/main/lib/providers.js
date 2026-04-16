@@ -13,6 +13,7 @@ exports.PROVIDER_REGISTRY = exports.PROVIDER_MODELS = void 0;
 exports.getModelsForProvider = getModelsForProvider;
 exports.getAllModelsFlat = getAllModelsFlat;
 exports.getModelsForConfig = getModelsForConfig;
+exports.formatModelName = formatModelName;
 // ── Model Lists ──────────────────────────────────────────────────────
 exports.PROVIDER_MODELS = {
     openai: [

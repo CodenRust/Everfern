@@ -21,6 +21,7 @@ import { globalSessionManager } from '../../acp/control-plane/manager.core';
 import { getBaseTools } from './tools_manager';
 import { TelemetryLogger } from '../helpers/telemetry-logger';
 import { stateManager } from './state-manager';
+import { globalAbortManager, AbortError } from './abort-manager';
 
 // Tool Imports
 import { plannerTool, updateStepTool, executionPlanTool } from '../tools/planner';
@@ -194,6 +195,29 @@ export class AgentRunner {
     };
   }
 
+  /**
+   * Abort the current execution
+   * Requirement 1.1: Stop button shall immediately set the Stream_Abort_Flag to true
+   */
+  public abort(): void {
+    globalAbortManager.setAborted();
+    console.log('[AgentRunner] 🛑 Abort requested - execution will be terminated');
+  }
+
+  /**
+   * Check if execution is currently aborted
+   */
+  public isAborted(): boolean {
+    return globalAbortManager.streamAborted;
+  }
+
+  /**
+   * Get abort timing information for debugging
+   */
+  public getAbortTiming(): { aborted: boolean; elapsedMs: number | null } {
+    return globalAbortManager.getAbortTiming();
+  }
+
   public shouldCaptureScreenshot(userInput: string | any[]): boolean {
     const text = typeof userInput === 'string' ? userInput : JSON.stringify(userInput);
     const explicitVisionKeywords = /take.*screenshot|capture.*screen|see.*screen|show.*screen|look.*at.*screen|view.*screen|desktop|click|open.*app|find.*icon|locate.*button|open.*window|minimize|maximize|close.*window|browser|gui automation|computer use/i;
@@ -347,6 +371,12 @@ export class AgentRunner {
     this.telemetry.updateSpinner('Building execution graph...');
     console.log('[AgentRunner] 🔄 Building execution graph...');
 
+    // Reset abort state for new execution
+    globalAbortManager.reset();
+
+    // Create shouldAbort callback for graph nodes
+    const shouldAbort = globalAbortManager.createShouldAbortCallback();
+
     // Build graph asynchronously to avoid blocking the event loop
     const graph = await Promise.resolve().then(() => buildGraph(
       this,
@@ -355,7 +385,7 @@ export class AgentRunner {
       eventQueue,
       convId,
       missionTracker,
-      this.config.shouldAbort,
+      shouldAbort, // Pass abort callback to graph
     ));
     console.log('[AgentRunner] ✅ Graph built successfully');
 
@@ -370,11 +400,18 @@ export class AgentRunner {
     let graphDone = false;
     (async () => {
       try {
+        // Check abort before starting graph execution
+        // Requirement 1.2: Agent_Runner shall check the flag before each node execution
+        globalAbortManager.checkAbort();
+
         console.log('[AgentRunner] 🔄 Getting graph state...');
         const threadConfig = { configurable: { thread_id: convId }, recursionLimit: 100 };
         const currentState = await graph.getState(threadConfig);
         console.log('[AgentRunner] ✅ Graph state retrieved');
         const { Command } = await import('@langchain/langgraph');
+
+        // Check abort before graph invocation
+        globalAbortManager.checkAbort();
 
         if (currentState && currentState.next && currentState.next.length > 0) {
             console.log('[AgentRunner] 🔄 Resuming interrupted session...');
@@ -404,8 +441,19 @@ export class AgentRunner {
         console.error('[AgentRunner] Graph Error:', err);
         const errorMsg = err instanceof Error ? err.message : String(err);
 
+        // Handle abort errors specially
+        if (err instanceof AbortError || errorMsg.includes('Execution aborted by user')) {
+          console.log('[AgentRunner] 🛑 Execution aborted by user');
+          eventQueue.push({
+            type: 'chunk',
+            content: '\n\n🛑 Stopped by user.'
+          });
+          missionTracker.fail('Execution stopped by user');
+          this.telemetry.warn('Execution aborted by user (stop button clicked)');
+          this.telemetry.terminate(false, 'User abort');
+        }
         // Specialized handling for rate limits
-        if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit')) {
+        else if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit')) {
           eventQueue.push({
             type: 'chunk',
             content: `\n\n⚠️ **Rate Limit Reached**: The AI provider (Gemini) is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.`

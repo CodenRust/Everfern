@@ -61,9 +61,13 @@ Respond with JSON:
         return intent === 'conversation' || intent === 'question';
     }
 }
-const createPlannerNode = (runner, eventQueue, missionTracker) => {
+const createPlannerNode = (runner, eventQueue, missionTracker, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
+        // Check for abort signal before processing
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         integrator.startNode('planner', 'Compiling execution pipeline');
         // Emit phase change event for planning phase
         if (missionTracker) {

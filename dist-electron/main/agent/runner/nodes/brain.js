@@ -78,9 +78,13 @@ Respond with JSON only:
  * and sets a completionSignal so the judge can make an informed verdict
  * without relying on regex pattern matching.
  */
-const createBrainNode = (runner, eventQueue, missionTracker, toolDefs) => {
+const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
+        // Check for abort signal before processing
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const tools = toolDefs || runner._buildToolDefinitions();
         // Emit phase change event for execution phase (only on first brain call)
         if (missionTracker && state.iterations === 0) {

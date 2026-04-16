@@ -46,6 +46,7 @@ import DirectoryModal from '../components/DirectoryModal';
 import { FileExplorerView } from "../components/FileExplorerView";
 import { LoadingBreadcrumb, Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import IntegrationSettings from '../../components/IntegrationSettings';
 
 // Chat-specific components
 import ArtifactsPanel from './ArtifactsPanel';
@@ -127,6 +128,7 @@ export default function ChatPage() {
     const [showModelSelector, setShowModelSelector] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [showDirectoryModal, setShowDirectoryModal] = useState(false);
+    const [showIntegrationSettings, setShowIntegrationSettings] = useState(false);
     const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [randomGreeting, setRandomGreeting] = useState("");
@@ -1433,10 +1435,37 @@ export default function ChatPage() {
         handleSend(responseText);
     }, [handleSend]);
 
-    const handleHitlApproval = useCallback((approved: boolean) => {
+    // Listen for processed HITL responses from backend
+    useEffect(() => {
+        const acpApi = (window as any).electronAPI?.acp;
+        if (!acpApi?.onHitlResponseProcessed) return;
+
+        acpApi.onHitlResponseProcessed((data: { message: string; shouldSendAsMessage: boolean }) => {
+            console.log('[HITL] ✅ Processed HITL response received:', data);
+
+            if (data.shouldSendAsMessage) {
+                // Automatically send the HITL response as a new user message
+                console.log('[HITL] 🔄 Sending HITL response as user message:', data.message);
+
+                // Set the input value and trigger send
+                setInputValue(data.message);
+
+                // Trigger send after a brief delay to ensure state is updated
+                setTimeout(() => {
+                    handleSend();
+                }, 100);
+            }
+        });
+
+        return () => {
+            // Cleanup is handled by removeStreamListeners
+        };
+    }, [handleSend, setInputValue]);
+
+    const handleHitlApproval = useCallback((approved: boolean, sendMessage: boolean = false) => {
         if (!hitlRequest) return;
 
-        console.log('[HITL] User decision:', approved ? 'approved' : 'rejected');
+        console.log('[HITL] User decision:', approved ? 'approved' : 'rejected', 'sendMessage:', sendMessage);
 
         // Clear the HITL approval UI
         setShowHitlApproval(false);
@@ -1446,12 +1475,30 @@ export default function ChatPage() {
         // Clear the active HITL flag
         (window as any).__activeHitl = false;
 
-        // Send the approval response as a message
-        const responseText = approved
-            ? `[HITL_APPROVED] I have reviewed and approved the requested operation. Please proceed.`
-            : `[HITL_REJECTED] I have reviewed and rejected the requested operation. Please do not proceed.`;
+        // Send the approval response directly to the backend without creating a chat message
+        const responseText = approved ? '[HITL_APPROVED]' : '[HITL_REJECTED]';
 
-        handleSend(responseText);
+        if (sendMessage) {
+            // Optional: Send as a visible chat message (old behavior)
+            const messageText = approved
+                ? `[HITL_APPROVED] I have reviewed and approved the requested operation. Please proceed.`
+                : `[HITL_REJECTED] I have reviewed and rejected the requested operation. Please do not proceed.`;
+            handleSend(messageText);
+        } else {
+            // Send approval response directly to backend without creating a chat message
+            const acpApi = (window as any).electronAPI?.acp;
+            if (acpApi?.sendHitlResponse) {
+                acpApi.sendHitlResponse(responseText);
+            } else {
+                // Fallback: send as a system message that won't appear in chat
+                console.log('[HITL] Sending response directly to backend:', responseText);
+                // We could emit a custom event or use IPC directly here
+                const event = new CustomEvent('hitl-response', {
+                    detail: { response: responseText, approved }
+                });
+                window.dispatchEvent(event);
+            }
+        }
     }, [hitlRequest, handleSend]);
 
     const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1898,6 +1945,13 @@ export default function ChatPage() {
         </AnimatePresence>
     );
 
+    const integrationSettingsModalNode = (
+        <IntegrationSettings
+            isOpen={showIntegrationSettings}
+            onClose={() => setShowIntegrationSettings(false)}
+        />
+    );
+
     // ── Render ───────────────────────────────────────────────────────────────
     return (
         <>
@@ -1961,7 +2015,7 @@ export default function ChatPage() {
                     voiceDeepgramKey={voiceDeepgramKey}
                     voiceElevenlabsKey={voiceElevenlabsKey}
                 />
-                <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} activeConversationId={activeConversationId} onSelectConversation={handleSelectConversation} onNewChat={handleNewChat} onSettingsClick={() => setShowSettings(true)} onArtifactsClick={() => setShowArtifacts(true)} onCustomizeClick={() => setShowDirectoryModal(true)} />
+                <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} activeConversationId={activeConversationId} onSelectConversation={handleSelectConversation} onNewChat={handleNewChat} onSettingsClick={() => setShowSettings(true)} onArtifactsClick={() => setShowArtifacts(true)} onCustomizeClick={() => setShowDirectoryModal(true)} onIntegrationClick={() => setShowIntegrationSettings(true)} />
 
                 <motion.div
                     initial={false}
@@ -2026,8 +2080,8 @@ export default function ChatPage() {
                                                 {showHitlApproval && hitlRequest && (
                                                     <HitlApprovalForm
                                                         request={hitlRequest}
-                                                        onApprove={() => handleHitlApproval(true)}
-                                                        onReject={() => handleHitlApproval(false)}
+                                                        onApprove={(sendMessage) => handleHitlApproval(true, sendMessage)}
+                                                        onReject={(sendMessage) => handleHitlApproval(false, sendMessage)}
                                                     />
                                                 )}
 
@@ -2339,8 +2393,8 @@ export default function ChatPage() {
                                                 <div style={{ padding: '16px 20px 0' }}>
                                                     <HitlApprovalForm
                                                         request={hitlRequest}
-                                                        onApprove={() => handleHitlApproval(true)}
-                                                        onReject={() => handleHitlApproval(false)}
+                                                        onApprove={(sendMessage) => handleHitlApproval(true, sendMessage)}
+                                                        onReject={(sendMessage) => handleHitlApproval(false, sendMessage)}
                                                     />
                                                 </div>
                                             )}
@@ -2468,6 +2522,7 @@ export default function ChatPage() {
                 </motion.div>
 
                 {settingsModalNode}
+                {integrationSettingsModalNode}
                 <DirectoryModal isOpen={showDirectoryModal} onClose={() => setShowDirectoryModal(false)} />
                 {onboardingModalNode}
 

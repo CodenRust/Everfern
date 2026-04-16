@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.todoWriteTool = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const os_1 = require("os");
 exports.todoWriteTool = {
     name: 'todo_write',
     description: 'Maintain a structured task list in task.md. ' +
@@ -63,16 +64,22 @@ exports.todoWriteTool = {
             },
             planPath: {
                 type: 'string',
-                description: 'Absolute path to the planning directory where task.md should reside.'
+                description: 'Optional absolute path to the planning directory where task.md should reside. Defaults to ~/.everfern/tasks if not provided.'
             }
         },
-        required: ['tasks', 'planPath']
+        required: ['tasks']
     },
     async execute(args) {
         const tasks = args.tasks;
-        const planPath = args.planPath;
+        let planPath = args.planPath;
         if (!tasks || !Array.isArray(tasks)) {
             return { success: false, output: 'Tasks must be an array.', error: 'invalid_args' };
+        }
+        // If planPath is not provided, use a default location
+        if (!planPath || typeof planPath !== 'string') {
+            const homedir = (0, os_1.homedir)();
+            planPath = path.join(homedir, '.everfern', 'tasks');
+            console.warn('[TodoWrite] planPath not provided, using default:', planPath);
         }
         try {
             // Ensure directory exists

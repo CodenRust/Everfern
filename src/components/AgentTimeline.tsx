@@ -368,11 +368,20 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, c
         console.log('[AgentTimeline] toolCalls:', toolCalls.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label, status: tc.status })));
     }, [toolCalls]);
 
-    const nonWriteToolCalls = useMemo(
+    // Filter tools based on visibility preferences
+    const visibleToolCalls = useMemo(
         () => {
-            const filtered = toolCalls.filter((tc) => tc.toolName !== "write" && tc.toolName !== "write_file");
-            console.log('[AgentTimeline] Filtered out write tools. Original:', toolCalls.length, 'Filtered:', filtered.length);
-            console.log('[AgentTimeline] Filtered tools:', filtered.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label })));
+            // Tools that are typically hidden from timeline (but shown in HITL)
+            // Only hide tools that are very frequent and low-value for user visibility
+            const hiddenTools = ['write_file']; // Only hide write_file, show everything else including 'write'
+            const filtered = toolCalls.filter((tc) => !hiddenTools.includes(tc.toolName));
+
+            console.log('[AgentTimeline] Tool visibility filtering:');
+            console.log('  - Original tools:', toolCalls.length);
+            console.log('  - Visible tools:', filtered.length);
+            console.log('  - Hidden tools:', toolCalls.filter(tc => hiddenTools.includes(tc.toolName)).map(tc => tc.toolName));
+            console.log('  - Visible tool names:', filtered.map(tc => tc.toolName));
+
             return filtered;
         },
         [toolCalls]
@@ -382,7 +391,7 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, c
         setExpandedToolId((prev) => (prev === id ? null : id));
     };
 
-    if (!isLive && nonWriteToolCalls.length === 0 && !thought?.trim() && !currentPhase && !planSteps?.length) return null;
+    if (!isLive && visibleToolCalls.length === 0 && !thought?.trim() && !currentPhase && !planSteps?.length) return null;
 
     const runningCount = toolCalls.filter((t) => t.status === "running").length;
     const hasRunning = runningCount > 0 || isLive;
@@ -426,23 +435,23 @@ export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, c
                 </div>
             )}
 
-            {nonWriteToolCalls.length > 0 && (
+            {visibleToolCalls.length > 0 && (
                 <div style={{ padding: "8px 0 8px 12px" }}>
-                    {nonWriteToolCalls.map((tc, idx) => (
+                    {visibleToolCalls.map((tc, idx) => (
                         <ToolRow
                             key={tc.id || idx}
                             tc={tc}
                             isExpanded={expandedToolId === tc.id}
                             onToggle={() => toggleTool(tc.id)}
                             isFirst={idx === 0}
-                            isLast={idx === nonWriteToolCalls.length - 1}
+                            isLast={idx === visibleToolCalls.length - 1}
                             currentPhase={currentPhase}
                         />
                     ))}
                 </div>
             )}
 
-            {hasRunning && nonWriteToolCalls.length === 0 && !currentPhase && (
+            {hasRunning && visibleToolCalls.length === 0 && !currentPhase && (
                 <div style={{ padding: "12px 0", textAlign: "center" }}>
                     <span style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>
                         Initializing...

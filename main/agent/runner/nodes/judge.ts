@@ -27,10 +27,16 @@ export const createJudgeNode = (
   runner: AgentRunner,
   eventQueue?: StreamEvent[],
   missionTracker?: MissionTracker,
+  shouldAbort?: () => boolean,
 ) => {
   const integrator = createMissionIntegrator(missionTracker);
 
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
+    // Check for abort signal before processing
+    if (shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+
     const startTime = Date.now();
     integrator.startNode('judge', 'Evaluating mission completion');
 

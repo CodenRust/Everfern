@@ -17,6 +17,8 @@
 - **🤖 Autonomous Agent Engine** — Graph-based orchestration with intelligent task decomposition, planning, and execution
 - **⚡ Real-time Streaming UI** — Next.js-powered glassmorphic interface with live token streaming and artifact rendering
 - **🛠️ Multi-Provider Support** — Seamless integration with local (Ollama, LMStudio) and cloud AI providers (OpenAI, Anthropic, DeepSeek, and more)
+- **🖥️ Computer Use & GUI Automation** — Native desktop automation with vision-language models for human-like GUI interaction
+- **🔌 MCP (Model Context Protocol) Integration** — Extensible tool ecosystem with support for custom MCP servers and Docker containers
 - **📊 High-Fidelity Telemetry** — Detailed insights into agent behavior, node transitions, and resource utilization
 - **🔒 Privacy-First Architecture** — All data stays local; no secrets leave your desktop
 - **🎨 Rich Artifact Viewer** — Interactive visualization for diffs, code, execution plans, and more
@@ -93,9 +95,94 @@ The agent processes requests through a sophisticated state machine:
 
 1. **Triage** — Analyzes user intent, decomposes tasks, and computes context limits
 2. **Planner** — Generates deterministic execution strategies
-3. **Execute Tools** — Invokes file operations, searches, and shell commands
+3. **Execute Tools** — Invokes file operations, searches, shell commands, and GUI automation
 4. **Call Model** — Evaluates state and generates responses
 5. **Output** — Returns results to the user
+
+### Computer Use & GUI Automation
+
+EverFern includes advanced computer use capabilities that allow the AI to interact with your desktop GUI like a human:
+
+**🖱️ Mouse & Keyboard Control**
+- Precise mouse movement, clicking, and dragging
+- Keyboard input with support for key combinations
+- Scroll wheel and gesture support
+
+**📸 Visual Understanding**
+- Real-time screenshot capture and analysis
+- Vision-language model integration (Qwen-VL, GPT-4V)
+- Intelligent coordinate mapping and element detection
+
+**🎯 Smart Automation**
+- Application launching via Start Menu search
+- Form filling and web navigation
+- File management and system operations
+- Cross-application workflows
+
+**🔍 Advanced Features**
+- Zoom functionality for detailed element inspection
+- Text recognition and UI element identification
+- Retry logic and error recovery
+- Session recording and playback
+
+**Example Usage:**
+```
+"Open Spotify and play my liked songs"
+"Take a screenshot and create a summary document"
+"Find and organize files in my Downloads folder"
+"Set up a meeting in my calendar app"
+```
+
+The computer use system runs as an autonomous sub-agent with its own vision-language model, providing reliable GUI automation for complex desktop tasks.
+
+### MCP (Model Context Protocol) Integration
+
+EverFern supports the Model Context Protocol for extensible tool integration:
+
+**🔧 Server Types Supported**
+- **Command-based**: Local Python/Node.js scripts
+- **Docker containers**: Isolated server environments
+- **Stdio communication**: Direct process communication
+
+**📦 Built-in MCP Tools**
+- File system operations
+- Web search and content fetching
+- Database queries and operations
+- API integrations and webhooks
+
+**🛠️ Custom MCP Servers**
+Create your own MCP servers for specialized functionality:
+
+```python
+# Example: Custom MCP server
+from mcp.server import Server
+from mcp.types import Tool
+
+server = Server("my-custom-server")
+
+@server.list_tools()
+async def list_tools():
+    return [Tool(name="my_tool", description="Custom functionality")]
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict):
+    return {"result": "Custom tool executed"}
+```
+
+**Configuration Example:**
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "uvx",
+      "args": ["mcp-server-filesystem", "/path/to/allowed/files"]
+    },
+    "custom-server": {
+      "docker": "my-org/custom-mcp-server:latest /data"
+    }
+  }
+}
+```
 
 ### Supported AI Providers
 

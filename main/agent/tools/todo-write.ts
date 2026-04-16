@@ -20,8 +20,8 @@ export const todoWriteTool: AgentTool = {
           type: 'object',
           properties: {
             description: { type: 'string', description: 'What needs to be done.' },
-            status: { 
-              type: 'string', 
+            status: {
+              type: 'string',
               enum: ['pending', 'in_progress', 'completed'],
               description: 'Current state of the task.'
             }
@@ -31,18 +31,25 @@ export const todoWriteTool: AgentTool = {
       },
       planPath: {
         type: 'string',
-        description: 'Absolute path to the planning directory where task.md should reside.'
+        description: 'Optional absolute path to the planning directory where task.md should reside. Defaults to ~/.everfern/tasks if not provided.'
       }
     },
-    required: ['tasks', 'planPath']
+    required: ['tasks']
   },
 
   async execute(args): Promise<ToolResult> {
     const tasks = args.tasks as Array<{ description: string; status: string }>;
-    const planPath = args.planPath as string;
+    let planPath = args.planPath as string;
 
     if (!tasks || !Array.isArray(tasks)) {
       return { success: false, output: 'Tasks must be an array.', error: 'invalid_args' };
+    }
+
+    // If planPath is not provided, use a default location
+    if (!planPath || typeof planPath !== 'string') {
+      const homedir = osHomedir();
+      planPath = path.join(homedir, '.everfern', 'tasks');
+      console.warn('[TodoWrite] planPath not provided, using default:', planPath);
     }
 
     try {
@@ -52,7 +59,7 @@ export const todoWriteTool: AgentTool = {
       }
 
       const taskFile = path.join(planPath, 'task.md');
-      
+
       // Generate Markdown content
       const lines = ['# Task List', ''];
       tasks.forEach(t => {

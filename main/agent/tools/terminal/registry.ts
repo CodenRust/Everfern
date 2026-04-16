@@ -36,7 +36,7 @@ export class CommandRegistry {
 
   spawnCommand(commandLine: string, cwd: string, persistent = false): string {
     const id = persistent ? CommandRegistry.PERSISTENT_ID : crypto.randomUUID();
-    
+
     // If persistent and already exists, just return the ID (caller should use writeInput/command_status)
     const existing = this.commands.get(id);
     if (persistent && existing && existing.status === 'running') {
@@ -44,24 +44,77 @@ export class CommandRegistry {
     }
 
     const isWin = os.platform() === 'win32';
-    const shell = isWin ? 'pwsh.exe' : '/bin/bash';
 
-    // Persistent terminal starts a raw shell; one-off starts with -Command/-c
-    const args = persistent 
-      ? (isWin ? ['-NoExit', '-NoLogo'] : ['-i'])
-      : (isWin ? ['-Command', commandLine] : ['-c', commandLine]);
+    // For Windows, try pwsh.exe first, fallback to powershell.exe, then cmd.exe
+    let shell: string;
+    let args: string[];
 
-    const child = spawn(shell, args, {
-      cwd,
-      shell: false, 
-      env: { ...process.env, COLUMNS: '120', ROWS: '40' }
-    });
+    if (isWin) {
+      // Try to find PowerShell Core (pwsh) first, then Windows PowerShell, then cmd
+      const possibleShells = ['pwsh.exe', 'powershell.exe', 'cmd.exe'];
+      shell = possibleShells[0]; // Start with pwsh.exe
+
+      // Persistent terminal starts a raw shell; one-off starts with -Command/-c
+      if (persistent) {
+        args = shell === 'cmd.exe' ? ['/k'] : ['-NoExit', '-NoLogo'];
+      } else {
+        args = shell === 'cmd.exe' ? ['/c', commandLine] : ['-Command', commandLine];
+      }
+    } else {
+      shell = '/bin/bash';
+      args = persistent ? ['-i'] : ['-c', commandLine];
+    }
+
+    let child: ChildProcess;
+    let shellUsed = shell;
+
+    try {
+      child = spawn(shell, args, {
+        cwd,
+        shell: false,
+        env: { ...process.env, COLUMNS: '120', ROWS: '40' }
+      });
+    } catch (err: any) {
+      // If pwsh.exe fails on Windows, try powershell.exe
+      if (isWin && shell === 'pwsh.exe' && err.code === 'ENOENT') {
+        console.log('[Terminal] pwsh.exe not found, trying powershell.exe');
+        shell = 'powershell.exe';
+        shellUsed = shell;
+        args = persistent ? ['-NoExit', '-NoLogo'] : ['-Command', commandLine];
+
+        try {
+          child = spawn(shell, args, {
+            cwd,
+            shell: false,
+            env: { ...process.env, COLUMNS: '120', ROWS: '40' }
+          });
+        } catch (err2: any) {
+          // If powershell.exe also fails, try cmd.exe
+          if (err2.code === 'ENOENT') {
+            console.log('[Terminal] powershell.exe not found, trying cmd.exe');
+            shell = 'cmd.exe';
+            shellUsed = shell;
+            args = persistent ? ['/k'] : ['/c', commandLine];
+
+            child = spawn(shell, args, {
+              cwd,
+              shell: false,
+              env: { ...process.env, COLUMNS: '120', ROWS: '40' }
+            });
+          } else {
+            throw err2;
+          }
+        }
+      } else {
+        throw err;
+      }
+    }
 
     const record: CommandRecord = {
       id,
       process: child,
       outputBuffer: '',
-      commandLine: persistent ? 'Persistent Shell' : commandLine,
+      commandLine: persistent ? `Persistent Shell (${shellUsed})` : commandLine,
       status: 'running',
     };
 
@@ -86,6 +139,7 @@ export class CommandRegistry {
     });
 
     this.commands.set(id, record);
+    console.log(`[Terminal] Spawned ${shellUsed} with PID ${child.pid}`);
     return id;
   }
 

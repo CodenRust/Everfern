@@ -1,0 +1,700 @@
+"use strict";
+/**
+ * Discord Platform Integration
+ *
+ * This module implements the Discord bot integration for EverFern using
+ * the Discord.js library for bot functionality.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DiscordPlatform = void 0;
+const discord_js_1 = require("discord.js");
+const fs_1 = require("fs");
+const platform_interface_1 = require("./platform-interface");
+/**
+ * Discord platform implementation
+ */
+class DiscordPlatform extends platform_interface_1.MessagePlatform {
+    client = null;
+    reconnectAttempts = 0;
+    maxReconnectAttempts = 5;
+    reconnectDelay = 5000; // 5 seconds
+    constructor(config) {
+        super('discord', config);
+    }
+    /**
+     * Initialize the Discord bot connection
+     */
+    async initialize() {
+        const discordConfig = this.config;
+        if (!discordConfig.config.botToken) {
+            throw new platform_interface_1.PlatformAuthError('discord', 'Bot token is required');
+        }
+        try {
+            // Create Discord client with necessary intents and partials for DM support
+            this.client = new discord_js_1.Client({
+                intents: [
+                    discord_js_1.GatewayIntentBits.Guilds,
+                    discord_js_1.GatewayIntentBits.GuildMessages,
+                    discord_js_1.GatewayIntentBits.MessageContent,
+                    discord_js_1.GatewayIntentBits.DirectMessages,
+                    discord_js_1.GatewayIntentBits.GuildMembers
+                ],
+                partials: [discord_js_1.Partials.Channel, discord_js_1.Partials.Message, discord_js_1.Partials.User] // Required for DM channels, messages, and users
+            });
+            // Set up event handlers
+            this.setupEventHandlers();
+            // Login to Discord
+            await this.client.login(discordConfig.config.botToken);
+            // Wait for ready event
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Discord client ready timeout'));
+                }, 30000);
+                this.client.once('ready', () => {
+                    clearTimeout(timeout);
+                    resolve();
+                });
+                this.client.once('error', (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
+                });
+            });
+            // Set bot status
+            if (discordConfig.config.statusMessage && this.client.user) {
+                this.client.user.setActivity(discordConfig.config.statusMessage, {
+                    type: discord_js_1.ActivityType.Playing
+                });
+            }
+            // Verify DM configuration
+            console.log(`[Discord] ✅ Bot initialized successfully`);
+            console.log(`[Discord] DM responses enabled: ${discordConfig.config.respondToDMs !== false}`);
+            console.log(`[Discord] Guild responses enabled: ${discordConfig.config.respondToGuilds !== false}`);
+            console.log(`[Discord] Guild mention only: ${discordConfig.config.guildMentionOnly === true}`);
+            // Test if the bot can receive DMs by logging the user's DM channel capability
+            if (this.client.user) {
+                console.log(`[Discord] Bot user can receive DMs: ${this.client.user.dmChannel !== null || 'unknown'}`);
+            }
+            this.reconnectAttempts = 0;
+            this.emitStatusChange({
+                connected: true,
+                lastConnected: new Date(),
+                details: {
+                    botId: this.client.user?.id,
+                    botUsername: this.client.user?.username,
+                    guildCount: this.client.guilds.cache.size
+                }
+            });
+        }
+        catch (error) {
+            const errorMessage = error.message || 'Unknown error';
+            if (error.code === 'TOKEN_INVALID') {
+                throw new platform_interface_1.PlatformAuthError('discord', 'Invalid bot token');
+            }
+            else if (error.code === 'DISALLOWED_INTENTS') {
+                throw new platform_interface_1.PlatformAuthError('discord', 'Bot missing required intents');
+            }
+            else {
+                throw new platform_interface_1.PlatformConnectionError('discord', errorMessage, error);
+            }
+        }
+    }
+    /**
+     * Disconnect from Discord
+     */
+    async disconnect() {
+        if (this.client) {
+            try {
+                await this.client.destroy();
+                this.client = null;
+                this.emitStatusChange({
+                    connected: false,
+                    details: { disconnectedAt: new Date() }
+                });
+            }
+            catch (error) {
+                console.error('Error disconnecting from Discord:', error);
+            }
+        }
+    }
+    /**
+     * Send a message to Discord
+     */
+    async sendMessage(text, options) {
+        if (!this.client || !this.client.user) {
+            throw new platform_interface_1.PlatformConnectionError('discord', 'Bot not initialized');
+        }
+        this.validateMessage(text, options);
+        try {
+            const channel = await this.client.channels.fetch(options.chatId);
+            if (!channel || (!channel.isTextBased())) {
+                throw new Error(`Invalid channel: ${options.chatId}`);
+            }
+            // Format text for Discord
+            const formattedText = this.formatText(text, options.parseMode);
+            // Prepare message options
+            const messageOptions = {
+                content: formattedText.length > 0 ? formattedText : undefined,
+                allowedMentions: { parse: ['users', 'roles'] }
+            };
+            // Add reply reference if specified
+            if (options.replyToMessageId) {
+                messageOptions.reply = {
+                    messageReference: options.replyToMessageId,
+                    failIfNotExists: false
+                };
+            }
+            // Add attachments if any
+            if (options.attachments && options.attachments.length > 0) {
+                messageOptions.files = options.attachments.map(attachment => {
+                    return new discord_js_1.AttachmentBuilder(attachment.file, {
+                        name: attachment.filename,
+                        description: attachment.caption
+                    });
+                });
+            }
+            // Send message
+            const message = await channel.send(messageOptions);
+            return message.id;
+        }
+        catch (error) {
+            this.handleDiscordError(error);
+            throw error;
+        }
+    }
+    /**
+     * Send typing indicator
+     */
+    async sendTyping(chatId) {
+        if (!this.client) {
+            throw new platform_interface_1.PlatformConnectionError('discord', 'Bot not initialized');
+        }
+        try {
+            const channel = await this.client.channels.fetch(chatId);
+            if (channel && channel.isTextBased()) {
+                await channel.sendTyping();
+            }
+        }
+        catch (error) {
+            this.handleDiscordError(error);
+            throw error;
+        }
+    }
+    /**
+     * Edit an existing message
+     */
+    async editMessage(chatId, messageId, newText) {
+        if (!this.client) {
+            throw new platform_interface_1.PlatformConnectionError('discord', 'Bot not initialized');
+        }
+        try {
+            const channel = await this.client.channels.fetch(chatId);
+            if (!channel || !channel.isTextBased()) {
+                throw new Error(`Invalid channel: ${chatId}`);
+            }
+            const message = await channel.messages.fetch(messageId);
+            await message.edit(newText);
+        }
+        catch (error) {
+            this.handleDiscordError(error);
+            throw error;
+        }
+    }
+    /**
+     * Get platform status
+     */
+    async getStatus() {
+        if (!this.client || !this.client.user) {
+            return {
+                connected: false,
+                error: 'Bot not initialized'
+            };
+        }
+        try {
+            // Check if client is ready and connected
+            const isReady = this.client.readyAt !== null;
+            return {
+                connected: isReady,
+                lastConnected: this.client.readyAt || undefined,
+                details: {
+                    botId: this.client.user.id,
+                    botUsername: this.client.user.username,
+                    guildCount: this.client.guilds.cache.size,
+                    ping: this.client.ws.ping
+                }
+            };
+        }
+        catch (error) {
+            return {
+                connected: false,
+                error: error.message || 'Status check failed'
+            };
+        }
+    }
+    /**
+     * Test the connection
+     */
+    async testConnection() {
+        try {
+            const status = await this.getStatus();
+            return status.connected;
+        }
+        catch {
+            return false;
+        }
+    }
+    /**
+     * Download a file from Discord
+     */
+    async downloadFile(file, localPath) {
+        try {
+            const response = await fetch(file.url);
+            if (!response.ok) {
+                throw new Error(`Failed to download file: ${response.statusText}`);
+            }
+            const buffer = await response.arrayBuffer();
+            await fs_1.promises.writeFile(localPath, Buffer.from(buffer));
+        }
+        catch (error) {
+            throw new platform_interface_1.PlatformConnectionError('discord', `File download failed: ${error.message}`);
+        }
+    }
+    /**
+     * Get user information
+     */
+    async getUserInfo(userId) {
+        if (!this.client) {
+            throw new platform_interface_1.PlatformConnectionError('discord', 'Bot not initialized');
+        }
+        try {
+            const user = await this.client.users.fetch(userId);
+            return {
+                id: user.id,
+                name: user.displayName || user.username,
+                avatar: user.displayAvatarURL({ size: 256 }),
+                isBot: user.bot
+            };
+        }
+        catch (error) {
+            this.handleDiscordError(error);
+            throw error;
+        }
+    }
+    /**
+     * Format text for Discord markdown
+     */
+    formatText(text, parseMode) {
+        if (parseMode === 'markdown') {
+            // Discord supports basic markdown
+            return text;
+        }
+        else if (parseMode === 'html') {
+            // Convert basic HTML to Discord markdown
+            return text
+                .replace(/<b>(.*?)<\/b>/g, '**$1**')
+                .replace(/<i>(.*?)<\/i>/g, '*$1*')
+                .replace(/<u>(.*?)<\/u>/g, '__$1__')
+                .replace(/<code>(.*?)<\/code>/g, '`$1`')
+                .replace(/<pre>(.*?)<\/pre>/g, '```\n$1\n```')
+                .replace(/<a href="([^"]*)"[^>]*>(.*?)<\/a>/g, '[$2]($1)');
+        }
+        return text;
+    }
+    /**
+     * Check if bot is mentioned in message
+     */
+    isBotMentioned(message) {
+        if (!this.client?.user)
+            return false;
+        // Check if bot is mentioned directly
+        if (message.mentions.users.has(this.client.user.id)) {
+            return true;
+        }
+        // Check if bot is mentioned by role
+        if (message.mentions.roles.size > 0) {
+            const botMember = message.guild?.members.cache.get(this.client.user.id);
+            if (botMember) {
+                for (const role of message.mentions.roles.values()) {
+                    if (botMember.roles.cache.has(role.id)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Check for @everyone or @here mentions
+        if (message.mentions.everyone) {
+            return true;
+        }
+        return false;
+    }
+    /**
+     * Set up Discord event handlers
+     */
+    setupEventHandlers() {
+        if (!this.client)
+            return;
+        this.client.on('ready', () => {
+            console.log(`[Discord] ✅ Bot logged in as ${this.client.user?.tag}`);
+            console.log(`[Discord] Bot ID: ${this.client.user?.id}`);
+            console.log(`[Discord] Guilds: ${this.client.guilds.cache.size}`);
+            console.log(`[Discord] Intents configured: DirectMessages, MessageContent, Guilds, GuildMessages, GuildMembers`);
+            console.log(`[Discord] Partials configured: Channel, Message, User`);
+            // Log the actual intents to verify they're set correctly
+            console.log(`[Discord] Client intents value: ${this.client.options.intents}`);
+            console.log(`[Discord] Client partials: ${JSON.stringify(this.client.options.partials)}`);
+        });
+        this.client.on('messageCreate', (message) => {
+            console.log(`[Discord] 🔔 messageCreate event fired`);
+            console.log(`[Discord] Message ID: ${message.id}`);
+            console.log(`[Discord] Author: ${message.author.username} (${message.author.id})`);
+            console.log(`[Discord] Author is bot: ${message.author.bot}`);
+            console.log(`[Discord] Channel type: ${message.channel.type} (${discord_js_1.ChannelType[message.channel.type]})`);
+            console.log(`[Discord] Channel ID: ${message.channel.id}`);
+            console.log(`[Discord] Content: "${message.content}"`);
+            console.log(`[Discord] Message partial: ${message.partial}`);
+            console.log(`[Discord] Channel partial: ${message.channel.partial}`);
+            this.handleIncomingMessage(message);
+        });
+        // Add raw event listener to debug what's actually being received
+        this.client.on('raw', (packet) => {
+            if (packet.t === 'MESSAGE_CREATE') {
+                console.log(`[Discord] 📦 Raw MESSAGE_CREATE packet received:`);
+                console.log(`[Discord] Channel ID: ${packet.d.channel_id}`);
+                console.log(`[Discord] Channel Type: ${packet.d.channel_type}`);
+                console.log(`[Discord] Author: ${packet.d.author.username} (${packet.d.author.id})`);
+                console.log(`[Discord] Content: "${packet.d.content}"`);
+                console.log(`[Discord] Guild ID: ${packet.d.guild_id || 'null (DM)'}`);
+                // If this is a DM (channel_type === 1) and messageCreate didn't fire, handle it manually
+                if (packet.d.channel_type === 1 && !packet.d.author.bot) {
+                    console.log(`[Discord] 🔧 DM detected in raw event, attempting manual processing...`);
+                    // Create a minimal message-like object for DM processing
+                    const dmMessage = {
+                        id: packet.d.id,
+                        content: packet.d.content,
+                        author: {
+                            id: packet.d.author.id,
+                            username: packet.d.author.username,
+                            bot: packet.d.author.bot,
+                            displayName: packet.d.author.global_name || packet.d.author.username,
+                            displayAvatarURL: () => `https://cdn.discordapp.com/avatars/${packet.d.author.id}/${packet.d.author.avatar}.png`
+                        },
+                        channel: {
+                            id: packet.d.channel_id,
+                            type: 1, // DM
+                            partial: false
+                        },
+                        guild: null,
+                        member: null,
+                        createdAt: new Date(packet.d.timestamp),
+                        partial: false,
+                        attachments: new Map(),
+                        mentions: { users: new Map(), roles: new Map(), everyone: false },
+                        reference: packet.d.message_reference || null
+                    };
+                    // Process this as a DM manually
+                    setTimeout(() => {
+                        console.log(`[Discord] 🔄 Processing raw DM message manually...`);
+                        this.handleRawDMMessage(dmMessage, packet.d);
+                    }, 100);
+                }
+            }
+        });
+        this.client.on('error', (error) => {
+            console.error('[Discord] ❌ Client error:', error);
+            this.handleConnectionError(error);
+        });
+        this.client.on('disconnect', () => {
+            console.log('[Discord] ⚠️ Client disconnected');
+            this.emitStatusChange({
+                connected: false,
+                error: 'Client disconnected'
+            });
+        });
+        this.client.on('reconnecting', () => {
+            console.log('[Discord] 🔄 Client reconnecting...');
+        });
+        this.client.on('resume', () => {
+            console.log('[Discord] ✅ Client resumed');
+            this.emitStatusChange({
+                connected: true,
+                lastConnected: new Date()
+            });
+        });
+        this.client.on('debug', (info) => {
+            if (info.includes('Heartbeat') || info.includes('heartbeat')) {
+                // Skip heartbeat logs to reduce noise
+                return;
+            }
+            if (info.includes('Failed to find guild') || info.includes('unknown type for channel')) {
+                // Skip DM channel warnings - these are expected for DM channels which don't have guilds
+                return;
+            }
+            console.log(`[Discord Debug] ${info}`);
+        });
+        // Add warn event listener to catch any warnings
+        this.client.on('warn', (warning) => {
+            console.warn(`[Discord Warning] ${warning}`);
+        });
+    }
+    /**
+     * Handle raw DM message when Discord.js messageCreate doesn't fire
+     * This is a fallback for when partials don't work properly
+     */
+    handleRawDMMessage(dmMessage, rawData) {
+        console.log(`[Discord] 📨 handleRawDMMessage called (fallback)`);
+        console.log(`[Discord] ✅ Message is from human user: ${dmMessage.author.username}`);
+        console.log(`[Discord] Content: "${dmMessage.content}"`);
+        const discordConfig = this.config;
+        // Check if DM responses are enabled
+        if (discordConfig.config.respondToDMs === false) {
+            console.log(`[Discord] ❌ DM responses disabled in config, ignoring message`);
+            return;
+        }
+        console.log(`[Discord] ✅ DM responses enabled, processing message`);
+        // Convert to platform-agnostic format
+        const incomingMessage = {
+            id: dmMessage.id,
+            platform: 'discord',
+            user: {
+                id: dmMessage.author.id,
+                name: dmMessage.author.displayName || dmMessage.author.username,
+                avatar: dmMessage.author.displayAvatarURL()
+            },
+            chat: {
+                id: dmMessage.channel.id,
+                name: `DM with ${dmMessage.author.username}`,
+                type: 'private'
+            },
+            content: {
+                text: this.sanitizeInput(dmMessage.content),
+                files: [], // Raw events don't include processed attachments easily
+                isMention: false, // DMs don't have mentions
+                replyTo: dmMessage.reference ? {
+                    id: dmMessage.reference.message_id || '',
+                    text: '',
+                    user: ''
+                } : undefined
+            },
+            timestamp: dmMessage.createdAt,
+            raw: { ...dmMessage, rawDiscordData: rawData }
+        };
+        console.log(`[Discord] ✅ Raw DM message converted successfully`);
+        console.log(`[Discord] Emitting raw DM message to bot manager...`);
+        this.emitMessage(incomingMessage);
+        console.log(`[Discord] ✅ Raw DM message emitted to bot manager`);
+    }
+    /**
+     * Handle incoming Discord message
+     */
+    async handleIncomingMessage(message) {
+        console.log(`[Discord] 📨 handleIncomingMessage called`);
+        // Handle partial messages by fetching complete data
+        if (message.partial) {
+            console.log(`[Discord] ⚠️ Message is partial, fetching complete data...`);
+            try {
+                message = await message.fetch();
+                console.log(`[Discord] ✅ Partial message fetched successfully`);
+            }
+            catch (error) {
+                console.error(`[Discord] ❌ Failed to fetch partial message:`, error);
+                return;
+            }
+        }
+        // Handle partial channels by fetching complete data
+        if (message.channel.partial) {
+            console.log(`[Discord] ⚠️ Channel is partial, fetching complete data...`);
+            try {
+                await message.channel.fetch();
+                console.log(`[Discord] ✅ Partial channel fetched successfully`);
+            }
+            catch (error) {
+                console.error(`[Discord] ❌ Failed to fetch partial channel:`, error);
+                return;
+            }
+        }
+        // Ignore bot messages
+        if (message.author.bot) {
+            console.log(`[Discord] ❌ Ignoring bot message from ${message.author.username}`);
+            return;
+        }
+        console.log(`[Discord] ✅ Message is from human user`);
+        console.log(`[Discord] User: ${message.author.username} (${message.author.id})`);
+        console.log(`[Discord] Channel: ${this.getChannelDisplayName(message)}`);
+        console.log(`[Discord] Content: ${message.content.substring(0, 100)}${message.content.length > 100 ? '...' : ''}`);
+        const discordConfig = this.config;
+        console.log(`[Discord] Config - respondToDMs: ${discordConfig.config.respondToDMs}`);
+        console.log(`[Discord] Config - respondToGuilds: ${discordConfig.config.respondToGuilds}`);
+        console.log(`[Discord] Config - guildMentionOnly: ${discordConfig.config.guildMentionOnly}`);
+        // Check DM/Guild settings first
+        const isDM = message.channel.type === discord_js_1.ChannelType.DM;
+        console.log(`[Discord] Is DM: ${isDM}`);
+        if (isDM) {
+            console.log(`[Discord] 🔍 Processing DM message...`);
+            if (discordConfig.config.respondToDMs === false) {
+                console.log(`[Discord] ❌ DM responses disabled in config, ignoring message`);
+                return;
+            }
+            console.log(`[Discord] ✅ DM responses enabled, will process message`);
+        }
+        else {
+            console.log(`[Discord] 🔍 Processing guild message...`);
+            if (discordConfig.config.respondToGuilds === false) {
+                console.log(`[Discord] ❌ Guild responses disabled in config, ignoring message`);
+                return;
+            }
+            const isMentioned = this.isBotMentioned(message);
+            console.log(`[Discord] Bot mentioned: ${isMentioned}`);
+            if (discordConfig.config.guildMentionOnly && !isMentioned) {
+                console.log(`[Discord] ❌ Guild mention-only mode enabled, bot not mentioned, ignoring`);
+                return;
+            }
+            if (isMentioned) {
+                console.log(`[Discord] 🔔 Bot was mentioned/pinged in message`);
+            }
+            console.log(`[Discord] ✅ Guild message will be processed`);
+        }
+        // Check if user is allowed (only for guild messages, not DMs)
+        if (!isDM && discordConfig.config.allowedUsers &&
+            discordConfig.config.allowedUsers.length > 0) {
+            console.log(`[Discord] Checking allowed users list (${discordConfig.config.allowedUsers.length} users)`);
+            if (!discordConfig.config.allowedUsers.includes(message.author.id)) {
+                console.log(`[Discord] ❌ User ${message.author.username} (${message.author.id}) not in allowed list`);
+                return;
+            }
+            console.log(`[Discord] ✅ User is in allowed list`);
+        }
+        // Check if guild is allowed (only for guild messages)
+        if (!isDM && message.guild &&
+            discordConfig.config.allowedGuilds &&
+            discordConfig.config.allowedGuilds.length > 0) {
+            console.log(`[Discord] Checking allowed guilds list (${discordConfig.config.allowedGuilds.length} guilds)`);
+            if (!discordConfig.config.allowedGuilds.includes(message.guild.id)) {
+                console.log(`[Discord] ❌ Guild ${message.guild.name} (${message.guild.id}) not in allowed list`);
+                return;
+            }
+            console.log(`[Discord] ✅ Guild is in allowed list`);
+        }
+        console.log(`[Discord] 🔄 Converting message to platform-agnostic format...`);
+        // Convert to platform-agnostic format
+        const incomingMessage = {
+            id: message.id,
+            platform: 'discord',
+            user: {
+                id: message.author.id,
+                name: message.member?.displayName || message.author.displayName || message.author.username,
+                avatar: message.author.displayAvatarURL({ size: 256 })
+            },
+            chat: {
+                id: message.channel.id,
+                name: this.getChannelDisplayName(message),
+                type: this.mapChannelType(message.channel.type)
+            },
+            content: {
+                text: this.sanitizeInput(message.content),
+                files: this.extractFiles(message),
+                isMention: this.isBotMentioned(message),
+                replyTo: message.reference ? {
+                    id: message.reference.messageId || '',
+                    text: '', // Would need to fetch the referenced message
+                    user: '' // Would need to fetch the referenced message
+                } : undefined
+            },
+            timestamp: message.createdAt,
+            raw: message
+        };
+        console.log(`[Discord] ✅ Message converted successfully`);
+        console.log(`[Discord] Emitting message to bot manager...`);
+        this.emitMessage(incomingMessage);
+        console.log(`[Discord] ✅ Message emitted to bot manager`);
+    }
+    /**
+     * Extract files from Discord message
+     */
+    extractFiles(message) {
+        const files = [];
+        for (const attachment of message.attachments.values()) {
+            files.push({
+                id: attachment.id,
+                name: attachment.name || 'unknown',
+                mimeType: attachment.contentType || 'application/octet-stream',
+                size: attachment.size,
+                url: attachment.url,
+                caption: attachment.description || undefined
+            });
+        }
+        return files;
+    }
+    /**
+     * Get channel display name
+     */
+    getChannelDisplayName(message) {
+        if (message.channel.type === discord_js_1.ChannelType.DM) {
+            return `DM with ${message.author.username}`;
+        }
+        if ('name' in message.channel && message.channel.name) {
+            const guildName = message.guild?.name || 'Unknown Guild';
+            return `#${message.channel.name} (${guildName})`;
+        }
+        return `Channel ${message.channel.id}`;
+    }
+    /**
+     * Map Discord channel type to platform-agnostic type
+     */
+    mapChannelType(channelType) {
+        switch (channelType) {
+            case discord_js_1.ChannelType.DM:
+                return 'private';
+            case discord_js_1.ChannelType.GroupDM:
+                return 'group';
+            case discord_js_1.ChannelType.GuildText:
+            case discord_js_1.ChannelType.GuildVoice:
+            case discord_js_1.ChannelType.GuildAnnouncement: // Replaces deprecated GuildNews
+            case discord_js_1.ChannelType.GuildForum:
+                return 'channel';
+            default:
+                return 'channel';
+        }
+    }
+    /**
+     * Handle Discord API errors
+     */
+    handleDiscordError(error) {
+        if (error.code === 50013) {
+            throw new platform_interface_1.PlatformAuthError('discord', 'Missing permissions');
+        }
+        else if (error.code === 50001) {
+            throw new platform_interface_1.PlatformAuthError('discord', 'Missing access');
+        }
+        else if (error.code === 50007) {
+            throw new platform_interface_1.PlatformAuthError('discord', 'Cannot send messages to this user');
+        }
+        else if (error.code === 429) {
+            const retryAfter = error.retry_after || 60;
+            throw new platform_interface_1.PlatformRateLimitError('discord', retryAfter, error);
+        }
+    }
+    /**
+     * Handle connection errors and attempt reconnection
+     */
+    async handleConnectionError(error) {
+        this.emitStatusChange({
+            connected: false,
+            error: error.message || 'Connection error'
+        });
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            console.log(`Attempting to reconnect to Discord (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+            setTimeout(async () => {
+                try {
+                    await this.initialize();
+                }
+                catch (reconnectError) {
+                    console.error('Reconnection failed:', reconnectError);
+                }
+            }, this.reconnectDelay * this.reconnectAttempts);
+        }
+        else {
+            console.error('Max reconnection attempts reached for Discord');
+        }
+    }
+}
+exports.DiscordPlatform = DiscordPlatform;

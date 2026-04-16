@@ -13,7 +13,7 @@ import json
 from typing import Any
 
 from mcp.server import Server
-from mcp.types import Tool, TextResource, Resource
+from mcp.types import Tool
 from mcp.server.stdio import stdio_server
 
 
@@ -122,7 +122,7 @@ class TestMCPServer:
                 import sys
 
                 info_type = arguments.get("info_type", "platform")
-                
+
                 if info_type == "platform":
                     return json.dumps({
                         "system": platform.system(),

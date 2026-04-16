@@ -27,21 +27,75 @@ class CommandRegistry {
             return id;
         }
         const isWin = os_1.default.platform() === 'win32';
-        const shell = isWin ? 'pwsh.exe' : '/bin/bash';
-        // Persistent terminal starts a raw shell; one-off starts with -Command/-c
-        const args = persistent
-            ? (isWin ? ['-NoExit', '-NoLogo'] : ['-i'])
-            : (isWin ? ['-Command', commandLine] : ['-c', commandLine]);
-        const child = (0, child_process_1.spawn)(shell, args, {
-            cwd,
-            shell: false,
-            env: { ...process.env, COLUMNS: '120', ROWS: '40' }
-        });
+        // For Windows, try pwsh.exe first, fallback to powershell.exe, then cmd.exe
+        let shell;
+        let args;
+        if (isWin) {
+            // Try to find PowerShell Core (pwsh) first, then Windows PowerShell, then cmd
+            const possibleShells = ['pwsh.exe', 'powershell.exe', 'cmd.exe'];
+            shell = possibleShells[0]; // Start with pwsh.exe
+            // Persistent terminal starts a raw shell; one-off starts with -Command/-c
+            if (persistent) {
+                args = shell === 'cmd.exe' ? ['/k'] : ['-NoExit', '-NoLogo'];
+            }
+            else {
+                args = shell === 'cmd.exe' ? ['/c', commandLine] : ['-Command', commandLine];
+            }
+        }
+        else {
+            shell = '/bin/bash';
+            args = persistent ? ['-i'] : ['-c', commandLine];
+        }
+        let child;
+        let shellUsed = shell;
+        try {
+            child = (0, child_process_1.spawn)(shell, args, {
+                cwd,
+                shell: false,
+                env: { ...process.env, COLUMNS: '120', ROWS: '40' }
+            });
+        }
+        catch (err) {
+            // If pwsh.exe fails on Windows, try powershell.exe
+            if (isWin && shell === 'pwsh.exe' && err.code === 'ENOENT') {
+                console.log('[Terminal] pwsh.exe not found, trying powershell.exe');
+                shell = 'powershell.exe';
+                shellUsed = shell;
+                args = persistent ? ['-NoExit', '-NoLogo'] : ['-Command', commandLine];
+                try {
+                    child = (0, child_process_1.spawn)(shell, args, {
+                        cwd,
+                        shell: false,
+                        env: { ...process.env, COLUMNS: '120', ROWS: '40' }
+                    });
+                }
+                catch (err2) {
+                    // If powershell.exe also fails, try cmd.exe
+                    if (err2.code === 'ENOENT') {
+                        console.log('[Terminal] powershell.exe not found, trying cmd.exe');
+                        shell = 'cmd.exe';
+                        shellUsed = shell;
+                        args = persistent ? ['/k'] : ['/c', commandLine];
+                        child = (0, child_process_1.spawn)(shell, args, {
+                            cwd,
+                            shell: false,
+                            env: { ...process.env, COLUMNS: '120', ROWS: '40' }
+                        });
+                    }
+                    else {
+                        throw err2;
+                    }
+                }
+            }
+            else {
+                throw err;
+            }
+        }
         const record = {
             id,
             process: child,
             outputBuffer: '',
-            commandLine: persistent ? 'Persistent Shell' : commandLine,
+            commandLine: persistent ? `Persistent Shell (${shellUsed})` : commandLine,
             status: 'running',
         };
         const appendOutput = (data) => {
@@ -61,6 +115,7 @@ class CommandRegistry {
             record.status = 'done';
         });
         this.commands.set(id, record);
+        console.log(`[Terminal] Spawned ${shellUsed} with PID ${child.pid}`);
         return id;
     }
     getCommand(id) {

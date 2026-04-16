@@ -42,16 +42,16 @@ If the command remains running, this tool returns a CommandId which you MUST use
       const waitMs = Math.max(500, Math.min(10000, Number(args.WaitMsBeforeAsync || 2000)));
 
       const registry = CommandRegistry.getInstance();
-      
+
       // Use the singleton persistent terminal
       const id = CommandRegistry.PERSISTENT_ID;
       const existing = registry.getCommand(id);
-      
+
       const beforeBufferLength = existing?.outputBuffer.length || 0;
 
       // Start or get the terminal
       registry.spawnCommand('', cwd, true);
-      
+
       // If we have a command to run, pipe it in
       if (commandLine) {
         // Append a newline to execute
@@ -60,46 +60,60 @@ If the command remains running, this tool returns a CommandId which you MUST use
 
       // Wait for output to accumulate or timeout
       let elapsedTime = 0;
-      const pollInterval = 200;
+      const pollInterval = 100; // Reduced from 200ms for more responsive polling
       let noChangeCount = 0;
       let lastBufferLength = beforeBufferLength;
-      
-      // Use WaitMsBeforeAsync as the minimum wait time
-      const maxWait = Math.max(waitMs, 30000); 
-      
+      let lastSignificantChange = 0;
+
+      // Use WaitMsBeforeAsync as the minimum wait time, but allow longer for slow commands
+      const minWait = waitMs;
+      const maxWait = Math.max(waitMs * 3, 60000); // Allow up to 60 seconds for very slow commands
+
+      console.log(`[RunCommand] Starting command: "${commandLine}", minWait: ${minWait}ms, maxWait: ${maxWait}ms`);
+
       while (elapsedTime < maxWait) {
         await new Promise((r) => setTimeout(r, pollInterval));
         elapsedTime += pollInterval;
-        
+
         const currentBuffer = registry.getCommand(id)?.outputBuffer || '';
         const currentLength = currentBuffer.length;
-        
+
         // Check if we see a prompt (command completed)
-        const lastLines = currentBuffer.split('\n').slice(-3).join('\n');
-        const hasPrompt = lastLines.includes('> ') || lastLines.includes('$ ') || lastLines.includes('PS ');
-        
-        // If output hasn't changed AND we see a prompt, command is complete
-        if (currentLength === lastBufferLength && hasPrompt) {
+        const lastLines = currentBuffer.split('\n').slice(-5).join('\n'); // Check more lines
+        const hasPrompt = /(?:^|\n)(?:PS\s+[^>]*>|C:\\[^>]*>|\$\s|\w+@\w+.*\$)\s*$/m.test(lastLines);
+
+        // Track when we last saw significant output change
+        if (currentLength > lastBufferLength + 10) { // More than 10 chars = significant
+          lastSignificantChange = elapsedTime;
+          noChangeCount = 0;
+          console.log(`[RunCommand] Output growing: ${currentLength} chars (+${currentLength - lastBufferLength})`);
+        } else if (currentLength === lastBufferLength) {
           noChangeCount++;
-          // Wait for 3 consecutive polls (600ms) with no change AND a prompt before declaring complete
-          if (noChangeCount >= 3) {
-            console.log('[RunCommand] Output stabilized with prompt detected, command complete');
+        } else {
+          noChangeCount = 0; // Small changes reset counter but don't update lastSignificantChange
+        }
+
+        // Early completion detection (only after minimum wait time)
+        if (elapsedTime >= minWait) {
+          // If we have a clear prompt and no output for a while, command is done
+          if (hasPrompt && noChangeCount >= 5) { // 500ms of no change
+            console.log('[RunCommand] Prompt detected and output stable, command complete');
             break;
           }
-        } else if (currentLength > lastBufferLength) {
-          // Output is still coming, reset counter
-          noChangeCount = 0;
-        } else {
-          // No change but no prompt yet, increment counter
-          noChangeCount++;
+
+          // If no significant output change for a long time, likely done
+          if (elapsedTime - lastSignificantChange > 3000 && currentLength > beforeBufferLength) {
+            console.log('[RunCommand] No significant output change for 3s, assuming complete');
+            break;
+          }
         }
-        
-        // Only break early if we've waited at least the minimum time AND output is stable
-        if (elapsedTime >= waitMs && noChangeCount >= 3 && hasPrompt) {
-          console.log('[RunCommand] Minimum wait time reached and output stable, returning');
+
+        // For very long-running commands, provide intermediate results
+        if (elapsedTime >= minWait * 2 && currentLength > lastBufferLength + 100) {
+          console.log('[RunCommand] Long-running command with substantial output, returning intermediate results');
           break;
         }
-        
+
         lastBufferLength = currentLength;
       }
 
@@ -111,20 +125,32 @@ If the command remains running, this tool returns a CommandId which you MUST use
       // Return the new output since the last call or start
       const newOutput = record.outputBuffer.slice(beforeBufferLength);
       const out = stripAnsi(newOutput).trim();
-      
+
       console.log('[RunCommand] Returning output, length:', out.length, 'elapsed:', elapsedTime, 'ms');
-      
-      // CRITICAL: Always return output to AI, even if empty
+
+      // Enhanced output handling
       if (!out) {
-        return { 
-          success: true, 
-          output: `[Command Executed]\nCommand: ${commandLine}\nOutput: (No output captured - command may still be running. Use command_status to check for output.)\n\n(Terminal session remains active. You can run more commands in this session.)` 
+        // Check if the process is still running
+        const isRunning = record.status === 'running';
+        const statusMsg = isRunning
+          ? "Command may still be running or produced no output. Use command_status to check for more output."
+          : "Command completed with no output.";
+
+        return {
+          success: true,
+          output: `[Command Executed]\nCommand: ${commandLine}\nOutput: (No output captured)\nStatus: ${statusMsg}\n\n(Terminal session remains active. You can run more commands in this session.)`
         };
       }
-      
-      return { 
-        success: true, 
-        output: `[Command Executed]\nCommand: ${commandLine}\n\n${out}\n\n(Terminal session remains active. You can run more commands in this session.)` 
+
+      // Check if command might still be running
+      const mightBeRunning = elapsedTime >= maxWait || (record.status === 'running' && !out.includes('PS ') && !out.includes('C:\\'));
+      const statusNote = mightBeRunning
+        ? "\n\n[Note: Command may still be running. Use command_status to check for additional output.]"
+        : "";
+
+      return {
+        success: true,
+        output: `[Command Executed]\nCommand: ${commandLine}\n\n${out}${statusNote}\n\n(Terminal session remains active. You can run more commands in this session.)`
       };
     } catch (err: any) {
       const msg = err.message ?? String(err);

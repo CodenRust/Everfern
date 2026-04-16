@@ -138,9 +138,13 @@ Respond with JSON:
     // Better to iterate unnecessarily than to complete prematurely
     return false;
 }
-const createValidationNode = (runner, missionTracker) => {
+const createValidationNode = (runner, missionTracker, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
+        // Check for abort signal before processing
+        if (shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         integrator.startNode('validation', 'Validating tool calls for safety');
         try {
             runner.telemetry.transition('validation');
