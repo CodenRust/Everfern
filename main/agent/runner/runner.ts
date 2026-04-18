@@ -145,7 +145,7 @@ export class AgentRunner {
             run: async (t, h, m) => {
               const subRunner = new AgentRunner(this.client, this.config);
               subRunner.skills = this.skills;
-              const clonedHistory = JSON.parse(JSON.stringify(h));
+              const clonedHistory = [...h] as any[];
               let lastResponse = '';
               let toolCalls: any[] = [];
               const stream = subRunner.runStream(t, clonedHistory, m, `sub:${agentId}`);
@@ -353,7 +353,17 @@ export class AgentRunner {
     const preloadedPrompt = await getSlimSystemPromptAsync(platform, conversationId, [], this.skills);
 
     // Create eventQueue early so we can push status updates
+    let pushResolver: any = null;
     const eventQueue: StreamEvent[] = [];
+    const originalPush = eventQueue.push.bind(eventQueue);
+    eventQueue.push = (...items: StreamEvent[]) => {
+      const res = originalPush(...items);
+      if (pushResolver) {
+        pushResolver();
+        pushResolver = null;
+      }
+      return res;
+    };
 
     // Skip boring internal messages - frontend shows LoadingBreadcrumb instead
     // These console logs are for debugging only
@@ -473,6 +483,10 @@ export class AgentRunner {
         this.telemetry.terminate(false, errorMsg);
       } finally {
         graphDone = true;
+        if (pushResolver) {
+          pushResolver();
+          pushResolver = null;
+        }
       }
     })();
 
@@ -495,7 +509,7 @@ export class AgentRunner {
 
         yield event;
       } else {
-        await new Promise(r => setTimeout(r, 10));
+        await new Promise<void>(r => { pushResolver = r; });
       }
     }
 

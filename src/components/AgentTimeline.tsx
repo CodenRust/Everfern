@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDownIcon, LoaderIcon, BrainIcon } from "lucide-react";
 import { LoadingBreadcrumb } from "@/components/ui/animated-loading-svg-text-shimmer";
 
 export interface ToolCallDisplay {
@@ -20,6 +19,7 @@ export interface ToolCallDisplay {
     displayName?: string;
     description?: string;
     phase?: "triage" | "planning" | "execution" | "validation" | "completion";
+    thought?: string; // Individual thought for this step
 }
 
 interface AgentTimelineProps {
@@ -33,431 +33,803 @@ interface AgentTimelineProps {
     planTitle?: string | null;
 }
 
+// Timeline item types
+type TimelineItem =
+    | { type: "tool"; data: ToolCallDisplay }
+    | { type: "thought"; data: { id: string; content: string; isLive?: boolean } }
+    | { type: "plan"; data: { steps: Array<{ id: string; description: string; tool?: string }>; title?: string | null } };
+
 const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
 };
 
-// Phase colors and indicators for better visual distinction
-const phaseColors: Record<string, { bg: string; border: string; text: string; icon: string }> = {
-    triage: { bg: "rgba(139, 92, 246, 0.1)", border: "#8b5cf6", text: "#a855f7", icon: "🔍" },
-    planning: { bg: "rgba(59, 130, 246, 0.1)", border: "#3b82f6", text: "#3b82f6", icon: "📋" },
-    execution: { bg: "rgba(16, 185, 129, 0.1)", border: "#10b981", text: "#10b981", icon: "⚡" },
-    validation: { bg: "rgba(245, 158, 11, 0.1)", border: "#f59e0b", text: "#f59e0b", icon: "✓" },
-    completion: { bg: "rgba(34, 197, 94, 0.1)", border: "#22c55e", text: "#22c55e", icon: "🎯" }
-};
-
-// Enhanced node display names with phase context
-const getEnhancedNodeDisplayName = (nodeName: string, phase?: string): string => {
-    const nodeNames: Record<string, string> = {
-        // Triage phase nodes
-        'intent_classifier': 'Understanding your request',
-        'triage': 'Analyzing request complexity',
-
-        // Planning phase nodes
-        'global_planner': 'Creating execution plan',
-        'planner': 'Compiling execution pipeline',
-        'planning': 'Designing approach',
-
-        // Execution phase nodes
-        'brain': 'Processing with AI',
-        'multi_tool_orchestrator': 'Coordinating tools',
-        'execute_tools': 'Running tools',
-        'execution': 'Executing plan',
-
-        // Validation phase nodes
-        'action_validation': 'Validating actions',
-        'judge': 'Evaluating completion',
-        'validation': 'Validating results',
-
-        // Completion phase nodes
-        'completion': 'Finalizing results',
-        'hitl_approval': 'Waiting for approval'
-    };
-
-    const displayName = nodeNames[nodeName];
+// Tool name → human label
+const toolLabel = (toolName: string, label?: string, displayName?: string): string => {
+    if (label) return label;
     if (displayName) return displayName;
-
-    // Add phase context to unknown nodes
-    if (phase && nodeName) {
-        const phasePrefix = phase.charAt(0).toUpperCase() + phase.slice(1);
-        return `${phasePrefix}: ${nodeName.replace(/_/g, ' ')}`;
-    }
-
-    return nodeName ? `Working on ${nodeName.replace(/_/g, ' ')}` : 'Working';
-};
-
-// Phase Indicator Component
-const PhaseIndicator = ({ phase, currentNode }: { phase?: string; currentNode?: string }) => {
-    if (!phase) return null;
-
-    const phaseInfo = phaseColors[phase];
-    if (!phaseInfo) return null;
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex items-center gap-2 mb-3 p-2 rounded-lg"
-            style={{
-                backgroundColor: phaseInfo.bg,
-                border: `1px solid ${phaseInfo.border}20`
-            }}
-        >
-            <span className="text-sm">{phaseInfo.icon}</span>
-            <div className="flex-1">
-                <div className="text-xs font-medium" style={{ color: phaseInfo.text }}>
-                    {phase.charAt(0).toUpperCase() + phase.slice(1)} Phase
-                </div>
-                {currentNode && (
-                    <div className="text-xs opacity-75" style={{ color: phaseInfo.text }}>
-                        {getEnhancedNodeDisplayName(currentNode, phase)}
-                    </div>
-                )}
-            </div>
-            <motion.div
-                animate={{ scale: [1, 1.2, 1] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: phaseInfo.border }}
-            />
-        </motion.div>
-    );
-};
-
-// Plan Steps Component — shown during planning phase
-const PlanSteps = ({ steps, title }: { steps: Array<{ id: string; description: string; tool?: string }>; title?: string | null }) => {
-    const [expanded, setExpanded] = React.useState(false);
-    if (!steps || steps.length === 0) return null;
-
-    const toolIcon = (tool?: string) => {
-        if (!tool) return '▸';
-        if (tool.includes('write') || tool.includes('edit')) return '✏️';
-        if (tool.includes('read') || tool.includes('find') || tool.includes('grep')) return '🔍';
-        if (tool.includes('run') || tool.includes('command') || tool.includes('bash')) return '⚡';
-        if (tool.includes('web') || tool.includes('search') || tool.includes('fetch')) return '🌐';
-        return '▸';
+    const map: Record<string, string> = {
+        read_file: "Read file",
+        write: "Write file",
+        write_file: "Write file",
+        run_command: "Run command",
+        bash: "Run command",
+        executePwsh: "Run command",
+        web_search: "Web search",
+        web_fetch: "Fetch URL",
+        grep_search: "Search codebase",
+        file_search: "Find file",
+        list_directory: "List directory",
+        get_diagnostics: "Check diagnostics",
+        str_replace: "Edit file",
+        create_artifact: "Create artifact",
+        memory_save: "Save memory",
+        memory_search: "Search memory",
+        screenshot: "Take screenshot",
+        computer_use: "Computer use",
+        ask_user: "Ask user",
+        planner: "Plan steps",
+        subagent: "Spawn subagent",
     };
+    return map[toolName] ?? toolName.replace(/_/g, " ");
+};
+
+// Status dot with pulse animation
+const StatusDot = ({ status, isLive }: { status: ToolCallDisplay["status"]; isLive?: boolean }) => {
+    const isRunning = status === "running" || isLive;
+    const color = isRunning ? "#6366f1" : status === "error" ? "#ef4444" : "#22c55e";
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            style={{
-                margin: '8px 0 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(59,130,246,0.2)',
-                backgroundColor: 'rgba(59,130,246,0.04)',
-                overflow: 'hidden'
-            }}
-        >
-            <button
-                onClick={() => setExpanded(e => !e)}
-                style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '10px 14px', background: 'none', border: 'none',
-                    cursor: 'pointer', textAlign: 'left'
-                }}
-            >
-                <span style={{ fontSize: 13 }}>📋</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#3b82f6', flex: 1 }}>
-                    {title || 'Execution Plan'} <span style={{ fontWeight: 400, color: '#6b7280' }}>({steps.length} steps)</span>
-                </span>
-                <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                    <ChevronDownIcon width={13} height={13} className="text-blue-400" />
-                </motion.span>
-            </button>
-            <AnimatePresence>
-                {expanded && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        style={{ overflow: 'hidden' }}
-                    >
-                        <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {steps.map((step, idx) => (
-                                <div key={step.id || idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                                    <span style={{ fontSize: 11, color: '#9ca3af', minWidth: 18, paddingTop: 1 }}>{idx + 1}.</span>
-                                    <span style={{ fontSize: 12, color: '#374151', flex: 1, lineHeight: 1.5 }}>
-                                        {toolIcon(step.tool)} {step.description}
-                                    </span>
-                                    {step.tool && (
-                                        <span style={{
-                                            fontSize: 10, color: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)',
-                                            padding: '1px 6px', borderRadius: 4, whiteSpace: 'nowrap', flexShrink: 0
-                                        }}>
-                                            {step.tool}
-                                        </span>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </motion.div>
+        <div style={{ position: "relative", width: 10, height: 10, flexShrink: 0 }}>
+            <div style={{
+                width: 10, height: 10, borderRadius: "50%",
+                backgroundColor: color,
+                border: "2px solid #faf9f7",
+                boxShadow: "0 0 0 1px #e8e6d9",
+            }} />
+            {isRunning && (
+                <motion.div
+                    animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
+                    transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+                    style={{
+                        position: "absolute", inset: -2,
+                        borderRadius: "50%",
+                        backgroundColor: color,
+                    }}
+                />
+            )}
+        </div>
     );
 };
 
-
-const ToolRow = ({ tc, isExpanded, onToggle, isFirst, isLast, currentPhase }: {
-    tc: ToolCallDisplay;
-    isExpanded: boolean;
-    onToggle: () => void;
-    isFirst: boolean;
-    isLast: boolean;
-    currentPhase?: string;
-}) => {
-    const isRunning = tc.status === "running";
-    const isError = tc.status === "error";
-    const isTerminal = tc.toolName === "run_command" || tc.toolName === "bash";
-    const hasOutput = !!tc.output && !isRunning;
-
-    // Use phase-specific colors if available
-    const toolPhase = tc.phase || currentPhase;
-    const phaseInfo = toolPhase ? phaseColors[toolPhase] : null;
-
-    const statusColor = isRunning
-        ? { dot: phaseInfo?.border || "#6b7280", line: "#d1d5db" }
-        : isError
-            ? { dot: "#ef4444", line: "#fecaca" }
-            : isTerminal
-                ? { dot: "#6366f1", line: "#c7d2fe" }
-                : { dot: phaseInfo?.border || "#22c55e", line: "#bbf7d0" };
-
+// Thought item - appears as a branch off the main timeline
+const ThoughtItem = ({ content, isLive, isLast }: { content: string; isLive?: boolean; isLast: boolean }) => {
     return (
-        <motion.div
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            style={{ display: "flex", alignItems: "stretch", gap: 12, position: "relative" }}
-        >
-            {/* Connection Line & Dot */}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+            {/* Main timeline line */}
+            <div style={{
+                width: 20,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                position: "relative",
+            }}>
+                {/* Vertical line before */}
                 <div style={{
-                    flex: isFirst ? 0 : 1,
                     width: 2,
-                    backgroundColor: isFirst ? "transparent" : "#e5e7eb",
-                    minHeight: isFirst ? 10 : 0
+                    height: 12,
+                    backgroundColor: "#e8e6d9",
                 }} />
 
+                {/* Branch point */}
                 <div style={{
-                    width: 10, height: 10, borderRadius: "50%",
-                    backgroundColor: statusColor.dot,
-                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    backgroundColor: "#faf9f7",
+                    border: "2px solid #e8e6d9",
                     flexShrink: 0,
                     zIndex: 2,
-                    boxShadow: isRunning ? `0 0 8px ${statusColor.dot}40` : "none"
+                }} />
+
+                {/* Vertical line after - extends through entire content */}
+                {!isLast && (
+                    <div style={{
+                        position: "absolute",
+                        top: 22,
+                        bottom: -20,
+                        width: 2,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+                )}
+
+                {/* Branch curve */}
+                <svg
+                    width="40"
+                    height="40"
+                    viewBox="0 0 40 40"
+                    style={{
+                        position: "absolute",
+                        left: 9,
+                        top: 12,
+                        pointerEvents: "none",
+                    }}
+                >
+                    <path
+                        d="M 0 0 Q 20 0 20 20 L 20 40"
+                        stroke="#e8e6d9"
+                        strokeWidth="2"
+                        fill="none"
+                    />
+                </svg>
+            </div>
+
+            {/* Thought content */}
+            <div style={{ flex: 1, paddingLeft: 32, paddingTop: 8, paddingBottom: 20 }}>
+                {isLive ? (
+                    <LoadingBreadcrumb text="Thinking" className="mb-2" />
+                ) : (
+                    <div style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        marginBottom: 6,
+                    }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                            stroke="#b5b2aa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                            <circle cx="12" cy="12" r="10" />
+                        </svg>
+                        <span style={{
+                            fontSize: 11,
+                            color: "#8a8886",
+                            fontWeight: 600,
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase"
+                        }}>
+                            Reasoning
+                        </span>
+                    </div>
+                )}
+                <div style={{
+                    fontSize: 12.5,
+                    color: "#4a4846",
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.75,
+                    borderLeft: "2px solid #e8e6d9",
+                    paddingLeft: 12,
+                    fontStyle: "italic",
+                    backgroundColor: "#faf9f7",
+                    padding: "8px 12px",
+                    borderRadius: 8,
                 }}>
-                    {isRunning && (
-                        <motion.div
-                            animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
-                            transition={{ repeat: Infinity, duration: 2 }}
-                            style={{ position: "absolute", width: 14, height: 14, borderRadius: "50%", border: `1.5px solid ${statusColor.dot}` }}
+                    {content}
+                    {isLive && (
+                        <motion.span
+                            animate={{ opacity: [1, 0] }}
+                            transition={{ repeat: Infinity, duration: 0.5 }}
+                            style={{
+                                display: "inline-block", width: 2, height: "1em",
+                                backgroundColor: "#6366f1", marginLeft: 3,
+                                verticalAlign: "text-bottom",
+                            }}
                         />
                     )}
                 </div>
-
-                <div style={{
-                    flex: 1,
-                    width: 2,
-                    backgroundColor: isLast ? "transparent" : "#e5e7eb"
-                }} />
             </div>
+        </div>
+    );
+};
 
-            {/* Content Branch */}
-            <div style={{ flex: 1, paddingBottom: isLast ? 0 : 16, paddingTop: 4 }}>
-                <div
-                    onClick={() => hasOutput && onToggle()}
-                    onMouseEnter={(e) => { if (hasOutput) e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.03)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+// Plan item - appears as a branch off the main timeline
+const PlanItem = ({
+    steps,
+    title,
+    isLast
+}: {
+    steps: Array<{ id: string; description: string; tool?: string }>;
+    title?: string | null;
+    isLast: boolean;
+}) => {
+    return (
+        <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+            {/* Main timeline line */}
+            <div style={{
+                width: 20,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                position: "relative",
+            }}>
+                {/* Vertical line before */}
+                <div style={{
+                    width: 2,
+                    height: 12,
+                    backgroundColor: "#e8e6d9",
+                }} />
+
+                {/* Branch point */}
+                <div style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    backgroundColor: "#faf9f7",
+                    border: "2px solid #e8e6d9",
+                    flexShrink: 0,
+                    zIndex: 2,
+                }} />
+
+                {/* Vertical line after - extends through entire content */}
+                {!isLast && (
+                    <div style={{
+                        position: "absolute",
+                        top: 22,
+                        bottom: -20,
+                        width: 2,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+                )}
+
+                {/* Branch curve */}
+                <svg
+                    width="40"
+                    height="40"
+                    viewBox="0 0 40 40"
                     style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: '4px 8px',
-                        borderRadius: 6,
-                        marginLeft: -8,
-                        cursor: hasOutput ? "pointer" : "default",
-                        userSelect: "none",
-                        transition: "background-color 0.15s ease"
+                        position: "absolute",
+                        left: 9,
+                        top: 12,
+                        pointerEvents: "none",
                     }}
                 >
-                    <div style={{ width: 12, height: 1, backgroundColor: "#e5e7eb", marginLeft: -12, zIndex: 1 }} />
+                    <path
+                        d="M 0 0 Q 20 0 20 20 L 20 40"
+                        stroke="#e8e6d9"
+                        strokeWidth="2"
+                        fill="none"
+                    />
+                </svg>
+            </div>
 
-                    {/* Phase indicator for tool */}
-                    {toolPhase && phaseInfo && (
-                        <span
-                            className="text-xs px-1.5 py-0.5 rounded"
-                            style={{
-                                backgroundColor: phaseInfo.bg,
-                                color: phaseInfo.text,
-                                border: `1px solid ${phaseInfo.border}30`
-                            }}
-                        >
-                            {phaseInfo.icon}
-                        </span>
-                    )}
-
+            {/* Plan content */}
+            <div style={{ flex: 1, paddingLeft: 32, paddingTop: 8, paddingBottom: 20 }}>
+                <div style={{
+                    display: "flex", alignItems: "center", gap: 6, marginBottom: 8,
+                }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                        stroke="#b5b2aa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="8" y1="6" x2="21" y2="6" />
+                        <line x1="8" y1="12" x2="21" y2="12" />
+                        <line x1="8" y1="18" x2="21" y2="18" />
+                        <line x1="3" y1="6" x2="3.01" y2="6" />
+                        <line x1="3" y1="12" x2="3.01" y2="12" />
+                        <line x1="3" y1="18" x2="3.01" y2="18" />
+                    </svg>
                     <span style={{
-                        fontSize: 13,
-                        fontWeight: 500,
-                        color: isRunning ? "#111111" : isError ? "#ef4444" : "#4b5563",
-                        fontFamily: "'Matter', sans-serif"
+                        fontSize: 11,
+                        color: "#8a8886",
+                        fontWeight: 600,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase"
                     }}>
-                        {tc.label || tc.displayName || tc.toolName}
+                        {title || "Plan"} · {steps.length} steps
+                    </span>
+                </div>
+                <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    backgroundColor: "#faf9f7",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    borderLeft: "2px solid #e8e6d9",
+                }}>
+                    {steps.map((step, idx) => (
+                        <div key={step.id || idx} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                            <span style={{
+                                fontSize: 10.5, color: "#b5b2aa",
+                                fontFamily: "'JetBrains Mono', monospace",
+                                minWidth: 18, paddingTop: 1,
+                            }}>
+                                {String(idx + 1).padStart(2, "0")}
+                            </span>
+                            <span style={{ fontSize: 12.5, color: "#4a4846", lineHeight: 1.55, flex: 1 }}>
+                                {step.description}
+                            </span>
+                            {step.tool && (
+                                <span style={{
+                                    fontSize: 10, color: "#6366f1",
+                                    backgroundColor: "rgba(99,102,241,0.08)",
+                                    padding: "2px 7px", borderRadius: 4,
+                                    whiteSpace: "nowrap", flexShrink: 0,
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                }}>
+                                    {step.tool}
+                                </span>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Single tool row on the main timeline
+const ToolRow = ({
+    tc, isExpanded, onToggle, isLast,
+}: {
+    tc: ToolCallDisplay;
+    isExpanded: boolean;
+    onToggle: () => void;
+    isLast: boolean;
+}) => {
+    const isRunning = tc.status === "running";
+    const isError = tc.status === "error";
+    const hasOutput = !!tc.output && !isRunning;
+    const name = toolLabel(tc.toolName, tc.label, tc.displayName);
+
+    // Check if this is a terminal command
+    const isTerminalCommand = tc.toolName === "run_command" || tc.toolName === "bash" || tc.toolName === "executePwsh";
+    const commandPath = tc.args?.cwd as string | undefined;
+    const command = tc.args?.command as string | undefined;
+
+    // Check if this is an artifact being created
+    const isArtifact = tc.toolName === "create_artifact";
+    const artifactContent = tc.args?.content as string | undefined;
+    const artifactType = tc.args?.type as string | undefined;
+    const artifactTitle = tc.args?.title as string | undefined;
+
+    return (
+        <div style={{ display: "flex", gap: 0, paddingBottom: 0, position: "relative" }}>
+            {/* Timeline line */}
+            <div style={{
+                width: 20,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                paddingTop: 0,
+            }}>
+                {/* Vertical line before dot */}
+                <div style={{
+                    width: 2,
+                    height: 8,
+                    backgroundColor: "#e8e6d9",
+                }} />
+
+                {/* Status dot */}
+                <StatusDot status={tc.status} />
+
+                {/* Vertical line after dot - extends through entire content */}
+                {!isLast && (
+                    <div style={{
+                        position: "absolute",
+                        top: 18,
+                        bottom: -20,
+                        width: 2,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+                )}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                <div
+                    onClick={() => hasOutput && onToggle()}
+                    style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        cursor: hasOutput ? "pointer" : "default",
+                        userSelect: "none",
+                        padding: "2px 0",
+                    }}
+                >
+                    <span style={{
+                        fontSize: 13.5,
+                        fontWeight: 500,
+                        color: isRunning ? "#201e24" : isError ? "#dc2626" : "#4a4846",
+                        fontFamily: "'Figtree', system-ui, sans-serif",
+                        letterSpacing: "-0.01em",
+                    }}>
+                        {name}
                     </span>
 
                     {isRunning && (
-                        <LoaderIcon size={12} className="animate-spin text-zinc-400" />
+                        <motion.div
+                            animate={{ opacity: [0.4, 1, 0.4] }}
+                            transition={{ repeat: Infinity, duration: 1.2 }}
+                            style={{ display: "flex", gap: 3, alignItems: "center" }}
+                        >
+                            {[0, 1, 2].map(i => (
+                                <motion.div
+                                    key={i}
+                                    animate={{ opacity: [0.3, 1, 0.3] }}
+                                    transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
+                                    style={{ width: 3, height: 3, borderRadius: "50%", backgroundColor: "#6366f1" }}
+                                />
+                            ))}
+                        </motion.div>
                     )}
 
                     {tc.durationMs !== undefined && !isRunning && (
-                        <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "'JetBrains Mono', monospace" }}>
+                        <span style={{
+                            fontSize: 11, color: "#b5b2aa",
+                            fontFamily: "'JetBrains Mono', monospace",
+                        }}>
                             {formatDuration(tc.durationMs)}
                         </span>
                     )}
 
                     {hasOutput && (
-                        <motion.span animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                            <ChevronDownIcon width={12} height={12} className="text-zinc-400" />
-                        </motion.span>
+                        <motion.svg
+                            animate={{ rotate: isExpanded ? 180 : 0 }}
+                            transition={{ duration: 0.18 }}
+                            width={12} height={12} viewBox="0 0 24 24"
+                            fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            style={{ marginLeft: "auto", flexShrink: 0 }}
+                        >
+                            <polyline points="6 9 12 15 18 9" />
+                        </motion.svg>
                     )}
                 </div>
 
                 {tc.description && !isExpanded && (
-                    <div style={{ fontSize: 11, color: "#71717a", marginTop: 2, marginLeft: 8, opacity: 0.8 }}>
+                    <div style={{
+                        fontSize: 11.5, color: "#8a8886", marginTop: 2,
+                        lineHeight: 1.5, fontFamily: "'Figtree', system-ui, sans-serif",
+                    }}>
                         {tc.description}
                     </div>
                 )}
 
-                <AnimatePresence>
-                    {isExpanded && tc.output && (
-                        <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            style={{ overflow: "hidden" }}
-                        >
+                {/* Streaming artifact content preview */}
+                {isArtifact && isRunning && artifactContent && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.3 }}
+                        style={{
+                            marginTop: 10,
+                            padding: "10px 14px",
+                            backgroundColor: "#faf9f7",
+                            borderRadius: 8,
+                            border: "1px solid #e8e6d9",
+                            borderLeft: "2px solid #6366f1",
+                        }}
+                    >
+                        {artifactTitle && (
                             <div style={{
-                                marginTop: 8, padding: "12px 16px",
-                                backgroundColor: "#fcfbf7", borderRadius: 12,
-                                fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
-                                color: "#4a4846", whiteSpace: "pre-wrap", maxHeight: 300, overflowY: "auto",
-                                border: "1px solid rgba(0,0,0,0.05)",
-                                marginLeft: 8
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "#6366f1",
+                                marginBottom: 6,
+                                fontFamily: "'Figtree', system-ui, sans-serif",
                             }}>
-                                {tc.output}
+                                {artifactTitle}
+                                {artifactType && (
+                                    <span style={{
+                                        marginLeft: 8,
+                                        fontSize: 10,
+                                        fontWeight: 400,
+                                        color: "#8a8886",
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                    }}>
+                                        {artifactType}
+                                    </span>
+                                )}
                             </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
-        </motion.div>
-    );
-};
-
-export const AgentTimeline = ({ toolCalls, thought, isLive, showOutput = true, currentPhase, currentNode, planSteps, planTitle }: AgentTimelineProps) => {
-    const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
-
-    // Debug: Log when toolCalls prop changes
-    React.useEffect(() => {
-        console.log('[AgentTimeline] toolCalls prop updated:', toolCalls.length, 'tools');
-        console.log('[AgentTimeline] toolCalls:', toolCalls.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label, status: tc.status })));
-    }, [toolCalls]);
-
-    // Filter tools based on visibility preferences
-    const visibleToolCalls = useMemo(
-        () => {
-            // Tools that are typically hidden from timeline (but shown in HITL)
-            // Only hide tools that are very frequent and low-value for user visibility
-            const hiddenTools = ['write_file']; // Only hide write_file, show everything else including 'write'
-            const filtered = toolCalls.filter((tc) => !hiddenTools.includes(tc.toolName));
-
-            console.log('[AgentTimeline] Tool visibility filtering:');
-            console.log('  - Original tools:', toolCalls.length);
-            console.log('  - Visible tools:', filtered.length);
-            console.log('  - Hidden tools:', toolCalls.filter(tc => hiddenTools.includes(tc.toolName)).map(tc => tc.toolName));
-            console.log('  - Visible tool names:', filtered.map(tc => tc.toolName));
-
-            return filtered;
-        },
-        [toolCalls]
-    );
-
-    const toggleTool = (id: string) => {
-        setExpandedToolId((prev) => (prev === id ? null : id));
-    };
-
-    if (!isLive && visibleToolCalls.length === 0 && !thought?.trim() && !currentPhase && !planSteps?.length) return null;
-
-    const runningCount = toolCalls.filter((t) => t.status === "running").length;
-    const hasRunning = runningCount > 0 || isLive;
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 4 }}
-        >
-            {/* Phase Indicator */}
-            <PhaseIndicator phase={currentPhase} currentNode={currentNode} />
-
-            {/* Plan Steps — shown during/after planning phase */}
-            {planSteps && planSteps.length > 0 && (
-                <PlanSteps steps={planSteps} title={planTitle} />
-            )}
-
-            {thought && (
-                <div style={{ padding: '0 8px 8px' }}>
-                    {isLive ? (
-                        <LoadingBreadcrumb text="Thinking" className="mb-2" />
-                    ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                            <BrainIcon width={14} height={14} className="text-zinc-400" />
-                            <span style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic', fontWeight: 500 }}>
-                                Reasoning
-                            </span>
-                        </div>
-                    )}
-                    <div style={{ fontSize: 13.5, color: '#4b5563', whiteSpace: 'pre-wrap', lineHeight: 1.7, borderLeft: '2px solid #e5e7eb', paddingLeft: 12, marginLeft: 6 }}>
-                        {thought}
-                        {isLive && (
+                        )}
+                        <div style={{
+                            fontSize: 11.5,
+                            fontFamily: "'JetBrains Mono', monospace",
+                            color: "#4a4846",
+                            whiteSpace: "pre-wrap",
+                            maxHeight: 200,
+                            overflowY: "auto",
+                            lineHeight: 1.6,
+                        }}>
+                            {artifactContent}
                             <motion.span
                                 animate={{ opacity: [1, 0] }}
                                 transition={{ repeat: Infinity, duration: 0.5 }}
-                                style={{ display: 'inline-block', width: 2, height: '1em', backgroundColor: '#6366f1', marginLeft: 4, verticalAlign: 'text-bottom' }}
+                                style={{
+                                    display: "inline-block",
+                                    width: 2,
+                                    height: "1em",
+                                    backgroundColor: "#6366f1",
+                                    marginLeft: 2,
+                                    verticalAlign: "text-bottom",
+                                }}
                             />
-                        )}
-                    </div>
-                </div>
-            )}
+                        </div>
+                    </motion.div>
+                )}
 
-            {visibleToolCalls.length > 0 && (
-                <div style={{ padding: "8px 0 8px 12px" }}>
-                    {visibleToolCalls.map((tc, idx) => (
-                        <ToolRow
-                            key={tc.id || idx}
-                            tc={tc}
-                            isExpanded={expandedToolId === tc.id}
-                            onToggle={() => toggleTool(tc.id)}
-                            isFirst={idx === 0}
-                            isLast={idx === visibleToolCalls.length - 1}
-                            currentPhase={currentPhase}
-                        />
-                    ))}
-                </div>
-            )}
+                <AnimatePresence>
+                    {isExpanded && tc.output && (() => {
+                        const lines = tc.output.split("\n");
+                        const MAX = 100;
+                        const truncated = lines.length > MAX;
+                        const display = truncated
+                            ? `[Showing last ${MAX} lines]\n` + lines.slice(-MAX).join("\n")
+                            : tc.output;
+                        return (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.18 }}
+                                style={{ overflow: "hidden" }}
+                            >
+                                {/* Command header for terminal commands */}
+                                {isTerminalCommand && (commandPath || command) && (
+                                    <div style={{
+                                        marginTop: 10,
+                                        padding: "8px 12px",
+                                        backgroundColor: "#faf9f7",
+                                        borderRadius: "8px 8px 0 0",
+                                        fontSize: 11,
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        color: "#6366f1",
+                                        borderLeft: "2px solid #6366f1",
+                                        borderRight: "1px solid #e8e6d9",
+                                        borderTop: "1px solid #e8e6d9",
+                                    }}>
+                                        {commandPath && <span style={{ color: "#8a8886" }}>{commandPath} : </span>}
+                                        <span style={{ color: "#201e24", fontWeight: 500 }}>{command}</span>
+                                    </div>
+                                )}
 
-            {hasRunning && visibleToolCalls.length === 0 && !currentPhase && (
-                <div style={{ padding: "12px 0", textAlign: "center" }}>
-                    <span style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>
-                        Initializing...
-                    </span>
+                                <div style={{
+                                    marginTop: isTerminalCommand && (commandPath || command) ? 0 : 10,
+                                    padding: "10px 14px",
+                                    backgroundColor: "#f4f3ef",
+                                    borderRadius: isTerminalCommand && (commandPath || command) ? "0 0 8px 8px" : 8,
+                                    fontSize: 11.5,
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    color: "#4a4846",
+                                    whiteSpace: "pre-wrap",
+                                    maxHeight: 260,
+                                    overflowY: "auto",
+                                    border: "1px solid #e8e6d9",
+                                    borderTop: isTerminalCommand && (commandPath || command) ? "none" : "1px solid #e8e6d9",
+                                    lineHeight: 1.6,
+                                }}>
+                                    {display}
+                                </div>
+                            </motion.div>
+                        );
+                    })()}
+                </AnimatePresence>
+            </div>
+        </div>
+    );
+};
+
+export const AgentTimeline = ({
+    toolCalls, thought, isLive, currentNode, planSteps, planTitle,
+}: AgentTimelineProps) => {
+    const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
+    const [collapsed, setCollapsed] = useState(false);
+
+    // Build unified timeline with thoughts interspersed in chronological order
+    const timelineItems = useMemo((): TimelineItem[] => {
+        const items: TimelineItem[] = [];
+
+        // Filter hidden tools
+        const hidden = ["write_file"];
+        const visibleTools = toolCalls.filter(tc => !hidden.includes(tc.toolName));
+
+        // Add global thought at the beginning if present
+        if (thought && thought.trim()) {
+            items.push({
+                type: "thought",
+                data: { id: "global-thought", content: thought, isLive }
+            });
+        }
+
+        // Add plan if present
+        if (planSteps && planSteps.length > 0) {
+            items.push({
+                type: "plan",
+                data: { steps: planSteps, title: planTitle }
+            });
+        }
+
+        // Add tools and their individual thoughts in chronological order
+        visibleTools.forEach(tc => {
+            // Add tool-specific thought before the tool if it exists
+            if (tc.thought && tc.thought.trim()) {
+                items.push({
+                    type: "thought",
+                    data: {
+                        id: `thought-${tc.id}`,
+                        content: tc.thought,
+                        isLive: tc.status === "running"
+                    }
+                });
+            }
+
+            // Add the tool
+            items.push({
+                type: "tool",
+                data: tc
+            });
+        });
+
+        return items;
+    }, [toolCalls, thought, isLive, planSteps, planTitle]);
+
+    const toggleTool = (id: string) => setExpandedToolId(p => p === id ? null : id);
+
+    const hasContent = timelineItems.length > 0;
+
+    // Don't show timeline if live but no content yet (hide "Initializing..." state)
+    if (!hasContent) return null;
+
+    // Count total steps (tools only, not thoughts/plans)
+    const totalSteps = timelineItems.filter(item => item.type === "tool").length;
+
+    // Generate header label
+    const headerLabel = isLive
+        ? currentNode
+            ? currentNode.replace(/_/g, " ")
+            : "Working"
+        : totalSteps > 0
+            ? `Completed · ${totalSteps} step${totalSteps !== 1 ? "s" : ""}`
+            : "Completed";
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+            style={{
+                marginBottom: 16,
+                fontFamily: "'Figtree', system-ui, sans-serif",
+                paddingLeft: 0,
+            }}
+        >
+            {/* Timeline start indicator - clickable header */}
+            <button
+                onClick={() => setCollapsed(c => !c)}
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    marginBottom: collapsed ? 0 : 12,
+                    paddingLeft: 0,
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    width: "100%",
+                }}
+            >
+                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                    {/* Vertical line connecting to timeline */}
+                    {!collapsed && hasContent && (
+                        <div style={{
+                            position: "absolute",
+                            top: 10,
+                            left: 4,
+                            width: 2,
+                            height: 12,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+
+                    {isLive ? (
+                        <div style={{ position: "relative", width: 10, height: 10, flexShrink: 0 }}>
+                            <div style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: "50%",
+                                backgroundColor: "#6366f1",
+                                border: "2px solid #faf9f7",
+                                boxShadow: "0 0 0 1px #e8e6d9",
+                            }} />
+                            <motion.div
+                                animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+                                style={{
+                                    position: "absolute", inset: -2,
+                                    borderRadius: "50%", backgroundColor: "#6366f1",
+                                }}
+                            />
+                        </div>
+                    ) : (
+                        <div style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            backgroundColor: "#22c55e",
+                            border: "2px solid #faf9f7",
+                            boxShadow: "0 0 0 1px #e8e6d9",
+                            flexShrink: 0
+                        }} />
+                    )}
                 </div>
-            )}
+
+                <span style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#201e24",
+                    letterSpacing: "-0.01em",
+                    textTransform: "capitalize",
+                    flex: 1,
+                    textAlign: "left",
+                }}>
+                    {headerLabel}
+                </span>
+
+                {/* Chevron indicator */}
+                <motion.svg
+                    animate={{ rotate: collapsed ? -90 : 0 }}
+                    transition={{ duration: 0.18 }}
+                    width={14} height={14} viewBox="0 0 24 24"
+                    fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                    strokeLinecap="round" strokeLinejoin="round"
+                    style={{ flexShrink: 0 }}
+                >
+                    <polyline points="6 9 12 15 18 9" />
+                </motion.svg>
+            </button>
+
+            {/* Timeline items - collapsible */}
+            <AnimatePresence initial={false}>
+                {!collapsed && (
+                    <motion.div
+                        key="timeline-content"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: "easeInOut" }}
+                        style={{ overflow: "hidden" }}
+                    >
+                        <div style={{ paddingLeft: 0 }}>
+                            {timelineItems.map((item, idx) => {
+                                const isLast = idx === timelineItems.length - 1;
+
+                                if (item.type === "thought") {
+                                    return (
+                                        <ThoughtItem
+                                            key={item.data.id}
+                                            content={item.data.content}
+                                            isLive={item.data.isLive}
+                                            isLast={isLast}
+                                        />
+                                    );
+                                }
+
+                                if (item.type === "plan") {
+                                    return (
+                                        <PlanItem
+                                            key="plan"
+                                            steps={item.data.steps}
+                                            title={item.data.title}
+                                            isLast={isLast}
+                                        />
+                                    );
+                                }
+
+                                if (item.type === "tool") {
+                                    return (
+                                        <ToolRow
+                                            key={item.data.id || idx}
+                                            tc={item.data}
+                                            isExpanded={expandedToolId === item.data.id}
+                                            onToggle={() => toggleTool(item.data.id)}
+                                            isLast={isLast}
+                                        />
+                                    );
+                                }
+
+                                return null;
+                            })}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </motion.div>
     );
 };

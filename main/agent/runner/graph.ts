@@ -1,4 +1,4 @@
-import { StateGraph, END, START } from '@langchain/langgraph';
+import { StateGraph, END, START, interrupt } from '@langchain/langgraph';
 import { GraphState, GraphStateType, StreamEvent } from './state';
 import { createTriageNode } from './nodes/triage';
 import { createPlannerNode } from './nodes/planner';
@@ -70,7 +70,7 @@ export const buildGraph = (
         const args = call.arguments || {};
         
         // Specialize formatting for terminal commands
-        if (name === 'terminal_execute' || name === 'executePwsh' || name === 'run_command') {
+        if (name === 'terminal_execute' || name === 'executePwsh' || name === 'run_command' || name === 'bash') {
           const cmd = args.command || args.CommandLine || args.cmd || JSON.stringify(args);
           return `**${name}** — \`${cmd}\``;
         }
@@ -100,8 +100,14 @@ export const buildGraph = (
 
       if (conversationId) {
         saveHitlRequest(approvalRequest);
-        // Note: stateManager is usually global, so it's fine to keep it as is
       }
+
+      // Emit tool_start for ask_user_question so frontend knows to expect a result
+      eventQueue?.push({
+        type: 'tool_start',
+        toolName: 'ask_user_question',
+        toolArgs: { questions: reasoning }
+      });
 
       const { askUserTool } = await import('../tools/ask-user');
       const hitlResult = await askUserTool.execute({
@@ -133,17 +139,20 @@ export const buildGraph = (
       runner.telemetry.info('HITL approval required — ending turn, user must respond');
       if (missionTracker) missionTracker.completeStep('step:hitl');
 
+      // Pause execution and wait for user response via Command({ resume: ... })
+      const answer = interrupt(approvalRequest);
+      const isApproved = String(answer).includes('[HITL_APPROVED]');
+      
+      runner.telemetry.info(`HITL response received: ${isApproved ? 'APPROVED' : 'REJECTED'}`);
+
       return {
-        taskPhase: 'awaiting_hitl' as const,
+        taskPhase: 'executing' as const,
         hitlApprovalResult: {
-          approved: undefined as any,
-          response: 'Waiting for human approval',
-          reasoning: 'HITL approval pending — user must respond',
+          approved: isApproved,
+          response: isApproved ? 'Approved by user' : 'Rejected by user',
+          reasoning: isApproved ? 'User approved the action' : 'User rejected the action',
         },
-        completionSignal: {
-          reason: 'needs_hitl' as const,
-          explanation: reasoning,
-        },
+        completionSignal: null,
       };
 
     } catch (error) {
@@ -249,7 +258,9 @@ export const buildGraph = (
         [END]: END,
     });
 
-  const finalGraph = compiledGraph.compile({ checkpointer: lightweightCheckpointer });
+  const finalGraph = compiledGraph.compile({ 
+    checkpointer: lightweightCheckpointer
+  });
   graphCache.set(cacheKey, finalGraph);
   return finalGraph;
 };

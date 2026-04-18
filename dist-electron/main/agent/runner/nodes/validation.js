@@ -151,7 +151,7 @@ const createValidationNode = (runner, missionTracker, shouldAbort) => {
             // Use AI to assess tool risk instead of keyword matching
             const isHighRisk = await assessToolRisk(state.pendingToolCalls || [], runner.client);
             // Evaluate whether task should complete or continue iterating
-            const taskShouldComplete = shouldCompleteTask(state);
+            const taskShouldComplete = await shouldCompleteTask(state, runner.client);
             const result = {
                 taskPhase: 'validation',
                 validationResult: {

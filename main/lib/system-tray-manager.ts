@@ -205,7 +205,7 @@ export class SystemTrayManager {
    */
   private getTrayIconPath(): string {
     const isDev = !app.isPackaged;
-    
+
     // In production, extraResources (like 'public') are in process.resourcesPath
     // In dev, they're in the project root
     const baseDir = isDev
@@ -323,6 +323,29 @@ export class SystemTrayManager {
 
   /**
    * Handle window state changes to update tray menu
+   *
+   * FIX: System Tray Minimize Event Interception
+   *
+   * The previous implementation intercepted ALL minimize events, including system-generated
+   * events from file picker dialogs and window blur/focus loss. This broke file picker
+   * functionality and caused unexpected window hiding.
+   *
+   * SOLUTION: Remove minimize event interception entirely. Only intercept the close event.
+   * This approach:
+   * - Prevents system-generated minimize events from being incorrectly intercepted
+   * - Preserves the minimize-to-tray behavior for explicit close button clicks
+   * - Allows normal minimize behavior (minimize to taskbar) when user clicks minimize button
+   * - Eliminates the need for complex dialog state tracking
+   *
+   * BEHAVIOR CHANGE:
+   * - Before: Clicking minimize button → hides to tray
+   * - After: Clicking minimize button → minimizes to taskbar (normal behavior)
+   * - Before: Clicking close button (X) → hides to tray
+   * - After: Clicking close button (X) → hides to tray (PRESERVED)
+   * - Before: File picker dialog → window hides to tray (BUG)
+   * - After: File picker dialog → window stays visible (FIXED)
+   *
+   * Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.2, 3.4, 3.5
    */
   setupWindowEvents(): void {
     if (!this.mainWindow) return;
@@ -337,6 +360,7 @@ export class SystemTrayManager {
     });
 
     // Handle window close event - minimize to tray instead of quitting
+    // This is the ONLY event we intercept to avoid breaking system-generated minimize events
     this.mainWindow.on('close', (event) => {
       if (this.config.minimizeToTray && this.tray) {
         event.preventDefault();
@@ -345,14 +369,13 @@ export class SystemTrayManager {
       }
     });
 
-    // Handle minimize event
-    this.mainWindow.on('minimize' as any, (event) => {
-      if (this.config.minimizeToTray && this.tray) {
-        event.preventDefault();
-        this.hideToTray();
-        console.log('[SystemTray] Window minimize intercepted, hidden to tray');
-      }
-    });
+    // NOTE: Minimize event interception has been REMOVED
+    // Previous implementation (lines 349-355) intercepted ALL minimize events,
+    // including system-generated events from file picker dialogs and focus loss.
+    // This caused the bug where file pickers would become unusable.
+    //
+    // The fix allows normal minimize behavior (minimize to taskbar) while preserving
+    // the minimize-to-tray behavior for explicit close button clicks.
   }
 }
 

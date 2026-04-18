@@ -26,9 +26,9 @@ exports.memorySearchTool = {
             const vectorBuffer = Buffer.from(new Float32Array(queryVector).buffer);
             // Hybrid Query using sqlite-vec
             const rows = await db_1.dbOps.all(`
-        SELECT 
-          m.id, 
-          m.text_content, 
+        SELECT
+          m.id,
+          m.text_content,
           m.metadata,
           vec_distance_cosine(v.embedding, ?) as distance
         FROM memory_chunks_vec v
@@ -56,7 +56,34 @@ exports.memorySearchTool = {
                 .sort((a, b) => b.score - a.score)
                 .slice(0, limit);
             const output = ranked.map((r, i) => `[Result ${i + 1}] (Score: ${r.score.toFixed(3)})\n${r.text_content}\nMetadata: ${r.metadata || '{}'}`).join('\n\n');
-            return { success: true, output };
+            // Check if any results contain user preferences
+            let hasPreference = false;
+            let preferenceText = '';
+            let preferenceType = '';
+            for (const r of ranked) {
+                try {
+                    const meta = r.metadata ? JSON.parse(r.metadata) : {};
+                    if (meta.isPreference === true) {
+                        hasPreference = true;
+                        preferenceText = r.text_content;
+                        preferenceType = meta.preferenceType || 'general';
+                        break; // Use the highest-ranked preference
+                    }
+                }
+                catch (e) {
+                    // Skip malformed metadata
+                }
+            }
+            return {
+                success: true,
+                output,
+                data: {
+                    hasPreference,
+                    preferenceText,
+                    preferenceType,
+                    resultCount: ranked.length
+                }
+            };
         }
         catch (err) {
             return { success: false, output: `Failed to search memory: ${err.message}` };

@@ -10,19 +10,35 @@ export function registerSystemHandlers() {
   });
 
   ipcMain.handle('system:open-file-picker', async (_event, options?: { filters?: { name: string, extensions: string[] }[] }) => {
+    console.log('[IPC] system:open-file-picker called with options:', options);
+
     const mainWindow = (global as any).mainWindow;
-    if (!mainWindow) return null;
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile'],
-      filters: options?.filters || [
-        { name: 'All Files', extensions: ['*'] },
-        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
-        { name: 'Text & Documents', extensions: ['txt', 'md', 'json', 'csv', 'js', 'ts', 'py', 'log', 'html', 'css'] }
-      ]
-    });
-    if (canceled || filePaths.length === 0) return null;
-    const originalFilePath = filePaths[0];
+    if (!mainWindow) {
+      console.error('[IPC] system:open-file-picker: mainWindow not available');
+      return { success: false, error: 'Main window not available' };
+    }
+
     try {
+      console.log('[IPC] Opening file dialog...');
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: options?.filters || [
+          { name: 'All Files', extensions: ['*'] },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
+          { name: 'Text & Documents', extensions: ['txt', 'md', 'json', 'csv', 'js', 'ts', 'py', 'log', 'html', 'css'] }
+        ]
+      });
+
+      console.log('[IPC] Dialog result - canceled:', canceled, 'filePaths:', filePaths);
+
+      if (canceled || filePaths.length === 0) {
+        console.log('[IPC] User canceled or no file selected');
+        return { success: false, canceled: true };
+      }
+
+      const originalFilePath = filePaths[0];
+      console.log('[IPC] Processing file:', originalFilePath);
+
       const stats = fs.statSync(originalFilePath);
       const ext = path.extname(originalFilePath).toLowerCase();
 
@@ -35,17 +51,22 @@ export function registerSystemHandlers() {
       const newFilePath = path.join(attachmentsDir, safeFileName);
       fs.copyFileSync(originalFilePath, newFilePath);
 
+      console.log('[IPC] File copied to:', newFilePath);
+
       let mimeType = 'application/octet-stream';
       if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
         mimeType = `image/${ext === '.jpg' ? 'jpeg' : ext.slice(1)}`;
         const base64 = fs.readFileSync(newFilePath).toString('base64');
         const uri = `data:${mimeType};base64,${base64}`;
+        console.log('[IPC] Returning image file, size:', stats.size);
         return { path: newFilePath, name: path.basename(originalFilePath), size: stats.size, mimeType, base64: uri, success: true };
       } else {
         const content = fs.readFileSync(newFilePath, 'utf-8');
+        console.log('[IPC] Returning text file, size:', stats.size);
         return { path: newFilePath, name: path.basename(originalFilePath), size: stats.size, mimeType: 'text/plain', content, success: true };
       }
     } catch (err: any) {
+      console.error('[IPC] Error in open-file-picker:', err);
       return { success: false, error: err.message };
     }
   });

@@ -48,6 +48,7 @@ const present_files_1 = require("../tools/present-files");
 const control_plane_1 = require("../tools/control-plane");
 const terminal_1 = require("../tools/terminal");
 const mcp_registry_tool_1 = require("../tools/mcp-registry-tool");
+const create_artifact_1 = require("../tools/create-artifact");
 const mcp_1 = require("../tools/mcp");
 const os = __importStar(require("os"));
 const getBaseTools = (runner) => {
@@ -74,7 +75,9 @@ const getBaseTools = (runner) => {
         control_plane_1.allowFileDeleteTool,
         mcp_registry_tool_1.searchMcpRegistryTool,
         mcp_registry_tool_1.connectMcpServerTool,
-        mcp_registry_tool_1.listMcpToolsTool
+        mcp_registry_tool_1.listMcpToolsTool,
+        create_artifact_1.createArtifactTool,
+        create_artifact_1.createSiteTool
     ];
     // Add dynamically connected MCP tools
     const mcpTools = mcp_1.mcpRegistry.listAllTools().map(name => mcp_1.mcpRegistry.getTool(name)).filter(Boolean);

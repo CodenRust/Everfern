@@ -170,7 +170,7 @@ export const createValidationNode = (runner: AgentRunner, missionTracker?: Missi
       const isHighRisk = await assessToolRisk(state.pendingToolCalls || [], runner.client);
 
       // Evaluate whether task should complete or continue iterating
-      const taskShouldComplete = shouldCompleteTask(state);
+      const taskShouldComplete = await shouldCompleteTask(state, runner.client);
 
       const result = {
         taskPhase: 'validation' as const,

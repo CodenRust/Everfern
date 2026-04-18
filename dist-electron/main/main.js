@@ -166,6 +166,9 @@ function createWindow() {
             webSecurity: false, // Temporarily disabled for production path debugging
         },
     });
+    // Make mainWindow available globally for IPC handlers
+    global.mainWindow = mainWindow;
+    console.log('[Window] mainWindow assigned to global');
     // Fallback: Show window after 5 seconds if ready-to-show never fires (only in normal mode)
     const showFallback = setTimeout(() => {
         if (mainWindow && !mainWindow.isVisible() && !isAutoStartMode) {
@@ -274,6 +277,8 @@ function createWindow() {
     mainWindow.on('closed', () => {
         console.log('[Window] Window closed');
         mainWindow = null;
+        global.mainWindow = null;
+        console.log('[Window] mainWindow cleared from global');
     });
 }
 // ── Protocol: Local App & Sites ──────────────────────────────────────────

@@ -104,10 +104,10 @@ try {
   acpManager = new ACPManager();
   console.log('[Startup] Initializing ChatHistoryStore...');
   historyStore = new ChatHistoryStore();
-  
+
   // Register all modularized IPC handlers
   setupIPC(historyStore);
-  
+
   console.log('[Startup] Singletons and IPC initialized.');
 } catch (err) {
   console.error('[Startup] ❌ Critical failure during singleton initialization:', err);
@@ -160,6 +160,11 @@ function createWindow(): void {
       webSecurity: false, // Temporarily disabled for production path debugging
     },
   });
+
+  // Make mainWindow available globally for IPC handlers
+  (global as any).mainWindow = mainWindow;
+  console.log('[Window] mainWindow assigned to global');
+
 
   // Fallback: Show window after 5 seconds if ready-to-show never fires (only in normal mode)
   const showFallback = setTimeout(() => {
@@ -276,6 +281,8 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     console.log('[Window] Window closed');
     mainWindow = null;
+    (global as any).mainWindow = null;
+    console.log('[Window] mainWindow cleared from global');
   });
 }
 

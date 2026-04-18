@@ -403,17 +403,30 @@ export default function SettingsPage({
                 {[
                     { id: 'local', label: 'Local Engine', desc: 'On-device via Ollama or LMStudio.', icon: <Image unoptimized src="/images/ai-providers/ollama.svg" alt="Ollama" width={24} height={24} style={{ filter: settingsEngine !== 'local' ? 'grayscale(1) opacity(0.6)' : 'none', transition: 'all 0.3s' }} /> },
                     { id: 'online', label: 'Web API', desc: 'OpenAI, Anthropic, or NVIDIA NIM.', icon: <GlobeAltIcon width={22} height={22} style={{ color: '#8a8886' }} /> },
-                    { id: 'everfern', label: 'EverFern Cloud', desc: 'Managed frontier models, optimized for EverFern.', icon: <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={24} height={24} style={{ filter: settingsEngine !== 'everfern' ? 'grayscale(1) opacity(0.6)' : 'none', transition: 'all 0.3s' }} /> },
-                ].map(({ id, label, desc, icon }) => {
+                    { id: 'everfern', label: 'EverFern Cloud', desc: 'Managed frontier models, optimized for EverFern.', icon: <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={24} height={24} style={{ filter: settingsEngine !== 'everfern' ? 'grayscale(1) opacity(0.6)' : 'none', transition: 'all 0.3s' }} />, disabled: true },
+                ].map(({ id, label, desc, icon, disabled }) => {
                     const sel = settingsEngine === id;
                     return (
                         <div
                             key={id}
-                            onClick={() => { setSettingsEngine(id as 'online' | 'local' | 'everfern'); if (id !== 'online') { setSettingsProvider(null); setSettingsApiKey(''); } }}
-                            style={{ position: 'relative', cursor: 'pointer', padding: 20, borderRadius: 16, backgroundColor: sel ? '#f4f4f4' : '#ffffff', border: `1.5px solid ${sel ? '#111111' : '#e8e6d9'}`, transition: 'all 0.2s' }}
+                            onClick={() => { 
+                                if (disabled) return;
+                                setSettingsEngine(id as 'online' | 'local' | 'everfern'); 
+                                if (id !== 'online') { setSettingsProvider(null); setSettingsApiKey(''); } 
+                            }}
+                            style={{ 
+                                position: 'relative', 
+                                cursor: disabled ? 'not-allowed' : 'pointer', 
+                                padding: 20, 
+                                borderRadius: 16, 
+                                backgroundColor: sel ? '#f4f4f4' : '#ffffff', 
+                                border: `1.5px solid ${sel ? '#111111' : '#e8e6d9'}`, 
+                                transition: 'all 0.2s',
+                                opacity: disabled ? 0.6 : 1
+                            }}
                         >
                             {id === 'everfern' && (
-                                <div style={{ position: 'absolute', top: -10, right: 14, padding: '3px 10px', backgroundColor: '#111111', color: '#ffffff', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', borderRadius: 10 }}>Recommended</div>
+                                <div style={{ position: 'absolute', top: -10, right: 14, padding: '3px 10px', backgroundColor: '#111111', color: '#ffffff', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', borderRadius: 10 }}>Coming Soon</div>
                             )}
                             {sel && <div style={{ position: 'absolute', top: 14, right: 14, color: '#111111' }}><CheckIcon width={16} height={16} strokeWidth={2.5} /></div>}
                             <div style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#f4f4f4', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14, border: '1px solid #e8e6d9' }}>

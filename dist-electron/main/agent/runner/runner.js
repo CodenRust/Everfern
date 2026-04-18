@@ -147,7 +147,7 @@ class AgentRunner {
                         run: async (t, h, m) => {
                             const subRunner = new AgentRunner(this.client, this.config);
                             subRunner.skills = this.skills;
-                            const clonedHistory = JSON.parse(JSON.stringify(h));
+                            const clonedHistory = [...h];
                             let lastResponse = '';
                             let toolCalls = [];
                             const stream = subRunner.runStream(t, clonedHistory, m, `sub:${agentId}`);
@@ -331,7 +331,17 @@ class AgentRunner {
         // Pre-load system prompt asynchronously with pre-loaded skills to avoid loading them twice
         const preloadedPrompt = await (0, system_prompt_1.getSlimSystemPromptAsync)(platform, conversationId, [], this.skills);
         // Create eventQueue early so we can push status updates
+        let pushResolver = null;
         const eventQueue = [];
+        const originalPush = eventQueue.push.bind(eventQueue);
+        eventQueue.push = (...items) => {
+            const res = originalPush(...items);
+            if (pushResolver) {
+                pushResolver();
+                pushResolver = null;
+            }
+            return res;
+        };
         // Skip boring internal messages - frontend shows LoadingBreadcrumb instead
         // These console logs are for debugging only
         this.telemetry.updateSpinner('Compiling system messages...');
@@ -435,6 +445,10 @@ class AgentRunner {
             }
             finally {
                 graphDone = true;
+                if (pushResolver) {
+                    pushResolver();
+                    pushResolver = null;
+                }
             }
         })();
         // Drain all events and wait for mission completion
@@ -454,7 +468,7 @@ class AgentRunner {
                 yield event;
             }
             else {
-                await new Promise(r => setTimeout(r, 10));
+                await new Promise(r => { pushResolver = r; });
             }
         }
         // Ensure judge evaluation completes before marking mission as complete

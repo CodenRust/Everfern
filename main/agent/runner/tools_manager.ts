@@ -14,6 +14,7 @@ import { presentFilesTool } from '../tools/present-files';
 import { createWorkspaceRequestTool, allowFileDeleteTool } from '../tools/control-plane';
 import { terminalTool, terminalStatusTool } from '../tools/terminal';
 import { searchMcpRegistryTool, connectMcpServerTool, listMcpToolsTool } from '../tools/mcp-registry-tool';
+import { createArtifactTool, createSiteTool } from '../tools/create-artifact';
 import { mcpRegistry } from '../tools/mcp';
 import { AIClient } from '../../lib/ai-client';
 import * as os from 'os';
@@ -52,7 +53,9 @@ export const getBaseTools = (runner: any): AgentTool[] => {
       allowFileDeleteTool,
       searchMcpRegistryTool,
       connectMcpServerTool,
-      listMcpToolsTool
+      listMcpToolsTool,
+      createArtifactTool,
+      createSiteTool
     ];
 
     // Add dynamically connected MCP tools

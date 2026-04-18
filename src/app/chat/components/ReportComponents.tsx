@@ -150,4 +150,129 @@ const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose
     );
 };
 
-export { ReportLink, ReportPane };
+// ── Report Container (for displaying reports in a card-like container) ────────
+interface ReportContainerProps {
+    content: string;
+    onView: (label: string, path: string) => void;
+}
+
+const ReportContainer = ({ content, onView }: ReportContainerProps) => {
+    const computerLinkPattern = /\[([^\]]+)\]\(computer:\/\/\/([^)]+)\)/g;
+    const links: Array<{ label: string; path: string }> = [];
+    let match;
+    while ((match = computerLinkPattern.exec(content)) !== null) {
+        links.push({ label: match[1], path: match[2] });
+    }
+
+    if (links.length === 0) return null;
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+            {links.map((link, idx) => {
+                const ext = link.path.split('.').pop()?.toUpperCase() || 'FILE';
+                return (
+                    <motion.div
+                        key={idx}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.25, delay: idx * 0.05 }}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '14px 18px',
+                            borderRadius: 14,
+                            backgroundColor: '#f4f3ef',
+                            border: '1px solid #e8e6d9',
+                            transition: 'all 0.2s ease',
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                        }}
+                        onMouseEnter={(e) => {
+                            const el = e.currentTarget as HTMLDivElement;
+                            el.style.backgroundColor = '#eceae4';
+                            el.style.borderColor = '#ddd9ce';
+                        }}
+                        onMouseLeave={(e) => {
+                            const el = e.currentTarget as HTMLDivElement;
+                            el.style.backgroundColor = '#f4f3ef';
+                            el.style.borderColor = '#e8e6d9';
+                        }}
+                    >
+                        {/* Left side - Icon and text */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
+                            <div
+                                style={{
+                                    width: 44,
+                                    height: 44,
+                                    borderRadius: 10,
+                                    backgroundColor: 'rgba(99,102,241,0.1)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <polyline points="14 2 14 8 20 8" />
+                                    <line x1="16" y1="13" x2="8" y2="13" />
+                                    <line x1="16" y1="17" x2="8" y2="17" />
+                                    <polyline points="10 9 9 9 8 9" />
+                                </svg>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                                <span style={{ fontSize: 14, fontWeight: 600, color: '#201e24', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {link.label}
+                                </span>
+                                <span style={{ fontSize: 11, color: '#8a8886', fontFamily: "'JetBrains Mono', monospace" }}>
+                                    {ext}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Right side - View button */}
+                        <button
+                            onClick={() => onView(link.label, link.path)}
+                            style={{
+                                padding: '8px 18px',
+                                borderRadius: 10,
+                                backgroundColor: 'transparent',
+                                border: '1.5px solid #c9c6be',
+                                color: '#4a4846',
+                                fontSize: 13,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 7,
+                                transition: 'all 0.15s ease',
+                                flexShrink: 0,
+                                fontFamily: "'Figtree', system-ui, sans-serif",
+                            }}
+                            onMouseEnter={(e) => {
+                                const el = e.currentTarget as HTMLButtonElement;
+                                el.style.backgroundColor = '#201e24';
+                                el.style.borderColor = '#201e24';
+                                el.style.color = '#ffffff';
+                            }}
+                            onMouseLeave={(e) => {
+                                const el = e.currentTarget as HTMLButtonElement;
+                                el.style.backgroundColor = 'transparent';
+                                el.style.borderColor = '#c9c6be';
+                                el.style.color = '#4a4846';
+                            }}
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            View
+                        </button>
+                    </motion.div>
+                );
+            })}
+        </div>
+    );
+};
+
+export { ReportLink, ReportPane, ReportContainer };

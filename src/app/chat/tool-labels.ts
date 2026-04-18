@@ -147,6 +147,24 @@ export function resolveToolDisplay(toolName: string, args?: Record<string, unkno
       return { icon: React.createElement(MagnifyingGlassIcon, { width: 16, height: 16 }), label: name ? `Consulting Skill: ${name}` : 'Consulting skill', color: '#8b5cf6' };
     }
 
+    case 'create_artifact': {
+      const title = typeof args?.title === 'string' ? args.title.trim() : '';
+      return { 
+        icon: React.createElement(PencilSquareIcon, { width: 16, height: 16 }), 
+        label: title ? `Building: ${truncate(title, 60)}` : 'Building artifact', 
+        color: '#f59e0b' 
+      };
+    }
+
+    case 'create_site': {
+      const name = typeof args?.name === 'string' ? args.name.trim() : '';
+      return { 
+        icon: React.createElement(Square3Stack3DIcon, { width: 16, height: 16 }), 
+        label: name ? `Creating site: ${truncate(name, 60)}` : 'Creating site', 
+        color: '#06b6d4' 
+      };
+    }
+
     case 'mcp_call': {
       const server = typeof args?.server === 'string' ? args.server.trim() : '';
       const tool = typeof args?.tool === 'string' ? args.tool.trim() : '';

@@ -75,7 +75,7 @@ import { WaveformIcon, FernStarburst } from './components/UIIcons';
 import { MarkdownRenderer, StreamingMarkdown } from './components/MarkdownComponents';
 import { ContextTokenRing, VoiceButton, RateLimitContinueButton } from './components/UIHelpers';
 import { ToolCallTag, ToolCallRow, WriteDiffCard } from './components/ToolCallComponents';
-import { ReportLink, ReportPane } from './components/ReportComponents';
+import { ReportContainer } from './components/ReportComponents';
 import { PlanReviewCard, AgentWorkspaceCards } from './components/PlanComponents';
 import { HitlApprovalForm, UserQuestionForm } from './components/FormComponents';
 import { PlanApprovalBanner } from './components/PlanApprovalBanner';
@@ -201,6 +201,14 @@ export default function ChatPage() {
         options: Array<{ label: string; value: string; isRecommended?: boolean }>;
         multiSelect: boolean;
     }>>([]);
+    const activeUserQuestionRef = useRef(false);
+
+    // Memory preference banner state - shown when AI uses stored user preferences
+    const [memoryPreferenceBanner, setMemoryPreferenceBanner] = useState<{
+        preference: string;
+        rawMemory: string;
+        dismissed: boolean;
+    } | null>(null);
 
     // Multiple questions panel state (unused - kept for legacy compat)
     const [userQuestions, setUserQuestions] = useState<Array<{
@@ -559,15 +567,60 @@ export default function ChatPage() {
     };
 
     const handleAttachment = async (type?: 'image' | 'document') => {
-        if ((window as any).electronAPI?.system?.openFilePicker) {
-            let options = {};
-            if (type === 'image') options = { filters: [{ name: 'Images', extensions: ['jpg', 'png', 'webp', 'gif', 'jpeg'] }] };
-            else if (type === 'document') options = { filters: [{ name: 'Documents', extensions: ['pdf', 'txt', 'md', 'json', 'csv', 'docx'] }] };
-            const file = await (window as any).electronAPI.system.openFilePicker(options);
-            if (file && file.success) {
-                const newAttachment: FileAttachment = { id: crypto.randomUUID(), name: file.name, size: file.size || 0, mimeType: file.mimeType || 'application/octet-stream', base64: file.base64, content: file.content, path: file.path };
-                setAttachments(prev => [...prev, newAttachment]);
+        console.log('[handleAttachment] Called with type:', type);
+
+        if (!(window as any).electronAPI?.system?.openFilePicker) {
+            console.error('[handleAttachment] openFilePicker API not available');
+            alert('File picker is not available. Please restart the application.');
+            return;
+        }
+
+        try {
+            let options: any = {};
+            if (type === 'image') {
+                options = { filters: [{ name: 'Images', extensions: ['jpg', 'png', 'webp', 'gif', 'jpeg'] }] };
+            } else if (type === 'document') {
+                options = { filters: [{ name: 'Documents', extensions: ['pdf', 'txt', 'md', 'json', 'csv', 'docx'] }] };
             }
+
+            console.log('[handleAttachment] Opening file picker with options:', options);
+            const file = await (window as any).electronAPI.system.openFilePicker(options);
+            console.log('[handleAttachment] File picker result:', file);
+
+            if (!file) {
+                console.log('[handleAttachment] File picker returned null - user may have cancelled');
+                return;
+            }
+
+            if (file.canceled) {
+                console.log('[handleAttachment] User cancelled file selection');
+                return;
+            }
+
+            if (!file.success) {
+                console.error('[handleAttachment] File picker failed:', file.error);
+                alert(`Failed to select file: ${file.error || 'Unknown error'}`);
+                return;
+            }
+
+            if (file.success && file.path) {
+                const newAttachment: FileAttachment = {
+                    id: crypto.randomUUID(),
+                    name: file.name,
+                    size: file.size || 0,
+                    mimeType: file.mimeType || 'application/octet-stream',
+                    base64: file.base64,
+                    content: file.content,
+                    path: file.path
+                };
+                console.log('[handleAttachment] Adding attachment:', newAttachment.name);
+                setAttachments(prev => [...prev, newAttachment]);
+            } else {
+                console.warn('[handleAttachment] File picker returned unexpected result:', file);
+            }
+        } catch (error) {
+            console.error('[handleAttachment] Error:', error);
+            alert(`Failed to attach file: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
@@ -640,6 +693,7 @@ export default function ChatPage() {
 
         // Clear any active user question when starting a new request
         setActiveUserQuestions([]);
+        setMemoryPreferenceBanner(null);
         setCurrentNode("");
         setActivePlanSteps(null);
         setActivePlanTitle(null);
@@ -681,7 +735,7 @@ export default function ChatPage() {
                 // Handle ask_user_question tool start - questions are set in onToolCall
                 if (toolName === 'ask_user_question') {
                     // Set the flag immediately so mission_complete doesn't clear the form
-                    (window as any).__activeUserQuestion = true;
+                    activeUserQuestionRef.current = true;
                 }
             });
             acpApi.onToolCall((record: any) => {
@@ -697,10 +751,20 @@ export default function ChatPage() {
                     liveToolCallsRef.current = updated;
                     setLiveToolCalls(updated);
 
+                    // Detect preference/choice memories from memory_search results using structured data
+                    if (record.toolName === 'memory_search' && record.result?.data?.hasPreference) {
+                        const data = record.result.data;
+                        setMemoryPreferenceBanner({
+                            preference: data.preferenceText || '',
+                            rawMemory: record.result.output || '',
+                            dismissed: false
+                        });
+                    }
+
                     // Handle ask_user_question tool specially
                     if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
                         // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
-                        (window as any).__activeUserQuestion = true;
+                        activeUserQuestionRef.current = true;
 
                         const data = record.result.data;
                         const normalizeOpts = (opts: any[]) => (opts || []).map((opt: any) => ({
@@ -725,7 +789,7 @@ export default function ChatPage() {
                             }]);
                         } else {
                             console.error('[Frontend] ❌ No valid question data found in tool_call');
-                            (window as any).__activeUserQuestion = false;
+                            activeUserQuestionRef.current = false;
                         }
                     } else if (record.toolName === 'ask_user_question') {
                         console.error('[Frontend] ❌ ask_user_question tool_call missing required data');
@@ -754,12 +818,46 @@ export default function ChatPage() {
                     if (delta) {
                         streamingContentRef.current += delta;
                         setStreamingContent(streamingContentRef.current);
+
+                        // Update create_artifact tool with streaming content
+                        const artifactToolIdx = liveToolCallsRef.current.findIndex(
+                            t => t.toolName === 'create_artifact' && t.status === 'running'
+                        );
+                        if (artifactToolIdx !== -1) {
+                            const updated = [...liveToolCallsRef.current];
+                            updated[artifactToolIdx] = {
+                                ...updated[artifactToolIdx],
+                                args: {
+                                    ...updated[artifactToolIdx].args,
+                                    content: streamingContentRef.current
+                                }
+                            };
+                            liveToolCallsRef.current = updated;
+                            setLiveToolCalls(updated);
+                        }
                     }
                 } else {
                     // Don't mark as done yet - wait for mission_complete event
                     if (delta) {
                         streamingContentRef.current += delta;
                         setStreamingContent(streamingContentRef.current);
+
+                        // Update create_artifact tool with final streaming content
+                        const artifactToolIdx = liveToolCallsRef.current.findIndex(
+                            t => t.toolName === 'create_artifact' && t.status === 'running'
+                        );
+                        if (artifactToolIdx !== -1) {
+                            const updated = [...liveToolCallsRef.current];
+                            updated[artifactToolIdx] = {
+                                ...updated[artifactToolIdx],
+                                args: {
+                                    ...updated[artifactToolIdx].args,
+                                    content: streamingContentRef.current
+                                }
+                            };
+                            liveToolCallsRef.current = updated;
+                            setLiveToolCalls(updated);
+                        }
                     }
                 }
             });
@@ -797,7 +895,7 @@ export default function ChatPage() {
                 setTimeout(() => {
                     // Only remove listeners if no HITL or user question is active
                     const hasActiveHitl = (window as any).__activeHitl || showHitlApproval;
-                    const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
+                    const hasActiveUserQuestion = activeUserQuestionRef.current || activeUserQuestions.length > 0;
                     const hasAnyActive = hasActiveHitl || hasActiveUserQuestion;
 
                     if (!hasAnyActive) {
@@ -828,7 +926,7 @@ export default function ChatPage() {
                 // so it doesn't disappear when the next send resets streaming state.
                 // Use the window flag as the primary check since it's set synchronously
                 // in onToolCall before React state updates propagate.
-                const hasActiveUserQuestion = (window as any).__activeUserQuestion || activeUserQuestions.length > 0;
+                const hasActiveUserQuestion = activeUserQuestionRef.current || activeUserQuestions.length > 0;
 
                 if (hasActiveUserQuestion) {
                     console.log('[Frontend] ⏸️ Active user question detected - committing accumulated content before pausing');
@@ -1053,7 +1151,7 @@ export default function ChatPage() {
                     }
                     setShowPermissionModal(true);
                 });
-                api.onToolStart(({ toolName, toolArgs }: { toolName: string; toolArgs: Record<string, unknown> }) => {
+                api.onToolStart(({ toolName, toolArgs, toolCallId }: { toolName: string; toolArgs: Record<string, unknown>, toolCallId?: string }) => {
                     console.log('[Frontend] 🔧 Received tool_start:', toolName, 'with args:', toolArgs);
                     console.log('[Frontend] Current liveToolCalls length BEFORE adding:', liveToolCallsRef.current.length);
                     console.log('[Frontend] Current liveToolCalls:', liveToolCallsRef.current.map(tc => ({ id: tc.id, toolName: tc.toolName, status: tc.status })));
@@ -1066,15 +1164,21 @@ export default function ChatPage() {
                     const display = resolveToolDisplay(toolName, toolArgs);
                     console.log('[Frontend] Resolved display for', toolName, ':', display);
 
-                    const newTc: ToolCallDisplay = { id: crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
-                    const mapKey = toolName + '_running';
+                    const newTc: ToolCallDisplay = { id: toolCallId || crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
+                    const mapKey = toolCallId || (toolName + '_running');
 
                     console.log('[Frontend] Created new ToolCallDisplay:', { id: newTc.id, toolName: newTc.toolName, label: newTc.label, status: newTc.status });
                     console.log('[Frontend] Adding to toolCallMap with key:', mapKey, 'id:', newTc.id);
                     toolCallMap.current.set(mapKey, newTc.id);
 
+
+                    // Filter out any "streaming-" placeholders that match this tool name
+                    const filtered = liveToolCallsRef.current.filter(t =>
+                        !(t.id.startsWith('streaming-') && t.toolName === toolName)
+                    );
+
                     // CRITICAL: Create a new array to trigger React re-render
-                    const updatedToolCalls = [...liveToolCallsRef.current, newTc];
+                    const updatedToolCalls = [...filtered, newTc];
                     liveToolCallsRef.current = updatedToolCalls;
                     setLiveToolCalls(updatedToolCalls);
 
@@ -1085,7 +1189,7 @@ export default function ChatPage() {
                     // Handle ask_user_question tool start - questions are set in onToolCall
                     if (toolName === 'ask_user_question') {
                         // Set the flag immediately so mission_complete doesn't clear the form
-                        (window as any).__activeUserQuestion = true;
+                        activeUserQuestionRef.current = true;
                     }
                 });
                 api.onViewSkill(({ name }: { name: string }) => {
@@ -1126,7 +1230,7 @@ export default function ChatPage() {
                         console.log('[Frontend] Result data:', JSON.stringify(record.result.data, null, 2));
 
                         // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
-                        (window as any).__activeUserQuestion = true;
+                        activeUserQuestionRef.current = true;
                         console.log('[Frontend] Set __activeUserQuestion flag to true');
 
                         const data = record.result.data;
@@ -1171,7 +1275,7 @@ export default function ChatPage() {
                         } else {
                             console.error('[Frontend] ❌ No valid question data found in tool_call');
                             console.error('[Frontend] Data structure:', data);
-                            (window as any).__activeUserQuestion = false;
+                            activeUserQuestionRef.current = false;
                         }
 
                         // Don't process further for ask_user_question - it doesn't need timeline display
@@ -1231,7 +1335,7 @@ export default function ChatPage() {
                         else if (record.toolName === 'web_search') { setContextItems(prev => [...prev, { id: crypto.randomUUID(), type: 'web', label: record.args.query }]); }
                         else if (record.toolName === 'computer_use') { setContextItems(prev => { const action = record.args.action || 'computer_use'; const target = record.args.query ? ` "${record.args.query}"` : ''; return [...prev.filter(i => i.type !== 'app'), { id: crypto.randomUUID(), type: 'app', label: `Computer Use: ${action}${target}`, base64Image: record.result?.base64Image }]; }); }
                     }
-                    const key = record.toolName + '_running';
+                    const key = record.toolCallId || (record.toolName + '_running');
                     const existingId = toolCallMap.current.get(key);
                     if (existingId) {
                         const updatedToolCalls = liveToolCallsRef.current.map(t => t.id === existingId ? { ...t, status: 'done' as const, output: typeof record.result === 'string' ? record.result : (record.result?.output || JSON.stringify({ ...record.result, base64Image: undefined }, null, 2)), data: record.result?.data, base64Image: record.result?.base64Image, durationMs: record.durationMs } : t);
@@ -1306,7 +1410,55 @@ export default function ChatPage() {
                         accumulated += delta;
                         streamingContentRef.current = accumulated;
                         setStreamingContent(accumulated);
-                        console.log(`[Frontend onStreamChunk] Accumulated: "${accumulated.substring(0, 50)}..."`);
+
+                        // Update create_artifact tool with streaming content
+                        const artifactToolIdx = liveToolCallsRef.current.findIndex(
+                            t => t.toolName === 'create_artifact' && t.status === 'running'
+                        );
+                        if (artifactToolIdx !== -1) {
+                            const updated = [...liveToolCallsRef.current];
+                            updated[artifactToolIdx] = {
+                                ...updated[artifactToolIdx],
+                                args: {
+                                    ...updated[artifactToolIdx].args,
+                                    content: accumulated
+                                }
+                            };
+                            liveToolCallsRef.current = updated;
+                            setLiveToolCalls(updated);
+                        }
+
+                        // Detect tool calls while streaming
+                        const toolCallMatches = Array.from(accumulated.matchAll(/<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/gi));
+                        let hasNewTools = false;
+
+                        toolCallMatches.forEach((match, index) => {
+                            const streamingId = `streaming-${index}`;
+                            const content = match[1].trim();
+
+                            // Try to find tool name in the partial JSON
+                            const nameMatch = content.match(/"name":\s*"([^"]+)"/);
+                            if (nameMatch) {
+                                const toolName = nameMatch[1];
+                                const existing = liveToolCallsRef.current.find(t => t.id === streamingId);
+
+                                if (!existing) {
+                                    const display = resolveToolDisplay(toolName, {});
+                                    const newTc: ToolCallDisplay = {
+                                        id: streamingId,
+                                        toolName,
+                                        ...display,
+                                        status: 'running'
+                                    };
+                                    liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
+                                    hasNewTools = true;
+                                }
+                            }
+                        });
+
+                        if (hasNewTools) {
+                            setLiveToolCalls([...liveToolCallsRef.current]);
+                        }
                     } else {
                         api.removeStreamListeners();
                         isMessageCommittedRef.current = true;
@@ -1407,8 +1559,12 @@ export default function ChatPage() {
     }, [inputValue, attachments, folderContexts, isLoading, messages, saveConversation, selectedModel, availableModels, activeConversationId, checkForPlan]);
 
     const handleQuestionSubmit = useCallback((answers: Record<string, string[]>, attachedFiles?: Array<{ name: string; content?: string; base64?: string; mimeType?: string }>) => {
-        const answerLines = Object.entries(answers).map(([question, values]) => `${question}: ${values.join(', ')}`);
-        const responseText = answerLines.join('\n');
+        // Format as clear form response so AI doesn't interpret as a new question
+        const answerLines = Object.entries(answers).map(([question, values]) => {
+            const selectedOptions = values.join(', ');
+            return `**Selected:** ${selectedOptions}`;
+        });
+        const responseText = `[Form Response]\n${answerLines.join('\n')}`;
 
         setActiveUserQuestions([]);
         setStreamingContent("");
@@ -1418,7 +1574,7 @@ export default function ChatPage() {
         streamingThoughtRef.current = "";
         liveToolCallsRef.current = [];
         isMessageCommittedRef.current = false; // Reset so next run's streaming content appears
-        (window as any).__activeUserQuestion = false;
+        activeUserQuestionRef.current = false;
 
         // If files were attached, add them to the attachments state before sending
         if (attachedFiles && attachedFiles.length > 0) {
@@ -1962,9 +2118,6 @@ export default function ChatPage() {
                 <PermissionDialog />
                 <ArtifactsPanel isOpen={showArtifacts} onClose={() => { setShowArtifacts(false); setSelectedArtifactName(null); }} activeChatId={activeConversationId} selectedFileName={selectedArtifactName} />
                 <PlanViewerPanel isOpen={showPlanViewer} onClose={() => setShowPlanViewer(false)} content={planViewerContent} onApprove={handleApprovePlan} />
-                {reportPane && (
-                    <ReportPane isOpen={!!reportPane} onClose={() => setReportPane(null)} label={reportPane.label} path={reportPane.path} />
-                )}
                 <VoiceAssistantUI
                     isOpen={showVoiceAssistant}
                     onClose={() => setShowVoiceAssistant(false)}
@@ -2068,6 +2221,79 @@ export default function ChatPage() {
 
                                             {/* ── Empty state composer ── */}
                                             <div style={{ width: "100%", maxWidth: 740 }}>
+                                                {/* Memory Preference Banner */}
+                                                {memoryPreferenceBanner && !memoryPreferenceBanner.dismissed && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, y: -8 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        exit={{ opacity: 0, y: -8 }}
+                                                        transition={{ duration: 0.2 }}
+                                                        style={{
+                                                            marginBottom: 10,
+                                                            padding: "12px 14px",
+                                                            backgroundColor: "#faf9f7",
+                                                            border: "1px solid #e8e6d9",
+                                                            borderLeft: "3px solid #6366f1",
+                                                            borderRadius: 10,
+                                                            display: "flex",
+                                                            flexDirection: "column",
+                                                            gap: 8,
+                                                        }}
+                                                    >
+                                                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                                                                <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
+                                                                <path d="M12 8v4M12 16h.01"/>
+                                                            </svg>
+                                                            <div style={{ flex: 1 }}>
+                                                                <div style={{ fontSize: 11.5, fontWeight: 600, color: "#6366f1", marginBottom: 3, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                                                                    From your previous preferences
+                                                                </div>
+                                                                <div style={{ fontSize: 13, color: "#4a4846", lineHeight: 1.55 }}>
+                                                                    {memoryPreferenceBanner.preference}
+                                                                </div>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setMemoryPreferenceBanner(b => b ? { ...b, dismissed: true } : null)}
+                                                                style={{ background: "none", border: "none", cursor: "pointer", color: "#b5b2aa", padding: 2, flexShrink: 0 }}
+                                                            >
+                                                                <XMarkIcon width={14} height={14} />
+                                                            </button>
+                                                        </div>
+                                                        <div style={{ display: "flex", gap: 6, paddingLeft: 22 }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setMemoryPreferenceBanner(b => b ? { ...b, dismissed: true } : null)}
+                                                                style={{
+                                                                    fontSize: 12, fontWeight: 500,
+                                                                    padding: "4px 12px", borderRadius: 6,
+                                                                    backgroundColor: "#6366f1", color: "#fff",
+                                                                    border: "none", cursor: "pointer",
+                                                                }}
+                                                            >
+                                                                Continue this way
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setMemoryPreferenceBanner(b => b ? { ...b, dismissed: true } : null);
+                                                                    setInputValue("I'd like to do this differently — ");
+                                                                    setTimeout(() => textareaRef.current?.focus(), 50);
+                                                                }}
+                                                                style={{
+                                                                    fontSize: 12, fontWeight: 500,
+                                                                    padding: "4px 12px", borderRadius: 6,
+                                                                    backgroundColor: "transparent", color: "#4a4846",
+                                                                    border: "1px solid #e8e6d9", cursor: "pointer",
+                                                                }}
+                                                            >
+                                                                Do it differently
+                                                            </button>
+                                                        </div>
+                                                    </motion.div>
+                                                )}
+
                                                 {/* User Question Form (single or multiple questions) */}
                                                 {activeUserQuestions.length > 0 && (
                                                     <UserQuestionForm
@@ -2236,12 +2462,29 @@ export default function ChatPage() {
                                                                             </div>
                                                                         ) : null}
                                                                         {artifacts.map((art, i) => (
-                                                                            <FileArtifact key={i} path={art.path} description={art.description} chatId={activeConversationId || ""} />
+                                                                            <div key={i} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+                                                                                <FileArtifact
+                                                                                    path={art.path}
+                                                                                    description={art.description}
+                                                                                    chatId={activeConversationId || ""}
+                                                                                    onOpenArtifact={(name) => {
+                                                                                        setSelectedArtifactName(name);
+                                                                                        setShowArtifacts(true);
+                                                                                    }}
+                                                                                />
+                                                                            </div>
                                                                         ))}
                                                                     </>
                                                                 );
                                                             })()}
-                                                            <ReportLink content={msg.content} onOpen={(label, path) => setReportPane({ label, path })} />
+                                                            <ReportContainer
+                                                                content={msg.content}
+                                                                onView={(label, path) => {
+                                                                    const filename = path.split(/[\\/]/).pop() || label;
+                                                                    setSelectedArtifactName(filename);
+                                                                    setShowArtifacts(true);
+                                                                }}
+                                                            />
                                                             {msg.role === "assistant" && currentSites.length > 0 && currentSites.some(site => site.chatId === activeConversationId) && (
                                                                 <div style={{ marginTop: 12 }}>
                                                                     {currentSites.filter(site => site.chatId === activeConversationId).map(site => <SitePreview key={site.id} chatId={activeConversationId || ""} filename={site.id} />)}
@@ -2250,9 +2493,6 @@ export default function ChatPage() {
                                                             {msg.toolCalls?.filter(tc => tc.toolName === 'write' || tc.toolName === 'write_to_file' || tc.toolName === 'write_file').map(tc => (
                                                                 <WriteDiffCard key={`write-${tc.id}`} tc={tc} />
                                                             ))}
-                                                            {msg.role === "assistant" && activeConversationId && (
-                                                                <ArtifactsList chatId={activeConversationId} onSelect={(name) => { setSelectedArtifactName(name); setShowArtifacts(true); }} />
-                                                            )}
                                                             <RateLimitContinueButton content={msg.content} onContinue={() => handleSend("continue")} />
                                                         </>
                                                     )}
@@ -2283,16 +2523,31 @@ export default function ChatPage() {
                                                 )}
 
                                                 {(() => {
-                                                    const { cleanContent, artifacts } = extractFileArtifacts(streamingContent || '');
+                                                    const { cleanContent: artifactCleanContent, artifacts } = extractFileArtifacts(streamingContent || '');
+
+                                                    // Scrub tool calls from streaming content
+                                                    const cleanContent = artifactCleanContent.replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/gi, '').trim();
+
                                                     return (
                                                         <>
                                                             {cleanContent && <StreamingMarkdown content={cleanContent} isLive={true} />}
                                                             {artifacts.map((art, i) => (
-                                                                <FileArtifact key={i} path={art.path} description={art.description} chatId={activeConversationId || ""} />
+                                                                <div key={i} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+                                                                    <FileArtifact
+                                                                        path={art.path}
+                                                                        description={art.description}
+                                                                        chatId={activeConversationId || ""}
+                                                                        onOpenArtifact={(name) => {
+                                                                            setSelectedArtifactName(name);
+                                                                            setShowArtifacts(true);
+                                                                        }}
+                                                                    />
+                                                                </div>
                                                             ))}
                                                         </>
                                                     );
                                                 })()}
+
                                                 {!streamingContent && liveToolCalls.length === 0 && !streamingThought && activeUserQuestions.length === 0 && !showHitlApproval && (
                                                     <LoadingBreadcrumb text={getNodeDisplayName(currentNode)} />
                                                 )}
@@ -2378,6 +2633,79 @@ export default function ChatPage() {
 
                                     <div style={{ width: "96%", maxWidth: 840, margin: "0 auto 8px auto", display: "flex", flexDirection: "column" }}>
                                         <div style={{ width: "100%", backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#ffffff", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: (isComputerUseActive || showPermissionModal) ? "0 0 16px 16px" : 16, position: "relative", zIndex: 2, display: "flex", flexDirection: "column", minHeight: 100, transition: "all 0.3s ease" }}>
+                                            {/* Memory Preference Banner */}
+                                            {memoryPreferenceBanner && !memoryPreferenceBanner.dismissed && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: -8 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    exit={{ opacity: 0, y: -8 }}
+                                                    transition={{ duration: 0.2 }}
+                                                    style={{
+                                                        margin: "12px 16px 0",
+                                                        padding: "12px 14px",
+                                                        backgroundColor: "#faf9f7",
+                                                        border: "1px solid #e8e6d9",
+                                                        borderLeft: "3px solid #6366f1",
+                                                        borderRadius: 10,
+                                                        display: "flex",
+                                                        flexDirection: "column",
+                                                        gap: 8,
+                                                    }}
+                                                >
+                                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                                                            <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
+                                                            <path d="M12 8v4M12 16h.01"/>
+                                                        </svg>
+                                                        <div style={{ flex: 1 }}>
+                                                            <div style={{ fontSize: 11, fontWeight: 600, color: "#6366f1", marginBottom: 3, letterSpacing: "0.02em", textTransform: "uppercase" }}>
+                                                                From your previous preferences
+                                                            </div>
+                                                            <div style={{ fontSize: 12.5, color: "#4a4846", lineHeight: 1.55 }}>
+                                                                {memoryPreferenceBanner.preference}
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setMemoryPreferenceBanner(b => b ? { ...b, dismissed: true } : null)}
+                                                            style={{ background: "none", border: "none", cursor: "pointer", color: "#b5b2aa", padding: 2, flexShrink: 0 }}
+                                                        >
+                                                            <XMarkIcon width={14} height={14} />
+                                                        </button>
+                                                    </div>
+                                                    <div style={{ display: "flex", gap: 6, paddingLeft: 22 }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setMemoryPreferenceBanner(b => b ? { ...b, dismissed: true } : null)}
+                                                            style={{
+                                                                fontSize: 11.5, fontWeight: 500,
+                                                                padding: "4px 12px", borderRadius: 6,
+                                                                backgroundColor: "#6366f1", color: "#fff",
+                                                                border: "none", cursor: "pointer",
+                                                            }}
+                                                        >
+                                                            Continue this way
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setMemoryPreferenceBanner(b => b ? { ...b, dismissed: true } : null);
+                                                                setInputValue("I'd like to do this differently — ");
+                                                                setTimeout(() => textareaRef.current?.focus(), 50);
+                                                            }}
+                                                            style={{
+                                                                fontSize: 11.5, fontWeight: 500,
+                                                                padding: "4px 12px", borderRadius: 6,
+                                                                backgroundColor: "transparent", color: "#4a4846",
+                                                                border: "1px solid #e8e6d9", cursor: "pointer",
+                                                            }}
+                                                        >
+                                                            Do it differently
+                                                        </button>
+                                                    </div>
+                                                </motion.div>
+                                            )}
+
                                             {/* User Question Form (single or multiple questions) */}
                                             {activeUserQuestions.length > 0 && (
                                                 <div style={{ padding: '16px 20px 0' }}>

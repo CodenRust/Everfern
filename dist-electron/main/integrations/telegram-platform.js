@@ -274,9 +274,60 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
      */
     formatText(text, parseMode) {
         if (parseMode === 'markdown') {
-            // Telegram uses MarkdownV2 which requires escaping special characters
-            return text
-                .replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
+            // Convert standard markdown to Telegram MarkdownV2 format
+            // In Telegram MarkdownV2: * = bold, _ = italic, ` = code
+            // Standard markdown: ** = bold, * = italic, ` = code
+            let formatted = text;
+            // Step 1: Temporarily replace markdown patterns with placeholders
+            const boldPattern = /\*\*(.+?)\*\*/g;
+            const italicPattern = /\*(.+?)\*/g;
+            const codePattern = /`(.+?)`/g;
+            const boldMatches = [];
+            const italicMatches = [];
+            const codeMatches = [];
+            // Extract bold text (**text**)
+            let boldIndex = 0;
+            formatted = formatted.replace(boldPattern, (match, content) => {
+                const placeholder = `__BOLD_${boldIndex}__`;
+                boldMatches.push({ placeholder, content });
+                boldIndex++;
+                return placeholder;
+            });
+            // Extract italic text (*text*)
+            let italicIndex = 0;
+            formatted = formatted.replace(italicPattern, (match, content) => {
+                const placeholder = `__ITALIC_${italicIndex}__`;
+                italicMatches.push({ placeholder, content });
+                italicIndex++;
+                return placeholder;
+            });
+            // Extract code text (`text`)
+            let codeIndex = 0;
+            formatted = formatted.replace(codePattern, (match, content) => {
+                const placeholder = `__CODE_${codeIndex}__`;
+                codeMatches.push({ placeholder, content });
+                codeIndex++;
+                return placeholder;
+            });
+            // Step 2: Escape special characters in the remaining text
+            formatted = formatted.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+            // Step 3: Restore markdown with proper Telegram formatting
+            // Restore code blocks (no escaping needed inside code)
+            codeMatches.forEach(({ placeholder, content }) => {
+                formatted = formatted.replace(placeholder, `\`${content}\``);
+            });
+            // Restore bold (**text** -> *text* in Telegram)
+            boldMatches.forEach(({ placeholder, content }) => {
+                // Escape special chars in content except those already escaped
+                const escaped = content.replace(/([_\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+                formatted = formatted.replace(placeholder, `*${escaped}*`);
+            });
+            // Restore italic (*text* -> _text_ in Telegram)
+            italicMatches.forEach(({ placeholder, content }) => {
+                const escaped = content.replace(/([*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+                formatted = formatted.replace(placeholder, `_${escaped}_`);
+            });
+            return formatted;
         }
         else if (parseMode === 'html') {
             // HTML mode - ensure proper HTML encoding

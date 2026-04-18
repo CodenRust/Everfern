@@ -625,11 +625,16 @@ export default function SetupPage() {
                                 {[
                                     { id: "local", name: "Local Engine", icon: Cpu, desc: "Ollama or LM Studio" },
                                     { id: "online", name: "AI Provider", icon: Cloud, desc: "OpenAI, Anthropic, etc." },
-                                    { id: "everfern", name: "EverFern Cloud", icon: EverFernBglessLogo, desc: "Managed & Optimized" }
+                                    { id: "everfern", name: "EverFern Cloud", icon: EverFernBglessLogo, desc: "Managed & Optimized", comingSoon: true }
                                 ].map(opt => (
                                     <button
                                         key={opt.id}
-                                        onClick={() => { setEngine(opt.id as any); setStep(2); }}
+                                        onClick={() => { 
+                                            if (opt.comingSoon) return;
+                                            setEngine(opt.id as any); 
+                                            setStep(2); 
+                                        }}
+                                        disabled={opt.comingSoon}
                                         style={{
                                             background: "rgba(255,255,255,0.02)",
                                             border: "1px solid #e2e2e2",
@@ -640,21 +645,42 @@ export default function SetupPage() {
                                             alignItems: "center",
                                             justifyContent: "center",
                                             gap: 20,
-                                            cursor: "pointer",
+                                            cursor: opt.comingSoon ? "not-allowed" : "pointer",
                                             transition: "all 0.18s ease",
                                             aspectRatio: "1",
+                                            opacity: opt.comingSoon ? 0.6 : 1,
+                                            position: "relative",
+                                            overflow: "hidden"
                                         }}
                                         onMouseEnter={e => {
+                                            if (opt.comingSoon) return;
                                             (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)";
                                             (e.currentTarget as HTMLElement).style.borderColor = "#8a8886";
                                             (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)";
                                         }}
                                         onMouseLeave={e => {
+                                            if (opt.comingSoon) return;
                                             (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)";
                                             (e.currentTarget as HTMLElement).style.borderColor = "#e2e2e2";
                                             (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
                                         }}
                                     >
+                                        {opt.comingSoon && (
+                                            <div style={{
+                                                position: "absolute",
+                                                top: 10,
+                                                right: -25,
+                                                background: "#201e24",
+                                                color: "white",
+                                                fontSize: 8,
+                                                fontWeight: 600,
+                                                padding: "2px 25px",
+                                                transform: "rotate(45deg)",
+                                                textTransform: "uppercase"
+                                            }}>
+                                                Soon
+                                            </div>
+                                        )}
                                         <div style={{
                                             width: 52, height: 52, borderRadius: 14,
                                             background: "rgba(255,255,255,0.04)",
@@ -726,7 +752,7 @@ export default function SetupPage() {
                                     </>
                                 ) : (
                                     <button
-                                        onClick={() => setStep(4)}
+                                        disabled={true}
                                         style={{
                                             display: "flex",
                                             alignItems: "center",
@@ -735,25 +761,22 @@ export default function SetupPage() {
                                             borderRadius: 14,
                                             background: "rgba(255,255,255,0.04)",
                                             border: "1px solid rgba(255,255,255,0.09)",
-                                            cursor: "pointer",
+                                            cursor: "not-allowed",
                                             transition: "all 0.15s",
-                                        }}
-                                        onMouseEnter={e => {
-                                            (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)";
-                                            (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.14)";
-                                        }}
-                                        onMouseLeave={e => {
-                                            (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
-                                            (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.09)";
+                                            opacity: 0.6,
+                                            width: "100%"
                                         }}
                                     >
                                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                                             <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                                                 <EverFernBglessLogo size={18} />
                                             </div>
-                                            <span style={{ fontWeight: 500, fontSize: 14, color: "#201e24" }}>Connect to EverFern Cloud</span>
+                                            <div style={{ textAlign: "left" }}>
+                                                <span style={{ fontWeight: 500, fontSize: 14, color: "#201e24", display: "block" }}>EverFern Cloud</span>
+                                                <span style={{ fontSize: 11, color: "#8a8886" }}>Coming Soon</span>
+                                            </div>
                                         </div>
-                                        <ChevronRight size={16} style={{ color: "#8a8886" }} />
+                                        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#8a8886", background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: 4 }}>Disabled</span>
                                     </button>
                                 )}
                             </div>
