@@ -65,6 +65,8 @@ export class DiscordPlatform extends MessagePlatform {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000; // 5 seconds
+  private messageCreateEventCount = 0; // Track messageCreate events for debugging
+  private processedMessageIds = new Set<string>(); // Track processed messages to avoid duplicates
 
   constructor(config: DiscordConfig) {
     super('discord', config);
@@ -88,6 +90,8 @@ export class DiscordPlatform extends MessagePlatform {
           GatewayIntentBits.GuildMessages,
           GatewayIntentBits.MessageContent,
           GatewayIntentBits.DirectMessages,
+          GatewayIntentBits.DirectMessageReactions,
+          GatewayIntentBits.DirectMessageTyping,
           GatewayIntentBits.GuildMembers
         ],
         partials: [Partials.Channel, Partials.Message, Partials.User] // Required for DM channels, messages, and users
@@ -129,9 +133,27 @@ export class DiscordPlatform extends MessagePlatform {
       console.log(`[Discord] Guild responses enabled: ${discordConfig.config.respondToGuilds !== false}`);
       console.log(`[Discord] Guild mention only: ${discordConfig.config.guildMentionOnly === true}`);
 
+      console.log(`[Discord] ⚠️  IMPORTANT: Ensure the following are enabled in Discord Developer Portal:`);
+      console.log(`[Discord]     1. MESSAGE CONTENT INTENT must be enabled`);
+      console.log(`[Discord]     2. Bot must have 'Send Messages' permission`);
+      console.log(`[Discord]     3. Users must share a server with the bot to send DMs`);
+
       // Test if the bot can receive DMs by logging the user's DM channel capability
       if (this.client.user) {
-        console.log(`[Discord] Bot user can receive DMs: ${this.client.user.dmChannel !== null || 'unknown'}`);
+        console.log(`[Discord] Bot user ID: ${this.client.user.id}`);
+        console.log(`[Discord] Bot username: ${this.client.user.username}`);
+        console.log(`[Discord] Bot discriminator: ${this.client.user.discriminator}`);
+        console.log(`[Discord] Bot can receive DMs: enabled by default`);
+
+        // Log the actual intents to verify they're correct
+        console.log(`[Discord] Active intents: ${this.client.options.intents}`);
+        console.log(`[Discord] Active partials: ${JSON.stringify(this.client.options.partials)}`);
+
+        // Check if DirectMessages intent is included
+        const hasDirectMessages = (this.client.options.intents as any) & GatewayIntentBits.DirectMessages;
+        const hasMessageContent = (this.client.options.intents as any) & GatewayIntentBits.MessageContent;
+        console.log(`[Discord] DirectMessages intent active: ${!!hasDirectMessages}`);
+        console.log(`[Discord] MessageContent intent active: ${!!hasMessageContent}`);
       }
 
       this.reconnectAttempts = 0;
@@ -337,6 +359,38 @@ export class DiscordPlatform extends MessagePlatform {
   }
 
   /**
+   * Test DM functionality by attempting to send a message to a user
+   * This is for debugging purposes only
+   */
+  async testDMFunctionality(userId: string): Promise<boolean> {
+    if (!this.client || !this.client.user) {
+      console.log('[Discord] Cannot test DM - client not initialized');
+      return false;
+    }
+
+    try {
+      console.log(`[Discord] Testing DM functionality with user ${userId}`);
+
+      // Try to fetch the user
+      const user = await this.client.users.fetch(userId);
+      console.log(`[Discord] User fetched: ${user.username} (${user.id})`);
+
+      // Try to create a DM channel
+      const dmChannel = await user.createDM();
+      console.log(`[Discord] DM channel created: ${dmChannel.id}`);
+
+      // Try to send a test message
+      const message = await dmChannel.send('🤖 Test message from bot - DM functionality is working!');
+      console.log(`[Discord] Test message sent: ${message.id}`);
+
+      return true;
+    } catch (error) {
+      console.error('[Discord] DM test failed:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get user information
    */
   async getUserInfo(userId: string): Promise<{
@@ -432,10 +486,26 @@ export class DiscordPlatform extends MessagePlatform {
       // Log the actual intents to verify they're set correctly
       console.log(`[Discord] Client intents value: ${this.client!.options.intents}`);
       console.log(`[Discord] Client partials: ${JSON.stringify(this.client!.options.partials)}`);
+
+      // Verify specific intents are active
+      const intents = this.client!.options.intents as any;
+      console.log(`[Discord] DirectMessages intent: ${!!(intents & GatewayIntentBits.DirectMessages)}`);
+      console.log(`[Discord] MessageContent intent: ${!!(intents & GatewayIntentBits.MessageContent)}`);
+      console.log(`[Discord] Guilds intent: ${!!(intents & GatewayIntentBits.Guilds)}`);
+      console.log(`[Discord] GuildMessages intent: ${!!(intents & GatewayIntentBits.GuildMessages)}`);
+
+      // Check if bot can receive DMs
+      console.log(`[Discord] Bot ready to receive DMs and guild messages`);
+
+      // Log some additional debugging info
+      console.log(`[Discord] Bot application ID: ${this.client!.application?.id}`);
+      console.log(`[Discord] Bot verified: ${this.client!.user?.verified}`);
+      console.log(`[Discord] Bot MFA enabled: ${this.client!.user?.mfaEnabled}`);
     });
 
-    this.client.on('messageCreate', (message: Message) => {
-      console.log(`[Discord] 🔔 messageCreate event fired`);
+    this.client.on('messageCreate', async (message: Message) => {
+      this.messageCreateEventCount++;
+      console.log(`[Discord] 🔔 messageCreate event fired (#${this.messageCreateEventCount})`);
       console.log(`[Discord] Message ID: ${message.id}`);
       console.log(`[Discord] Author: ${message.author.username} (${message.author.id})`);
       console.log(`[Discord] Author is bot: ${message.author.bot}`);
@@ -445,10 +515,10 @@ export class DiscordPlatform extends MessagePlatform {
       console.log(`[Discord] Message partial: ${message.partial}`);
       console.log(`[Discord] Channel partial: ${message.channel.partial}`);
 
-      this.handleIncomingMessage(message);
+      await this.handleIncomingMessage(message);
     });
 
-    // Add raw event listener to debug what's actually being received
+    // Add raw event listener for debugging only
     this.client.on('raw', (packet: any) => {
       if (packet.t === 'MESSAGE_CREATE') {
         console.log(`[Discord] 📦 Raw MESSAGE_CREATE packet received:`);
@@ -457,41 +527,28 @@ export class DiscordPlatform extends MessagePlatform {
         console.log(`[Discord] Author: ${packet.d.author.username} (${packet.d.author.id})`);
         console.log(`[Discord] Content: "${packet.d.content}"`);
         console.log(`[Discord] Guild ID: ${packet.d.guild_id || 'null (DM)'}`);
+        console.log(`[Discord] Bot author: ${packet.d.author.bot}`);
 
-        // If this is a DM (channel_type === 1) and messageCreate didn't fire, handle it manually
+        // Log if this is a DM from a human
         if (packet.d.channel_type === 1 && !packet.d.author.bot) {
-          console.log(`[Discord] 🔧 DM detected in raw event, attempting manual processing...`);
+          console.log(`[Discord] 🔍 DM from human detected in raw event`);
+          console.log(`[Discord] Waiting for messageCreate event to handle it...`);
 
-          // Create a minimal message-like object for DM processing
-          const dmMessage = {
-            id: packet.d.id,
-            content: packet.d.content,
-            author: {
-              id: packet.d.author.id,
-              username: packet.d.author.username,
-              bot: packet.d.author.bot,
-              displayName: packet.d.author.global_name || packet.d.author.username,
-              displayAvatarURL: () => `https://cdn.discordapp.com/avatars/${packet.d.author.id}/${packet.d.author.avatar}.png`
-            },
-            channel: {
-              id: packet.d.channel_id,
-              type: 1, // DM
-              partial: false
-            },
-            guild: null,
-            member: null,
-            createdAt: new Date(packet.d.timestamp),
-            partial: false,
-            attachments: new Map(),
-            mentions: { users: new Map(), roles: new Map(), everyone: false },
-            reference: packet.d.message_reference || null
-          };
-
-          // Process this as a DM manually
+          // Set a timeout to check if messageCreate fires
+          const currentCount = this.messageCreateEventCount;
+          const messageId = packet.d.id;
           setTimeout(() => {
-            console.log(`[Discord] 🔄 Processing raw DM message manually...`);
-            this.handleRawDMMessage(dmMessage, packet.d);
-          }, 100);
+            const newCount = this.messageCreateEventCount;
+            if (newCount > currentCount) {
+              console.log(`[Discord] ✅ messageCreate event fired for DM (count: ${currentCount} -> ${newCount})`);
+            } else {
+              console.log(`[Discord] ❌ messageCreate event did NOT fire for DM after 3 seconds (count still: ${currentCount})`);
+              console.log(`[Discord] 🔧 Activating fallback: manually processing DM from raw event`);
+
+              // Manually process the DM as a fallback
+              this.processRawDMFallback(packet.d);
+            }
+          }, 3000);
         }
       }
     });
@@ -537,59 +594,80 @@ export class DiscordPlatform extends MessagePlatform {
     this.client.on('warn', (warning: string) => {
       console.warn(`[Discord Warning] ${warning}`);
     });
+
+    // Add channelCreate event to debug DM channel creation
+    this.client.on('channelCreate', (channel: any) => {
+      if (channel.type === ChannelType.DM) {
+        console.log(`[Discord] 📩 DM channel created: ${channel.id}`);
+        console.log(`[Discord] DM recipient: ${channel.recipient?.username}`);
+      }
+    });
   }
 
+
   /**
-   * Handle raw DM message when Discord.js messageCreate doesn't fire
-   * This is a fallback for when partials don't work properly
+   * Process raw DM as fallback when messageCreate doesn't fire
+   * This is a backup mechanism for Discord.js DM handling issues
    */
-  private handleRawDMMessage(dmMessage: any, rawData: any): void {
-    console.log(`[Discord] 📨 handleRawDMMessage called (fallback)`);
-    console.log(`[Discord] ✅ Message is from human user: ${dmMessage.author.username}`);
-    console.log(`[Discord] Content: "${dmMessage.content}"`);
+  private processRawDMFallback(rawData: any): void {
+    console.log(`[Discord] 📨 processRawDMFallback called`);
+
+    // Check if we've already processed this message
+    if (this.processedMessageIds.has(rawData.id)) {
+      console.log(`[Discord] ⚠️ Message ${rawData.id} already processed via messageCreate, skipping fallback`);
+      return;
+    }
+
+    // Mark message as processed
+    this.processedMessageIds.add(rawData.id);
+
+    console.log(`[Discord] Processing DM from: ${rawData.author.username} (${rawData.author.id})`);
+    console.log(`[Discord] Content: "${rawData.content}"`);
 
     const discordConfig = this.config as DiscordConfig;
 
     // Check if DM responses are enabled
     if (discordConfig.config.respondToDMs === false) {
-      console.log(`[Discord] ❌ DM responses disabled in config, ignoring message`);
+      console.log(`[Discord] ❌ DM responses disabled in config, ignoring fallback message`);
       return;
     }
 
-    console.log(`[Discord] ✅ DM responses enabled, processing message`);
+    console.log(`[Discord] ✅ DM responses enabled, processing fallback message`);
 
-    // Convert to platform-agnostic format
+    // Convert raw data to platform-agnostic format
     const incomingMessage: IncomingMessage = {
-      id: dmMessage.id,
+      id: rawData.id,
       platform: 'discord',
       user: {
-        id: dmMessage.author.id,
-        name: dmMessage.author.displayName || dmMessage.author.username,
-        avatar: dmMessage.author.displayAvatarURL()
+        id: rawData.author.id,
+        name: rawData.author.global_name || rawData.author.username,
+        avatar: rawData.author.avatar
+          ? `https://cdn.discordapp.com/avatars/${rawData.author.id}/${rawData.author.avatar}.png`
+          : `https://cdn.discordapp.com/embed/avatars/${parseInt(rawData.author.discriminator) % 5}.png`
       },
       chat: {
-        id: dmMessage.channel.id,
-        name: `DM with ${dmMessage.author.username}`,
+        id: rawData.channel_id,
+        name: `DM with ${rawData.author.username}`,
         type: 'private'
       },
       content: {
-        text: this.sanitizeInput(dmMessage.content),
+        text: this.sanitizeInput(rawData.content),
         files: [], // Raw events don't include processed attachments easily
         isMention: false, // DMs don't have mentions
-        replyTo: dmMessage.reference ? {
-          id: dmMessage.reference.message_id || '',
+        replyTo: rawData.message_reference ? {
+          id: rawData.message_reference.message_id || '',
           text: '',
           user: ''
         } : undefined
       },
-      timestamp: dmMessage.createdAt,
-      raw: { ...dmMessage, rawDiscordData: rawData }
+      timestamp: new Date(rawData.timestamp),
+      raw: { rawDiscordData: rawData, fallbackProcessed: true }
     };
 
-    console.log(`[Discord] ✅ Raw DM message converted successfully`);
-    console.log(`[Discord] Emitting raw DM message to bot manager...`);
+    console.log(`[Discord] ✅ Raw DM fallback message converted successfully`);
+    console.log(`[Discord] Emitting fallback DM message to bot manager...`);
     this.emitMessage(incomingMessage);
-    console.log(`[Discord] ✅ Raw DM message emitted to bot manager`);
+    console.log(`[Discord] ✅ Fallback DM message emitted to bot manager`);
   }
 
   /**
@@ -597,6 +675,22 @@ export class DiscordPlatform extends MessagePlatform {
    */
   private async handleIncomingMessage(message: Message): Promise<void> {
     console.log(`[Discord] 📨 handleIncomingMessage called`);
+
+    // Check if we've already processed this message (to avoid duplicates from fallback)
+    if (this.processedMessageIds.has(message.id)) {
+      console.log(`[Discord] ⚠️ Message ${message.id} already processed, skipping duplicate`);
+      return;
+    }
+
+    // Mark message as processed
+    this.processedMessageIds.add(message.id);
+
+    // Clean up old message IDs (keep only last 1000)
+    if (this.processedMessageIds.size > 1000) {
+      const idsArray = Array.from(this.processedMessageIds);
+      this.processedMessageIds.clear();
+      idsArray.slice(-500).forEach(id => this.processedMessageIds.add(id));
+    }
 
     // Handle partial messages by fetching complete data
     if (message.partial) {

@@ -7,21 +7,25 @@ import { memorySaveTool } from '../tools/memory-save';
 import { memorySearchTool } from '../tools/memory-search';
 import { webSearchTool } from '../tools/web-search';
 import { webFetchTool } from '../tools/web-fetch';
-import { runCommandTool } from '../tools/terminal/run-command';
-import { commandStatusTool } from '../tools/terminal/command-status';
-import { sendCommandInputTool } from '../tools/terminal/send-command-input';
 import { todoWriteTool } from '../tools/todo-write';
 import { askUserTool } from '../tools/ask-user';
 import { skillTool } from '../tools/skill-tool';
 import { presentFilesTool } from '../tools/present-files';
 import { createWorkspaceRequestTool, allowFileDeleteTool } from '../tools/control-plane';
+import { terminalTool, terminalStatusTool } from '../tools/terminal';
+import { searchMcpRegistryTool, connectMcpServerTool, listMcpToolsTool } from '../tools/mcp-registry-tool';
+import { mcpRegistry } from '../tools/mcp';
 import { AIClient } from '../../lib/ai-client';
 import * as os from 'os';
 
 export const getBaseTools = (runner: any): AgentTool[] => {
   const platform = os.platform();
   const config = runner.config;
-  return [
+
+  // Static tools
+  const tools: AgentTool[] = [
+      terminalTool,
+      terminalStatusTool,
       plannerTool,
       updateStepTool,
       executionPlanTool,
@@ -39,15 +43,21 @@ export const getBaseTools = (runner: any): AgentTool[] => {
       memorySaveTool,
       memorySearchTool,
       webSearchTool,
-      runCommandTool,
-      commandStatusTool,
-      sendCommandInputTool,
       todoWriteTool,
       askUserTool,
       skillTool,
       presentFilesTool,
       webFetchTool,
       createWorkspaceRequestTool(config.requestPermission),
-      allowFileDeleteTool
+      allowFileDeleteTool,
+      searchMcpRegistryTool,
+      connectMcpServerTool,
+      listMcpToolsTool
     ];
+
+    // Add dynamically connected MCP tools
+    const mcpTools = mcpRegistry.listAllTools().map(name => mcpRegistry.getTool(name)).filter(Boolean) as AgentTool[];
+    tools.push(...mcpTools);
+
+    return tools;
 };

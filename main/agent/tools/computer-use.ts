@@ -762,25 +762,11 @@ class ComputerUseTool {
   private async attachScreenshot(payload: ToolPayload): Promise<ToolPayload> {
     const ts = nowTs();
     const imgPath = path.join(this.screenshotDir, `${ts}.png`);
-    await this.captureScreen(imgPath);
-
-    // Read raw image dimensions
-    const imgBuffer = fs.readFileSync(imgPath);
-    const { width: rawW, height: rawH } = this.getPngDimensions(imgBuffer);
-    const { newW, newH } = this.computeResizeDims(rawW, rawH);
-
-    // Re-encode as JPEG at target size using sharp
-    let encoded = "";
-    try {
-      const jpegBuffer = await sharp!(imgBuffer)
-        .resize(newW, newH, { fit: 'fill' })
-        .jpeg({ quality: this.imageQuality })
-        .toBuffer();
-      encoded = jpegBuffer.toString("base64");
-    } catch (err) {
-      console.warn('[ComputerUse] sharp resize failed — using raw image as fallback', err);
-      encoded = imgBuffer.toString("base64");
-    }
+    
+    // Offload capture and processing to a worker thread to keep main thread responsive
+    const workerResult = await this.captureScreenAsync(imgPath);
+    
+    const { encoded, width: rawW, height: rawH, newW, newH } = workerResult;
 
     const cursorPos = this.getCursorPosition();
     const displays = electronScreen.getAllDisplays();
@@ -822,6 +808,30 @@ class ComputerUseTool {
     };
 
     return updated;
+  }
+
+  private async captureScreenAsync(outPath: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const { Worker } = require('worker_threads');
+      const worker = new Worker(path.join(__dirname, 'screenshot-worker.js'), {
+        workerData: {
+          outPath,
+          monitorIndex: this.monitorIndex,
+          imageQuality: this.imageQuality,
+          imageMaxPixels: this.imageMaxPixels,
+          imageMinPixels: this.imageMinPixels,
+          imageScaleFactor: this.imageScaleFactor
+        }
+      });
+      worker.on('message', (msg: any) => {
+        if (msg.success) resolve(msg.data);
+        else reject(new Error(msg.error));
+      });
+      worker.on('error', reject);
+      worker.on('exit', (code: number) => {
+        if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
+      });
+    });
   }
 
   private async captureScreen(outPath: string): Promise<void> {

@@ -1,62 +1,109 @@
 /**
- * EverFern Desktop — Chat History Store
+ * EverFern Desktop — Chat History Store (SQLite Edition)
  * 
- * Persists conversation history to ~/.everfern/store/conversations/
- * Each conversation is saved as a separate JSON file.
+ * Persists conversation history to the central SQLite database.
+ * Includes migration logic for legacy JSON files.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { Conversation, ConversationSummary } from '../acp/types';
+import type { Conversation, ConversationSummary, ChatMessage } from '../acp/types';
+import { dbOps } from '../lib/db';
 
-const CONVERSATIONS_DIR = path.join(os.homedir(), '.everfern', 'conversations');
-const TIMELINE_DIR = path.join(os.homedir(), '.everfern', 'timeline');
-
-function ensureDir(): void {
-  if (!fs.existsSync(CONVERSATIONS_DIR)) {
-    fs.mkdirSync(CONVERSATIONS_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(TIMELINE_DIR)) {
-    fs.mkdirSync(TIMELINE_DIR, { recursive: true });
-  }
-}
+const LEGACY_CONVERSATIONS_DIR = path.join(os.homedir(), '.everfern', 'store', 'conversations');
+const LEGACY_TIMELINE_DIR = path.join(os.homedir(), '.everfern', 'store', 'timeline');
 
 export class ChatHistoryStore {
+  private migrated = false;
+
   constructor() {
-    ensureDir();
+    // Migration is handled asynchronously via init()
+  }
+
+  async init() {
+    if (this.migrated) return;
+    await this.migrateLegacyData();
+    this.migrated = true;
   }
 
   /**
-   * List all conversations (summary only, no messages).
-   * Sorted by updatedAt descending (newest first).
+   * Migrate legacy JSON files to SQLite.
    */
-  list(): ConversationSummary[] {
-    ensureDir();
+  private async migrateLegacyData() {
+    if (!fs.existsSync(LEGACY_CONVERSATIONS_DIR)) return;
+
     try {
-      const files = fs.readdirSync(CONVERSATIONS_DIR).filter(f => f.endsWith('.json'));
-      const summaries: ConversationSummary[] = [];
+      const files = fs.readdirSync(LEGACY_CONVERSATIONS_DIR).filter(f => f.endsWith('.json'));
+      if (files.length === 0) return;
+
+      console.log(`[History] 🚚 Migrating ${files.length} conversations to SQLite...`);
 
       for (const file of files) {
+        const id = file.replace('.json', '');
+        
+        // Check if already in DB
+        const existing = await dbOps.get('SELECT id FROM conversations WHERE id = ?', [id]);
+        if (existing) continue;
+
         try {
-          const raw = fs.readFileSync(path.join(CONVERSATIONS_DIR, file), 'utf-8');
+          const raw = fs.readFileSync(path.join(LEGACY_CONVERSATIONS_DIR, file), 'utf-8');
           const conv: Conversation = JSON.parse(raw);
-          summaries.push({
-            id: conv.id,
-            title: conv.title,
-            provider: conv.provider,
-            messageCount: conv.messages.length,
-            createdAt: conv.createdAt,
-            updatedAt: conv.updatedAt,
+          
+          // Load timeline data if exists
+          const timelineFolderPath = path.join(LEGACY_TIMELINE_DIR, id);
+          conv.messages.forEach(msg => {
+            if (msg.hasTimeline && msg.id && fs.existsSync(timelineFolderPath)) {
+              const tlPath = path.join(timelineFolderPath, `${msg.id}.json`);
+              if (fs.existsSync(tlPath)) {
+                try {
+                  const tlData = JSON.parse(fs.readFileSync(tlPath, 'utf-8'));
+                  msg.thought = tlData.thought;
+                  msg.toolCalls = tlData.toolCalls;
+                } catch {}
+              }
+            }
           });
-        } catch {
-          // Skip corrupted files
+
+          await this.save(conv);
+          console.log(`[History] ✅ Migrated ${id}`);
+        } catch (err) {
+          console.warn(`[History] Failed to migrate ${file}:`, err);
         }
       }
 
-      return summaries.sort((a, b) => 
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
+      // Rename legacy folder to prevent re-migration
+      const backupDir = `${LEGACY_CONVERSATIONS_DIR}_backup_${Date.now()}`;
+      fs.renameSync(LEGACY_CONVERSATIONS_DIR, backupDir);
+      console.log(`[History] 🏁 Migration complete. Legacy data moved to ${backupDir}`);
+
+    } catch (err) {
+      console.error('[History] Migration failed:', err);
+    }
+  }
+
+  /**
+   * List all conversations.
+   */
+  async list(): Promise<ConversationSummary[]> {
+    await this.init();
+    try {
+      const rows = await dbOps.all(`
+        SELECT c.*, COUNT(m.id) as messageCount 
+        FROM conversations c 
+        LEFT JOIN messages m ON c.id = m.conversation_id 
+        GROUP BY c.id 
+        ORDER BY c.updated_at DESC
+      `);
+
+      return rows.map(row => ({
+        id: row.id,
+        title: row.title,
+        provider: row.provider,
+        messageCount: row.messageCount,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
     } catch (err) {
       console.error('[History] Failed to list conversations:', err);
       return [];
@@ -66,32 +113,32 @@ export class ChatHistoryStore {
   /**
    * Load a full conversation by ID.
    */
-  load(id: string): Conversation | null {
+  async load(id: string): Promise<Conversation | null> {
+    await this.init();
     try {
-      const filePath = path.join(CONVERSATIONS_DIR, `${id}.json`);
-      if (!fs.existsSync(filePath)) return null;
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const conv: Conversation = JSON.parse(raw);
-      
-      const timelineFolderPath = path.join(TIMELINE_DIR, id);
-      if (fs.existsSync(timelineFolderPath)) {
-        conv.messages.forEach(msg => {
-          if (msg.hasTimeline && msg.id) {
-            const tlPath = path.join(timelineFolderPath, `${msg.id}.json`);
-            if (fs.existsSync(tlPath)) {
-              try {
-                const tlRaw = fs.readFileSync(tlPath, 'utf-8');
-                const tlData = JSON.parse(tlRaw);
-                msg.thought = tlData.thought;
-                msg.toolCalls = tlData.toolCalls;
-              } catch (e) {
-                console.warn(`[History] Failed to parse timeline data for ${msg.id}`);
-              }
-            }
-          }
-        });
-      }
-      return conv;
+      const convRow = await dbOps.get('SELECT * FROM conversations WHERE id = ?', [id]);
+      if (!convRow) return null;
+
+      const msgRows = await dbOps.all('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC', [id]);
+
+      const messages: ChatMessage[] = msgRows.map(row => ({
+        id: row.id,
+        role: row.role as any,
+        content: row.content,
+        thought: row.thought,
+        toolCalls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
+        hasTimeline: !!row.has_timeline,
+      }));
+
+      return {
+        id: convRow.id,
+        title: convRow.title,
+        provider: convRow.provider,
+        model: convRow.model,
+        messages,
+        createdAt: convRow.created_at,
+        updatedAt: convRow.updated_at,
+      } as Conversation;
     } catch (err) {
       console.error(`[History] Failed to load conversation ${id}:`, err);
       return null;
@@ -101,36 +148,54 @@ export class ChatHistoryStore {
   /**
    * Save a conversation (create or update).
    */
-  save(conversation: Conversation): { success: boolean; error?: string } {
-    ensureDir();
+  async save(conversation: Conversation): Promise<{ success: boolean; error?: string }> {
+    // Ensure DB is ready
+    if (!this.migrated && conversation.id !== 'temp-migration') {
+       await this.init();
+    }
+
     try {
-      const clonedConv: Conversation = JSON.parse(JSON.stringify(conversation));
-      let hasAnyTimeline = false;
-      const timelineFolderPath = path.join(TIMELINE_DIR, clonedConv.id);
+      // 1. Upsert Conversation
+      const existing = await dbOps.get('SELECT id FROM conversations WHERE id = ?', [conversation.id]);
+      if (existing) {
+        await dbOps.run(
+          'UPDATE conversations SET title = ?, provider = ?, model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [conversation.title, conversation.provider, (conversation as any).model, conversation.id]
+        );
+      } else {
+        await dbOps.run(
+          'INSERT INTO conversations (id, title, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            conversation.id, 
+            conversation.title, 
+            conversation.provider, 
+            (conversation as any).model, 
+            conversation.createdAt || new Date().toISOString(), 
+            conversation.updatedAt || new Date().toISOString()
+          ]
+        );
+      }
 
-      clonedConv.messages.forEach((msg) => {
-        if (msg.thought || (msg.toolCalls && msg.toolCalls.length > 0)) {
-          if (!hasAnyTimeline) {
-            hasAnyTimeline = true;
-            if (!fs.existsSync(timelineFolderPath)) fs.mkdirSync(timelineFolderPath, { recursive: true });
-          }
-          if (!msg.id) msg.id = `msg-${Date.now()}-${Math.random().toString(36).substring(2,9)}`;
-          
-          const tlData = {
-            thought: msg.thought,
-            toolCalls: msg.toolCalls
-          };
-          const tlPath = path.join(timelineFolderPath, `${msg.id}.json`);
-          fs.writeFileSync(tlPath, JSON.stringify(tlData, null, 2));
+      // 2. Sync Messages (Surgical: Delete all and re-insert for simplicity in this version, or update existing)
+      // For history, usually messages are immutable or appended. A full sync is safer for now.
+      await dbOps.run('DELETE FROM messages WHERE conversation_id = ?', [conversation.id]);
 
-          msg.hasTimeline = true;
-          delete msg.thought;
-          delete msg.toolCalls;
-        }
-      });
-
-      const filePath = path.join(CONVERSATIONS_DIR, `${clonedConv.id}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(clonedConv, null, 2));
+      for (const msg of conversation.messages) {
+        const msgId = msg.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        await dbOps.run(
+          'INSERT INTO messages (id, conversation_id, role, content, thought, tool_calls, has_timeline, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            msgId,
+            conversation.id,
+            msg.role,
+            typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+            msg.thought || null,
+            msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
+            msg.hasTimeline ? 1 : 0,
+            new Date().toISOString() // In a real app we'd preserve message timestamps
+          ]
+        );
+      }
 
       return { success: true };
     } catch (err) {
@@ -143,16 +208,10 @@ export class ChatHistoryStore {
   /**
    * Delete a conversation by ID.
    */
-  delete(id: string): { success: boolean; error?: string } {
+  async delete(id: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const filePath = path.join(CONVERSATIONS_DIR, `${id}.json`);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-      const timelineFolderPath = path.join(TIMELINE_DIR, id);
-      if (fs.existsSync(timelineFolderPath)) {
-        fs.rmSync(timelineFolderPath, { recursive: true, force: true });
-      }
+      await dbOps.run('DELETE FROM conversations WHERE id = ?', [id]);
+      // Cascading delete handles messages
       return { success: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

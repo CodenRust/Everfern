@@ -2348,7 +2348,7 @@ export default function ChatPage() {
                                 <div style={{ padding: "0 24px 12px", width: "100%", maxWidth: 848, margin: "0 auto", position: "relative" }}>
                                     <AnimatePresence>
                                         {(isComputerUseActive || showPermissionModal) && (
-                                            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.2 }} style={{ width: "100%", position: "relative", zIndex: 1 }}>
+                                            <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.2 }} style={{ width: "96%", maxWidth: 840, margin: "0 auto", position: "relative", zIndex: 1 }}>
                                                 <div style={{ width: "100%", background: "#161615", border: "1px solid rgba(255, 255, 255, 0.12)", borderBottom: "none", borderRadius: "20px 20px 0 0", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
                                                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                                                         <div style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: showPermissionModal ? "rgba(251, 191, 36, 0.15)" : "rgba(255, 255, 255, 0.05)", border: showPermissionModal ? "1px solid rgba(251, 191, 36, 0.3)" : "1px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>

@@ -29,7 +29,9 @@ vi.mock('electron', () => ({
     focus: vi.fn(),
     commandLine: {
       appendSwitch: vi.fn()
-    }
+    },
+    setLoginItemSettings: vi.fn(),
+    getLoginItemSettings: vi.fn(() => ({ openAtLogin: false }))
   },
   BrowserWindow: vi.fn(),
   Tray: vi.fn(function(this: any) {
@@ -72,17 +74,6 @@ vi.mock('fs', () => ({
 vi.mock('child_process', () => ({
   execSync: vi.fn()
 }));
-
-// Mock winreg for Windows registry operations
-vi.mock('winreg', () => {
-  return vi.fn(() => ({
-    get: vi.fn(),
-    set: vi.fn(),
-    remove: vi.fn(),
-    HKCU: 'HKEY_CURRENT_USER',
-    REG_SZ: 'REG_SZ'
-  }));
-});
 
 describe('Auto-Start and System Tray Integration Tests', () => {
   let autoStartManager: AutoStartManager;

@@ -178,14 +178,19 @@ const Select = (props: React.SelectHTMLAttributes<HTMLSelectElement>) => {
             )}
 
             {/* Hidden native select for form submission */}
-            <select
-                {...props}
-                value={selectedValue}
-                onChange={e => handleSelect(e.target.value)}
-                style={{ display: 'none' }}
-            >
-                {props.children}
-            </select>
+            {(() => {
+                const { defaultValue, value, ...rest } = props;
+                return (
+                    <select
+                        {...rest}
+                        value={selectedValue}
+                        onChange={e => handleSelect(e.target.value)}
+                        style={{ display: 'none' }}
+                    >
+                        {props.children}
+                    </select>
+                );
+            })()}
         </div>
     );
 };

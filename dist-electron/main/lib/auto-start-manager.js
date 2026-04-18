@@ -59,9 +59,8 @@ class AutoStartManager {
         try {
             switch (this.platform) {
                 case 'win32':
-                    return this.isEnabledWindows();
                 case 'darwin':
-                    return this.isEnabledMacOS();
+                    return electron_1.app.getLoginItemSettings().openAtLogin;
                 case 'linux':
                     return this.isEnabledLinux();
                 default:
@@ -82,10 +81,12 @@ class AutoStartManager {
             console.log(`[AutoStart] Enabling auto-start on ${this.platform}`);
             switch (this.platform) {
                 case 'win32':
-                    await this.enableWindows();
-                    break;
                 case 'darwin':
-                    await this.enableMacOS();
+                    electron_1.app.setLoginItemSettings({
+                        openAtLogin: true,
+                        path: electron_1.app.getPath('exe'),
+                        args: ['--auto-start']
+                    });
                     break;
                 case 'linux':
                     await this.enableLinux();
@@ -108,10 +109,12 @@ class AutoStartManager {
             console.log(`[AutoStart] Disabling auto-start on ${this.platform}`);
             switch (this.platform) {
                 case 'win32':
-                    await this.disableWindows();
-                    break;
                 case 'darwin':
-                    await this.disableMacOS();
+                    electron_1.app.setLoginItemSettings({
+                        openAtLogin: false,
+                        path: electron_1.app.getPath('exe'),
+                        args: ['--auto-start']
+                    });
                     break;
                 case 'linux':
                     await this.disableLinux();
@@ -132,96 +135,26 @@ class AutoStartManager {
     getStartupPath() {
         return electron_1.app.getPath('exe');
     }
-    // ── Windows Implementation ──────────────────────────────────────────
+    // ── Windows Implementation (Legacy/Custom if needed, but using app.setLoginItemSettings now) ─────────
     async isEnabledWindows() {
-        try {
-            // NOTE: This requires the 'winreg' package to be installed
-            // TODO: Add winreg to package.json dependencies
-            const Registry = require('winreg');
-            const regKey = new Registry({
-                hive: Registry.HKCU,
-                key: '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
-            });
-            return new Promise((resolve) => {
-                regKey.get(this.appName, (err, item) => {
-                    if (err) {
-                        resolve(false);
-                    }
-                    else {
-                        resolve(!!item);
-                    }
-                });
-            });
-        }
-        catch (error) {
-            console.error('[AutoStart] Windows registry check failed:', error);
-            if (error?.code === 'MODULE_NOT_FOUND') {
-                console.error('[AutoStart] winreg package not found. Please install: npm install winreg');
-                console.error('[AutoStart] Also install types: npm install --save-dev @types/winreg');
-            }
-            return false;
-        }
+        // Note: We're now using app.getLoginItemSettings() instead
+        return electron_1.app.getLoginItemSettings().openAtLogin;
     }
     async enableWindows() {
-        try {
-            // NOTE: This requires the 'winreg' package to be installed
-            const Registry = require('winreg');
-            const regKey = new Registry({
-                hive: Registry.HKCU,
-                key: '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
-            });
-            const exePath = this.getStartupPath();
-            const startupCommand = `"${exePath}" --auto-start`;
-            return new Promise((resolve, reject) => {
-                regKey.set(this.appName, Registry.REG_SZ, startupCommand, (err) => {
-                    if (err) {
-                        reject(new Error(`Failed to set Windows registry entry: ${err.message}`));
-                    }
-                    else {
-                        resolve();
-                    }
-                });
-            });
-        }
-        catch (error) {
-            if (error?.code === 'MODULE_NOT_FOUND') {
-                throw new Error('winreg package not found. Please install: npm install winreg @types/winreg');
-            }
-            throw error;
-        }
+        // Note: We're now using app.setLoginItemSettings() instead
+        electron_1.app.setLoginItemSettings({
+            openAtLogin: true,
+            path: electron_1.app.getPath('exe'),
+            args: ['--auto-start']
+        });
     }
     async disableWindows() {
-        try {
-            const Registry = require('winreg');
-            const regKey = new Registry({
-                hive: Registry.HKCU,
-                key: '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
-            });
-            return new Promise((resolve, reject) => {
-                regKey.remove(this.appName, (err) => {
-                    if (err && err.message && err.message.includes('not found')) {
-                        // Entry doesn't exist, consider it success
-                        resolve();
-                    }
-                    else if (err && err.message && err.message.includes('unable to find')) {
-                        // Registry key or value not found, consider it success
-                        resolve();
-                    }
-                    else if (err) {
-                        reject(new Error(`Failed to remove Windows registry entry: ${err.message}`));
-                    }
-                    else {
-                        resolve();
-                    }
-                });
-            });
-        }
-        catch (error) {
-            if (error?.code === 'MODULE_NOT_FOUND') {
-                throw new Error('winreg package not found. Please install: npm install winreg @types/winreg');
-            }
-            throw error;
-        }
+        // Note: We're now using app.setLoginItemSettings() instead
+        electron_1.app.setLoginItemSettings({
+            openAtLogin: false,
+            path: electron_1.app.getPath('exe'),
+            args: ['--auto-start']
+        });
     }
     // ── macOS Implementation ────────────────────────────────────────────
     async isEnabledMacOS() {
@@ -345,14 +278,14 @@ Categories=Utility;
             case 'win32':
                 return {
                     platform: 'Windows',
-                    method: 'Registry (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run)',
-                    location: 'Windows Registry'
+                    method: 'Electron app.setLoginItemSettings (Registry)',
+                    location: 'Windows Registry (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run)'
                 };
             case 'darwin':
                 return {
                     platform: 'macOS',
-                    method: 'LaunchAgent plist file',
-                    location: this.getMacOSPlistPath()
+                    method: 'Electron app.setLoginItemSettings (LaunchAgent)',
+                    location: 'Login Items / LaunchAgents'
                 };
             case 'linux':
                 return {
@@ -374,16 +307,6 @@ Categories=Utility;
     async validatePlatformSupport() {
         switch (this.platform) {
             case 'win32':
-                try {
-                    require('winreg');
-                    return { supported: true };
-                }
-                catch (error) {
-                    return {
-                        supported: false,
-                        reason: 'winreg package not installed. Run: npm install winreg @types/winreg'
-                    };
-                }
             case 'darwin':
             case 'linux':
                 return { supported: true };

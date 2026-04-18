@@ -718,24 +718,9 @@ class ComputerUseTool {
     async attachScreenshot(payload) {
         const ts = nowTs();
         const imgPath = path.join(this.screenshotDir, `${ts}.png`);
-        await this.captureScreen(imgPath);
-        // Read raw image dimensions
-        const imgBuffer = fs.readFileSync(imgPath);
-        const { width: rawW, height: rawH } = this.getPngDimensions(imgBuffer);
-        const { newW, newH } = this.computeResizeDims(rawW, rawH);
-        // Re-encode as JPEG at target size using sharp
-        let encoded = "";
-        try {
-            const jpegBuffer = await sharp(imgBuffer)
-                .resize(newW, newH, { fit: 'fill' })
-                .jpeg({ quality: this.imageQuality })
-                .toBuffer();
-            encoded = jpegBuffer.toString("base64");
-        }
-        catch (err) {
-            console.warn('[ComputerUse] sharp resize failed — using raw image as fallback', err);
-            encoded = imgBuffer.toString("base64");
-        }
+        // Offload capture and processing to a worker thread to keep main thread responsive
+        const workerResult = await this.captureScreenAsync(imgPath);
+        const { encoded, width: rawW, height: rawH, newW, newH } = workerResult;
         const cursorPos = this.getCursorPosition();
         const displays = electron_1.screen.getAllDisplays();
         const display = displays[this.monitorIndex - 1] || electron_1.screen.getPrimaryDisplay();
@@ -771,6 +756,32 @@ class ComputerUseTool {
             raw_height: rawH,
         };
         return updated;
+    }
+    async captureScreenAsync(outPath) {
+        return new Promise((resolve, reject) => {
+            const { Worker } = require('worker_threads');
+            const worker = new Worker(path.join(__dirname, 'screenshot-worker.js'), {
+                workerData: {
+                    outPath,
+                    monitorIndex: this.monitorIndex,
+                    imageQuality: this.imageQuality,
+                    imageMaxPixels: this.imageMaxPixels,
+                    imageMinPixels: this.imageMinPixels,
+                    imageScaleFactor: this.imageScaleFactor
+                }
+            });
+            worker.on('message', (msg) => {
+                if (msg.success)
+                    resolve(msg.data);
+                else
+                    reject(new Error(msg.error));
+            });
+            worker.on('error', reject);
+            worker.on('exit', (code) => {
+                if (code !== 0)
+                    reject(new Error(`Worker stopped with exit code ${code}`));
+            });
+        });
     }
     async captureScreen(outPath) {
         const screenshot = require('screenshot-desktop');

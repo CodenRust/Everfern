@@ -65,6 +65,7 @@ async function getPiCodingTools() {
         adaptTool(m.findToolDefinition, m.findTool.execute),
         adaptTool(m.grepToolDefinition, m.grepTool.execute),
         adaptTool(m.lsToolDefinition, m.lsTool.execute),
+        adaptTool(m.bashToolDefinition, m.bashTool.execute, 'executePwsh'),
     ];
     return loadedCodingTools;
 }

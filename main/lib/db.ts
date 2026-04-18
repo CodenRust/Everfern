@@ -44,6 +44,31 @@ function continueWithSetup(db: sqlite3.Database, resolve: (db: sqlite3.Database)
       model TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Conversation History tables
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      provider TEXT,
+      model TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT,
+      thought TEXT,
+      tool_calls TEXT, -- JSON string
+      has_timeline BOOLEAN DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);
   `, (execErr) => {
     if (execErr) return reject(execErr);
     instance = db;

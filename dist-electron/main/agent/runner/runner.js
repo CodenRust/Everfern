@@ -346,8 +346,8 @@ class AgentRunner {
         // Create shouldAbort callback for graph nodes
         const shouldAbort = abort_manager_1.globalAbortManager.createShouldAbortCallback();
         // Build graph asynchronously to avoid blocking the event loop
-        const graph = await Promise.resolve().then(() => (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools, eventQueue, convId, missionTracker, shouldAbort));
-        console.log('[AgentRunner] ✅ Graph built successfully');
+        const graph = await Promise.resolve().then(() => (0, graph_1.buildGraph)(this, this._buildToolDefinitions(), this.tools));
+        console.log('[AgentRunner] ✅ Graph built (or retrieved from cache)');
         await new Promise(resolve => setImmediate(resolve));
         this.telemetry.updateSpinner('Starting agent...');
         console.log('[AgentRunner] 🚀 Starting agent execution...');
@@ -360,7 +360,19 @@ class AgentRunner {
                 // Requirement 1.2: Agent_Runner shall check the flag before each node execution
                 abort_manager_1.globalAbortManager.checkAbort();
                 console.log('[AgentRunner] 🔄 Getting graph state...');
-                const threadConfig = { configurable: { thread_id: convId }, recursionLimit: 100 };
+                const threadConfig = {
+                    configurable: {
+                        thread_id: convId,
+                        executionContext: {
+                            runner: this,
+                            eventQueue,
+                            missionTracker,
+                            conversationId: convId,
+                            shouldAbort,
+                        }
+                    },
+                    recursionLimit: 100
+                };
                 const currentState = await graph.getState(threadConfig);
                 console.log('[AgentRunner] ✅ Graph state retrieved');
                 const { Command } = await Promise.resolve().then(() => __importStar(require('@langchain/langgraph')));

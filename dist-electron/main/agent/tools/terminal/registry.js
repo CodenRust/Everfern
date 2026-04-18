@@ -1,17 +1,45 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CommandRegistry = void 0;
 const child_process_1 = require("child_process");
-const crypto_1 = __importDefault(require("crypto"));
-const os_1 = __importDefault(require("os"));
+const os = __importStar(require("os"));
 class CommandRegistry {
     static instance;
     commands = new Map();
-    MAX_BUFFER_SIZE = 64000; // Increased for long-lived sessions
-    static PERSISTENT_ID = 'agent-terminal';
+    processes = new Map();
     constructor() { }
     static getInstance() {
         if (!CommandRegistry.instance) {
@@ -19,136 +47,54 @@ class CommandRegistry {
         }
         return CommandRegistry.instance;
     }
-    spawnCommand(commandLine, cwd, persistent = false) {
-        const id = persistent ? CommandRegistry.PERSISTENT_ID : crypto_1.default.randomUUID();
-        // If persistent and already exists, just return the ID (caller should use writeInput/command_status)
-        const existing = this.commands.get(id);
-        if (persistent && existing && existing.status === 'running') {
-            return id;
-        }
-        const isWin = os_1.default.platform() === 'win32';
-        // For Windows, try pwsh.exe first, fallback to powershell.exe, then cmd.exe
-        let shell;
-        let args;
-        if (isWin) {
-            // Try to find PowerShell Core (pwsh) first, then Windows PowerShell, then cmd
-            const possibleShells = ['pwsh.exe', 'powershell.exe', 'cmd.exe'];
-            shell = possibleShells[0]; // Start with pwsh.exe
-            // Persistent terminal starts a raw shell; one-off starts with -Command/-c
-            if (persistent) {
-                args = shell === 'cmd.exe' ? ['/k'] : ['-NoExit', '-NoLogo'];
-            }
-            else {
-                args = shell === 'cmd.exe' ? ['/c', commandLine] : ['-Command', commandLine];
-            }
-        }
-        else {
-            shell = '/bin/bash';
-            args = persistent ? ['-i'] : ['-c', commandLine];
-        }
-        let child;
-        let shellUsed = shell;
-        try {
-            child = (0, child_process_1.spawn)(shell, args, {
-                cwd,
-                shell: false,
-                env: { ...process.env, COLUMNS: '120', ROWS: '40' }
-            });
-        }
-        catch (err) {
-            // If pwsh.exe fails on Windows, try powershell.exe
-            if (isWin && shell === 'pwsh.exe' && err.code === 'ENOENT') {
-                console.log('[Terminal] pwsh.exe not found, trying powershell.exe');
-                shell = 'powershell.exe';
-                shellUsed = shell;
-                args = persistent ? ['-NoExit', '-NoLogo'] : ['-Command', commandLine];
-                try {
-                    child = (0, child_process_1.spawn)(shell, args, {
-                        cwd,
-                        shell: false,
-                        env: { ...process.env, COLUMNS: '120', ROWS: '40' }
-                    });
-                }
-                catch (err2) {
-                    // If powershell.exe also fails, try cmd.exe
-                    if (err2.code === 'ENOENT') {
-                        console.log('[Terminal] powershell.exe not found, trying cmd.exe');
-                        shell = 'cmd.exe';
-                        shellUsed = shell;
-                        args = persistent ? ['/k'] : ['/c', commandLine];
-                        child = (0, child_process_1.spawn)(shell, args, {
-                            cwd,
-                            shell: false,
-                            env: { ...process.env, COLUMNS: '120', ROWS: '40' }
-                        });
-                    }
-                    else {
-                        throw err2;
-                    }
-                }
-            }
-            else {
-                throw err;
-            }
-        }
-        const record = {
+    async execute(id, command, cwd = os.homedir()) {
+        const info = {
             id,
-            process: child,
-            outputBuffer: '',
-            commandLine: persistent ? `Persistent Shell (${shellUsed})` : commandLine,
+            command,
+            cwd,
             status: 'running',
+            output: '',
+            startTime: Date.now()
         };
-        const appendOutput = (data) => {
-            record.outputBuffer += data.toString();
-            if (record.outputBuffer.length > this.MAX_BUFFER_SIZE) {
-                record.outputBuffer = record.outputBuffer.slice(-this.MAX_BUFFER_SIZE);
-            }
-        };
-        child.stdout?.on('data', appendOutput);
-        child.stderr?.on('data', appendOutput);
-        child.on('close', (code) => {
-            record.status = 'done';
-            record.exitCode = code;
+        this.commands.set(id, info);
+        const isWin = process.platform === 'win32';
+        const shell = isWin ? 'powershell.exe' : 'bash';
+        const args = isWin ? ['-NoProfile', '-Command', command] : ['-c', command];
+        const proc = (0, child_process_1.spawn)(shell, args, { cwd, shell: false });
+        this.processes.set(id, proc);
+        info.pid = proc.pid;
+        proc.stdout?.on('data', (data) => {
+            info.output += data.toString();
         });
-        child.on('error', (err) => {
-            appendOutput(`\n[Process Error]: ${err.message}`);
-            record.status = 'done';
+        proc.stderr?.on('data', (data) => {
+            info.output += data.toString();
         });
-        this.commands.set(id, record);
-        console.log(`[Terminal] Spawned ${shellUsed} with PID ${child.pid}`);
-        return id;
-    }
-    getCommand(id) {
-        return this.commands.get(id);
+        return new Promise((resolve) => {
+            proc.on('close', (code) => {
+                info.status = code === 0 ? 'completed' : 'failed';
+                info.exitCode = code ?? -1;
+                this.processes.delete(id);
+                resolve(info);
+            });
+            proc.on('error', (err) => {
+                info.status = 'failed';
+                info.output += `\nError: ${err.message}`;
+                this.processes.delete(id);
+                resolve(info);
+            });
+        });
     }
     listCommands() {
-        return Array.from(this.commands.values()).map(record => ({
-            id: record.id,
-            commandLine: record.commandLine,
-            status: record.status,
-            exitCode: record.exitCode,
-            bufferSize: record.outputBuffer.length,
-        }));
-    }
-    writeInput(id, input) {
-        const record = this.commands.get(id);
-        if (record && record.status === 'running' && record.process.stdin) {
-            // Append the input we sent so the AI sees what it typed
-            record.outputBuffer += `\n>> ${input}\n`;
-            record.process.stdin.write(input);
-            return true;
-        }
-        return false;
+        return Array.from(this.commands.values());
     }
     terminate(id) {
-        const record = this.commands.get(id);
-        if (record && record.status === 'running') {
-            record.outputBuffer += `\n[Process Terminated]\n`;
-            try {
-                record.process.kill();
-            }
-            catch (e) { }
-            record.status = 'done';
+        const proc = this.processes.get(id);
+        if (proc) {
+            proc.kill();
+            const info = this.commands.get(id);
+            if (info)
+                info.status = 'terminated';
+            this.processes.delete(id);
             return true;
         }
         return false;

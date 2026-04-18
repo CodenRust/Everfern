@@ -40,7 +40,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ACPManager = void 0;
+exports.acpManager = exports.ACPManager = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -155,3 +155,4 @@ class ACPManager {
     }
 }
 exports.ACPManager = ACPManager;
+exports.acpManager = new ACPManager();

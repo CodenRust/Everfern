@@ -1,0 +1,295 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.registerAgentHandlers = registerAgentHandlers;
+const electron_1 = require("electron");
+const runner_1 = require("../agent/runner/runner");
+const abort_manager_1 = require("../agent/runner/abort-manager");
+const manager_1 = require("../acp/manager");
+const ai_client_1 = require("../lib/ai-client");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+const os = __importStar(require("os"));
+let agentPermissionResolver = null;
+function loadConfigSync() {
+    try {
+        const configPath = path.join(os.homedir(), '.everfern', 'config.json');
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            // Load API keys from ~/.everfern/keys/
+            config.keys = {};
+            const keysDir = path.join(os.homedir(), '.everfern', 'keys');
+            if (fs.existsSync(keysDir)) {
+                const files = fs.readdirSync(keysDir);
+                for (const file of files) {
+                    if (file.endsWith('.key')) {
+                        const baseName = file.replace('.key', '');
+                        const key = fs.readFileSync(path.join(keysDir, file), 'utf-8').trim();
+                        config.keys[baseName] = key;
+                    }
+                }
+            }
+            return config;
+        }
+    }
+    catch (err) {
+        console.error('[Config] Error loading config:', err);
+    }
+    return null;
+}
+const memory_manager_1 = require("../store/memory-manager");
+const providers_1 = require("../lib/providers");
+function registerAgentHandlers() {
+    // Provider management
+    electron_1.ipcMain.handle('acp:list-providers', () => manager_1.acpManager.listProviders());
+    electron_1.ipcMain.handle('acp:set-provider', async (_event, config) => {
+        return manager_1.acpManager.setProvider(config);
+    });
+    electron_1.ipcMain.handle('acp:health-check', async () => manager_1.acpManager.healthCheck());
+    electron_1.ipcMain.handle('acp:list-models', async () => {
+        try {
+            const config = manager_1.acpManager.getActiveConfig();
+            let providerType = config ? config.provider : 'everfern';
+            if (providerType === 'google')
+                providerType = 'gemini';
+            // 1. Get models for the active configured provider
+            const activeModels = (0, providers_1.getAllModelsFlat)().filter(m => m.providerType === providerType);
+            if (providerType === 'nvidia' && config?.customModel) {
+                if (!activeModels.find(m => m.id === config.customModel)) {
+                    activeModels.unshift({
+                        id: config.customModel,
+                        name: config.customModel + " (Custom)",
+                        provider: 'NVIDIA NIM',
+                        providerType: 'nvidia'
+                    });
+                }
+            }
+            // 2. Fetch local Ollama models dynamically
+            let ollamaModels = [];
+            try {
+                const ollamaClient = new ai_client_1.AIClient({ provider: 'ollama' });
+                const rawOllama = await ollamaClient.listModels();
+                ollamaModels = rawOllama.map((m) => ({
+                    id: m,
+                    name: m,
+                    provider: 'Ollama',
+                    providerType: 'ollama'
+                }));
+                if (rawOllama.length === 0) {
+                    ollamaModels.push({ id: 'ollama-empty', name: 'No models found in Ollama', provider: 'Ollama', providerType: 'ollama' });
+                }
+            }
+            catch {
+                ollamaModels.push({ id: 'ollama-error', name: 'Ollama is not running/installed', provider: 'Ollama', providerType: 'ollama' });
+            }
+            // 3. Fetch local LM Studio dynamically
+            let lmstudioModels = [];
+            try {
+                const lmClient = new ai_client_1.AIClient({ provider: 'lmstudio' });
+                const rawLm = await lmClient.listModels();
+                lmstudioModels = rawLm.map((m) => ({
+                    id: m,
+                    name: m,
+                    provider: 'LM Studio',
+                    providerType: 'lmstudio'
+                }));
+                if (rawLm.length === 0) {
+                    lmstudioModels.push({ id: 'lmstudio-empty', name: 'No models found in LM Studio', provider: 'LM Studio', providerType: 'lmstudio' });
+                }
+            }
+            catch {
+                lmstudioModels.push({ id: 'lmstudio-error', name: 'LM Studio is not running/installed', provider: 'LM Studio', providerType: 'lmstudio' });
+            }
+            // Deduplicate and combine
+            const merged = [...activeModels];
+            for (const om of [...ollamaModels, ...lmstudioModels]) {
+                if (!merged.find(m => m.id === om.id))
+                    merged.push(om);
+            }
+            if (merged.length === 0) {
+                merged.push({ id: 'everfern-1', name: 'Fern-1', provider: 'EverFern Cloud', providerType: 'everfern' });
+            }
+            return { success: true, models: merged };
+        }
+        catch (error) {
+            console.error('[acp:list-models] Error:', error);
+            return { success: false, models: [], error: String(error) };
+        }
+    });
+    // Stop/Abort
+    electron_1.ipcMain.handle('acp:stop', () => {
+        abort_manager_1.globalAbortManager.setAborted();
+        return { success: true };
+    });
+    electron_1.ipcMain.handle('agent:permission-response', (_event, granted) => {
+        if (agentPermissionResolver) {
+            agentPermissionResolver(granted);
+            agentPermissionResolver = null;
+        }
+    });
+    // ACP Chat Handler (Non-streaming)
+    electron_1.ipcMain.handle('acp:chat', async (_event, request) => {
+        let client = manager_1.acpManager.getClient();
+        const config = loadConfigSync();
+        if (request.providerType) {
+            const currentProvider = manager_1.acpManager.getActiveConfig()?.provider;
+            if (request.providerType !== currentProvider || !client) {
+                const apiKey = config?.keys?.[request.providerType] || '';
+                client = new ai_client_1.AIClient({
+                    provider: request.providerType,
+                    model: request.model,
+                    apiKey,
+                });
+            }
+            else if (request.model) {
+                client.setModel(request.model);
+            }
+        }
+        if (!client)
+            return { error: 'No AI provider configured' };
+        try {
+            const response = await client.chat({
+                messages: request.messages,
+                model: request.model,
+            });
+            return { success: true, response };
+        }
+        catch (error) {
+            return { success: false, error: String(error) };
+        }
+    });
+    // Main Streaming Handler
+    electron_1.ipcMain.handle('acp:stream', async (event, request) => {
+        const streamSender = event.sender;
+        const config = loadConfigSync();
+        let client = manager_1.acpManager.getClient();
+        // Dynamic provider switch
+        if (request.providerType) {
+            const currentProvider = manager_1.acpManager.getActiveConfig()?.provider;
+            if (request.providerType !== currentProvider || !client) {
+                const apiKey = config?.keys?.[request.providerType] || request.apiKey || '';
+                client = new ai_client_1.AIClient({
+                    provider: request.providerType,
+                    model: request.model,
+                    apiKey,
+                });
+            }
+            else if (request.model) {
+                client.setModel(request.model);
+            }
+        }
+        if (!client)
+            throw new Error('No AI provider configured');
+        const runner = new runner_1.AgentRunner(client);
+        // IPC Batching State
+        let chunkBuffer = '';
+        let thoughtBuffer = '';
+        let lastFlushTime = Date.now();
+        const FLUSH_INTERVAL_MS = 16;
+        const flushBuffers = () => {
+            if (chunkBuffer) {
+                try {
+                    streamSender.send('acp:stream-chunk', { delta: chunkBuffer, done: false });
+                }
+                catch (e) { }
+                chunkBuffer = '';
+            }
+            if (thoughtBuffer) {
+                try {
+                    streamSender.send('acp:thought', { content: thoughtBuffer });
+                }
+                catch (e) { }
+                thoughtBuffer = '';
+            }
+            lastFlushTime = Date.now();
+        };
+        const safeSend = (channel, data) => {
+            flushBuffers();
+            try {
+                const safeData = JSON.parse(JSON.stringify(data, (key, value) => {
+                    if (value instanceof Error)
+                        return { message: value.message, stack: value.stack };
+                    return value;
+                }));
+                streamSender.send(channel, safeData);
+            }
+            catch (err) {
+                console.error(`[IPC] Serialization failed for ${channel}:`, err);
+            }
+        };
+        try {
+            const history = request.messages.slice(0, -1);
+            const userInput = request.messages[request.messages.length - 1].content;
+            let fullResponse = '';
+            for await (const streamEvent of runner.runStream(userInput, history, request.model, request.conversationId)) {
+                if (abort_manager_1.globalAbortManager.streamAborted) {
+                    flushBuffers();
+                    streamSender.send('acp:stream-chunk', { delta: '\n\n🛑 Stopped by user.', done: true });
+                    break;
+                }
+                if (streamEvent.type === 'chunk') {
+                    chunkBuffer += streamEvent.content;
+                    fullResponse += streamEvent.content;
+                    if (Date.now() - lastFlushTime >= FLUSH_INTERVAL_MS)
+                        flushBuffers();
+                }
+                else if (streamEvent.type === 'thought') {
+                    thoughtBuffer += streamEvent.content;
+                    if (Date.now() - lastFlushTime >= FLUSH_INTERVAL_MS)
+                        flushBuffers();
+                }
+                else if (streamEvent.type === 'tool_start') {
+                    safeSend('acp:tool-start', { toolName: streamEvent.toolName, toolArgs: streamEvent.toolArgs });
+                }
+                else if (streamEvent.type === 'tool_call') {
+                    safeSend('acp:tool-call', streamEvent.toolCall);
+                }
+                else if (streamEvent.type === 'done') {
+                    flushBuffers();
+                    safeSend('acp:stream-chunk', { delta: '', done: true });
+                    // Self-Improvement: Trigger non-blocking memory reflection
+                    (0, memory_manager_1.reflectAndRemember)(history, userInput, fullResponse, client);
+                }
+                else {
+                    safeSend(`acp:${streamEvent.type}`, streamEvent);
+                }
+            }
+        }
+        catch (error) {
+            console.error('[AgentIPC] Stream Error:', error);
+            streamSender.send('acp:stream-chunk', { delta: `\n\n[Error: ${String(error)}]`, done: true });
+        }
+    });
+}

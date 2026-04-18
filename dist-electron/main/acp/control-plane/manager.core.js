@@ -11,11 +11,30 @@ const manager_runtime_controls_1 = require("./manager.runtime-controls");
 class SessionManager {
     sessions = new Map();
     cache = new Map();
-    prepareTurnMutexes = new Map();
+    sessionLocks = new Map();
+    async runWithLock(sessionId, fn) {
+        const currentLock = this.sessionLocks.get(sessionId) || Promise.resolve();
+        let release;
+        const nextLock = new Promise((resolve) => { release = resolve; });
+        // Chain the lock to ensure operations are processed sequentially for the session
+        const lockPromise = currentLock.then(() => nextLock, () => nextLock);
+        this.sessionLocks.set(sessionId, lockPromise);
+        try {
+            await currentLock;
+            return await fn();
+        }
+        finally {
+            release();
+            // Cleanup the lock from the map only if no other operations have queued up behind us
+            if (this.sessionLocks.get(sessionId) === lockPromise) {
+                this.sessionLocks.delete(sessionId);
+            }
+        }
+    }
     createSession(params) {
         const existing = this.sessions.get(params.sessionId);
         if (existing && existing.status !== 'completed' && existing.status !== 'killed' && existing.status !== 'archived') {
-            console.warn(`[ACP/SessionManager] Warning: createSession overwriting active session ${params.sessionId}`);
+            throw new Error(`[ACP/SessionManager] Cannot overwrite active session: ${params.sessionId}`);
         }
         const now = Date.now();
         const meta = {
@@ -86,56 +105,38 @@ class SessionManager {
      * and applying config/mode before throwing work at the agent.
      */
     async prepareTurn(sessionId) {
-        const record = this.sessions.get(sessionId);
-        if (!record)
-            return false;
-        // Check if preparation is already in progress for this session
-        const existingMutex = this.prepareTurnMutexes.get(sessionId);
-        if (existingMutex) {
-            // Wait for existing preparation to complete and return its result
-            await existingMutex;
-            return true; // Assume success if no exception was thrown
-        }
-        // Create new mutex for this session
-        let releaseMutex;
-        let rejectMutex;
-        const mutexPromise = new Promise((resolve, reject) => {
-            releaseMutex = resolve;
-            rejectMutex = reject;
+        return this.runWithLock(sessionId, async () => {
+            const record = this.sessions.get(sessionId);
+            if (!record)
+                return false;
+            try {
+                // 1. Reconcile identity (async but non-blocking for other sessions)
+                const identityPromise = (0, manager_identity_reconcile_1.reconcileManagerRuntimeSessionIdentifiers)({
+                    sessionKey: sessionId,
+                    handle: { agentSessionId: record.meta.identity?.agentSessionId },
+                    meta: record.meta,
+                });
+                // 2. Get cached signature while identity reconciliation is running
+                const cached = this.cache.get(sessionId) ?? {};
+                // Wait for identity reconciliation to complete
+                const { meta: newMeta } = await identityPromise;
+                record.meta = newMeta;
+                // 3. Apply runtime controls (only if signature changed)
+                const newSignature = await (0, manager_runtime_controls_1.applyManagerRuntimeControls)({
+                    sessionKey: sessionId,
+                    handle: { agentSessionId: newMeta.identity?.agentSessionId },
+                    meta: newMeta,
+                    cachedSignature: cached.signature,
+                });
+                this.cache.set(sessionId, { signature: newSignature });
+                // Check loop failure and circuit break limits if we had them here...
+                return true;
+            }
+            catch (e) {
+                console.error(`[ACP/SessionManager] Turn preparation failed for ${sessionId}:`, e);
+                throw e;
+            }
         });
-        this.prepareTurnMutexes.set(sessionId, mutexPromise);
-        try {
-            // 1. Reconcile identity (async but non-blocking for other sessions)
-            const identityPromise = (0, manager_identity_reconcile_1.reconcileManagerRuntimeSessionIdentifiers)({
-                sessionKey: sessionId,
-                handle: { agentSessionId: record.meta.identity?.agentSessionId },
-                meta: record.meta,
-            });
-            // 2. Get cached signature while identity reconciliation is running
-            const cached = this.cache.get(sessionId) ?? {};
-            // Wait for identity reconciliation to complete
-            const { meta: newMeta } = await identityPromise;
-            record.meta = newMeta;
-            // 3. Apply runtime controls (only if signature changed)
-            const newSignature = await (0, manager_runtime_controls_1.applyManagerRuntimeControls)({
-                sessionKey: sessionId,
-                handle: { agentSessionId: newMeta.identity?.agentSessionId },
-                meta: newMeta,
-                cachedSignature: cached.signature,
-            });
-            this.cache.set(sessionId, { signature: newSignature });
-            // Check loop failure and circuit break limits if we had them here...
-            releaseMutex();
-            return true;
-        }
-        catch (e) {
-            console.error(`[ACP/SessionManager] Turn preparation failed for ${sessionId}:`, e);
-            rejectMutex(e);
-            return false;
-        }
-        finally {
-            this.prepareTurnMutexes.delete(sessionId);
-        }
     }
 }
 exports.SessionManager = SessionManager;

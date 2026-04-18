@@ -192,11 +192,13 @@ class SystemTrayManager {
      */
     isSupported() {
         try {
-            return electron_1.Tray.isSupported?.() || false;
+            const supported = electron_1.Tray.isSupported?.() ?? true; // Electron Tray usually supported on main platforms
+            console.log(`[SystemTray] Support check: ${supported} (Platform: ${process.platform})`);
+            return supported;
         }
         catch (error) {
-            // Tray not available (e.g., in test environment)
-            return false;
+            console.warn('[SystemTray] Support check failed, assuming supported:', error);
+            return true;
         }
     }
     /**
@@ -211,6 +213,11 @@ class SystemTrayManager {
      */
     getTrayIconPath() {
         const isDev = !electron_1.app.isPackaged;
+        // In production, extraResources (like 'public') are in process.resourcesPath
+        // In dev, they're in the project root
+        const baseDir = isDev
+            ? path.join(__dirname, '../../')
+            : process.resourcesPath;
         // Platform-specific icon selection
         let iconName;
         switch (process.platform) {
@@ -228,14 +235,11 @@ class SystemTrayManager {
                 iconName = 'everfern-rounded.png';
         }
         // Try tray-specific icon first, fall back to general logo
-        const trayIconPath = isDev
-            ? path.join(__dirname, '../../public/images/logos/tray-icon.png')
-            : path.join(electron_1.app.getAppPath(), 'public/images/logos/tray-icon.png');
-        const fallbackIconPath = isDev
-            ? path.join(__dirname, `../../public/images/logos/${iconName}`)
-            : path.join(electron_1.app.getAppPath(), `public/images/logos/${iconName}`);
+        const trayIconPath = path.join(baseDir, 'public/images/logos/tray-icon.png');
+        const fallbackIconPath = path.join(baseDir, `public/images/logos/${iconName}`);
         // Use tray-specific icon if it exists, otherwise use fallback
         if (fs.existsSync(trayIconPath)) {
+            console.log(`[SystemTray] Using tray icon: ${trayIconPath}`);
             return trayIconPath;
         }
         else if (fs.existsSync(fallbackIconPath)) {

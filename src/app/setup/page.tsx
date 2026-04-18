@@ -717,6 +717,7 @@ export default function SetupPage() {
                                             { id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
                                             { id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
                                             { id: "gemini", name: "Google Gemini", logo: GeminiLogo },
+                                            { id: "ollama-cloud", name: "Ollama Cloud", logo: OllamaLogo },
                                             { id: "nvidia", name: "Nvidia NIM", logo: NvidiaLogo },
                                             { id: "openrouter", name: "OpenRouter", logo: OpenRouterLogo }
                                         ].map(p => (

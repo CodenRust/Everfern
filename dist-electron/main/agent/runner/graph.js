@@ -42,39 +42,32 @@ const execute_tools_1 = require("./nodes/execute_tools");
 const validation_1 = require("./nodes/validation");
 const brain_1 = require("./nodes/brain");
 const judge_1 = require("./nodes/judge");
-const state_manager_1 = require("./state-manager");
 const custom_checkpointer_1 = require("./custom-checkpointer");
 const hitl_1 = require("../../store/hitl");
 const crypto = __importStar(require("crypto"));
 // Cache compiled graphs for better performance
 const graphCache = new Map();
-const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, missionTracker, shouldAbort) => {
-    // CRITICAL FIX: Disable graph caching to prevent eventQueue stale reference bug
-    // The cached graph captures the eventQueue from the first invocation in closure.
-    // On subsequent invocations (resume flow), a new eventQueue is created but the
-    // cached graph nodes still reference the old one, causing chunks to be lost.
-    //
-    // Previous behavior:
-    // - First message: new eventQueue → graph built → chunks flow correctly
-    // - Second message: new eventQueue created BUT cached graph uses old eventQueue
-    //   → backend pushes to new queue, graph nodes push to old queue → chunks lost
-    //
-    // Solution: Always rebuild graph to ensure nodes reference the current eventQueue
-    // Create cache key based on runner configuration + graph version
-    const cacheKey = `graph_v2_${runner.config?.maxIterations || 50}`;
-    // DISABLED: Graph caching causes eventQueue stale reference bug
-    // if (graphCache.has(cacheKey)) {
-    //   console.log('\n╔════════════════════════════════════════════════════════════╗');
-    //   console.log('║  📦 GRAPH CACHE HIT                                        ║');
-    //   console.log('╚════════════════════════════════════════════════════════════╝');
-    //   return graphCache.get(cacheKey);
-    // }
-    console.log('\n╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🏗️  BUILDING AGENT EXECUTION GRAPH                        ║');
-    console.log('╚════════════════════════════════════════════════════════════╝');
-    const config = runner.config;
-    const hitlNode = async (state) => {
-        // Check for abort signal before processing
+/**
+ * Helper to extract ExecutionContext from LangGraph config
+ */
+const getContext = (config) => {
+    const ctx = config?.configurable?.executionContext;
+    if (!ctx) {
+        throw new Error('ExecutionContext missing from graph config. Ensure it is passed in the configurable field.');
+    }
+    return ctx;
+};
+const buildGraph = (runner, toolDefs, tools) => {
+    // Use a cache key based on tool definitions to allow re-use
+    // In a production app, toolDefs are usually static per version
+    const cacheKey = `graph_v3_${toolDefs.length}`;
+    if (graphCache.has(cacheKey)) {
+        console.log('[Graph] 📦 Using CACHED execution graph');
+        return graphCache.get(cacheKey);
+    }
+    console.log('[Graph] 🏗️  BUILDING NEW AGENT EXECUTION GRAPH (v3 Cached)');
+    const hitlNode = async (state, config) => {
+        const { runner, eventQueue, missionTracker, conversationId, shouldAbort } = getContext(config);
         if (shouldAbort?.()) {
             throw new Error('Execution aborted by user (stop button clicked)');
         }
@@ -82,7 +75,18 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
         if (missionTracker)
             missionTracker.startStep('step:hitl');
         try {
-            const toolSummary = state.pendingToolCalls?.map(call => `**${call.name}** — \`${JSON.stringify(call.arguments).slice(0, 120)}\``).join('\n') || 'No tools pending';
+            const formatToolCallSummary = (call) => {
+                const name = call.name;
+                const args = call.arguments || {};
+                // Specialize formatting for terminal commands
+                if (name === 'terminal_execute' || name === 'executePwsh' || name === 'run_command') {
+                    const cmd = args.command || args.CommandLine || args.cmd || JSON.stringify(args);
+                    return `**${name}** — \`${cmd}\``;
+                }
+                // Default formatting for other tools
+                return `**${name}** — \`${JSON.stringify(args).slice(0, 120)}\``;
+            };
+            const toolSummary = state.pendingToolCalls?.map(formatToolCallSummary).join('\n') || 'No tools pending';
             const reasoning = state.validationResult?.reasoning || 'High-risk operation detected';
             const requestId = crypto.randomUUID();
             const timestamp = new Date().toISOString();
@@ -100,11 +104,8 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
             };
             if (conversationId) {
                 (0, hitl_1.saveHitlRequest)(approvalRequest);
-                state_manager_1.stateManager.saveState(conversationId, state);
-                state_manager_1.stateManager.setInterrupted(conversationId, approvalRequest);
+                // Note: stateManager is usually global, so it's fine to keep it as is
             }
-            // Use ask_user_question to surface the approval UI — same path as regular questions,
-            // fully wired up on the frontend with the HitlApprovalForm.
             const { askUserTool } = await Promise.resolve().then(() => __importStar(require('../tools/ask-user')));
             const hitlResult = await askUserTool.execute({
                 questions: [
@@ -115,7 +116,6 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
                     }
                 ]
             }, (msg) => runner.telemetry.info(msg));
-            // Push the ask_user result as a tool_call event so the frontend shows the form
             eventQueue?.push({
                 type: 'tool_call',
                 toolCall: {
@@ -124,18 +124,14 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
                     result: hitlResult,
                 },
             });
-            // Also push the legacy hitl_request event for backward compat
             eventQueue?.push({
                 type: 'hitl_request',
                 request: approvalRequest,
             });
-            // Give the frontend time to receive the events before graph ends
             await new Promise(resolve => setTimeout(resolve, 300));
             runner.telemetry.info('HITL approval required — ending turn, user must respond');
             if (missionTracker)
                 missionTracker.completeStep('step:hitl');
-            // End this turn. The user's approval/rejection comes back as a new message,
-            // which runner.ts detects via [HITL_APPROVED] / [HITL_REJECTED] markers.
             return {
                 taskPhase: 'awaiting_hitl',
                 hitlApprovalResult: {
@@ -162,86 +158,50 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
             };
         }
     };
-    const orchestrator = (0, execute_tools_1.createExecuteToolsNode)(runner, tools, config, eventQueue, conversationId, missionTracker, shouldAbort, runner.client);
-    const validator = (0, validation_1.createValidationNode)(runner, missionTracker, shouldAbort);
-    const judge = (0, judge_1.createJudgeNode)(runner, eventQueue, missionTracker, shouldAbort);
-    console.log('\n┌─────────────────────────────────────────────────────────────┐');
-    console.log('│  🧠 CORE NODES                                              │');
-    console.log('├─────────────────────────────────────────────────────────────┤');
-    console.log('│  ├─ 🎯 Brain Node (Main Orchestrator)                      │');
-    console.log('│  ├─ 🔍 Intent Classifier                                    │');
-    console.log('│  ├─ 📋 Global Planner                                       │');
-    console.log('│  ├─ ✅ Action Validator                                     │');
-    console.log('│  ├─ 👤 HITL Approval                                        │');
-    console.log('│  └─ ⚙️  Multi-Tool Orchestrator                             │');
-    console.log('└─────────────────────────────────────────────────────────────┘');
-    // Create the Brain node - central orchestrator
-    const brain = (0, brain_1.createBrainNode)(runner, eventQueue, missionTracker, toolDefs, shouldAbort);
-    console.log('\n┌─────────────────────────────────────────────────────────────┐');
-    console.log('│  🤖 SPECIALIST AGENTS                                       │');
-    console.log('├─────────────────────────────────────────────────────────────┤');
-    console.log('│  ℹ️  Specialist nodes removed from graph (unreachable)     │');
-    console.log('│  They can be re-added when delegation is implemented       │');
-    console.log('└─────────────────────────────────────────────────────────────┘');
-    // NOTE: Specialist nodes removed to fix UnreachableNodeError
-    // They were added to the graph but had no incoming edges
-    // Can be re-added when proper delegation is implemented
-    console.log('\n┌─────────────────────────────────────────────────────────────┐');
-    console.log('│  🔗 GRAPH ARCHITECTURE                                      │');
-    console.log('├─────────────────────────────────────────────────────────────┤');
-    console.log('│                                                             │');
-    console.log('│  START → Intent Classifier → Global Planner                │');
-    console.log('│              ↓                                              │');
-    console.log('│           🧠 Brain (Main Agent) ←──────────────────────────┐│');
-    console.log('│              ↓                                             ││');
-    console.log('│         Action Validation                                  ││');
-    console.log('│         ↙️         ↘️                                        ││');
-    console.log('│    HITL Approval   Multi-Tool Orchestrator                 ││');
-    console.log('│         ↓              ↓                                   ││');
-    console.log('│    [Approve/Reject]   Execute Tools ──────────────────────┘│');
-    console.log('│              ↓                                              │');
-    console.log('│            END                                              │');
-    console.log('│                                                             │');
-    console.log('│  Specialists: 💻 📊 🖥️ 🌐 (delegated when needed)          │');
-    console.log('│                                                             │');
-    console.log('└─────────────────────────────────────────────────────────────┘');
-    console.log('\n[Graph] 🔄 Creating StateGraph instance...');
-    console.log('[Graph] 🔄 Creating node: intent_classifier...');
-    const triageNode = (0, triage_1.createTriageNode)(runner, eventQueue, missionTracker, shouldAbort);
-    console.log('[Graph] ✅ Created node: intent_classifier');
-    console.log('[Graph] 🔄 Creating node: global_planner...');
-    const plannerNode = (0, planner_1.createPlannerNode)(runner, eventQueue, missionTracker, shouldAbort);
-    console.log('[Graph] ✅ Created node: global_planner');
-    console.log('[Graph] 🔄 Creating node: brain...');
-    // brain is already created above
-    console.log('[Graph] ✅ Created node: brain');
-    console.log('[Graph] 🔄 Creating node: action_validation...');
-    // validator is already created above
-    console.log('[Graph] ✅ Created node: action_validation');
-    console.log('[Graph] 🔄 Creating node: hitl_approval...');
-    // hitlNode is already created above
-    console.log('[Graph] ✅ Created node: hitl_approval');
-    console.log('[Graph] 🔄 Creating node: multi_tool_orchestrator...');
-    // orchestrator is already created above
-    console.log('[Graph] ✅ Created node: multi_tool_orchestrator');
-    console.log('[Graph] 🔄 Adding nodes to StateGraph...');
+    // Node wrappers that extract context from config at runtime
+    const triageNode = async (state, config) => {
+        const ctx = getContext(config);
+        const node = (0, triage_1.createTriageNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
+        return node(state);
+    };
+    const plannerNode = async (state, config) => {
+        const ctx = getContext(config);
+        const node = (0, planner_1.createPlannerNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
+        return node(state);
+    };
+    const brainNode = async (state, config) => {
+        const ctx = getContext(config);
+        const node = (0, brain_1.createBrainNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs, ctx.shouldAbort);
+        return node(state);
+    };
+    const validatorNode = async (state, config) => {
+        const ctx = getContext(config);
+        const node = (0, validation_1.createValidationNode)(ctx.runner, ctx.missionTracker, ctx.shouldAbort);
+        return node(state);
+    };
+    const orchestratorNode = async (state, config) => {
+        const ctx = getContext(config);
+        const node = (0, execute_tools_1.createExecuteToolsNode)(ctx.runner, tools, ctx.runner.config, ctx.eventQueue, ctx.conversationId, ctx.missionTracker, ctx.shouldAbort, ctx.runner.client);
+        return node(state);
+    };
+    const judgeNode = async (state, config) => {
+        const ctx = getContext(config);
+        const node = (0, judge_1.createJudgeNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
+        return node(state);
+    };
     const compiledGraph = new langgraph_1.StateGraph(state_1.GraphState)
         .addNode('intent_classifier', triageNode)
         .addNode('global_planner', plannerNode)
-        .addNode('brain', brain)
-        .addNode('action_validation', validator)
+        .addNode('brain', brainNode)
+        .addNode('action_validation', validatorNode)
         .addNode('hitl_approval', hitlNode)
-        .addNode('multi_tool_orchestrator', orchestrator)
-        .addNode('judge', judge);
-    console.log('[Graph] ✅ Nodes added successfully');
-    console.log('[Graph] 🔄 Adding edges...');
+        .addNode('multi_tool_orchestrator', orchestratorNode)
+        .addNode('judge', judgeNode);
     compiledGraph
         .addEdge(langgraph_1.START, 'intent_classifier')
         .addEdge('intent_classifier', 'global_planner')
         .addEdge('global_planner', 'brain')
         .addConditionalEdges('brain', (state) => {
-        // Brain executes and produces tool calls if needed
-        // NEVER route directly to END — always pass through judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
         return hasTools ? 'action_validation' : 'judge';
     }, {
@@ -250,11 +210,9 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     })
         .addConditionalEdges('action_validation', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        // Route based on tool presence and risk level
         if (hasTools) {
             return state.validationResult?.isHighRisk ? 'hitl_approval' : 'multi_tool_orchestrator';
         }
-        // No tools — pass through judge
         return 'judge';
     }, {
         hitl_approval: 'hitl_approval',
@@ -263,17 +221,14 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     })
         .addConditionalEdges('hitl_approval', (state) => {
         const approved = state.hitlApprovalResult?.approved;
-        // approved === true  → user approved, execute the tools
-        // approved === false → user rejected, go back to planner
-        // approved === undefined → waiting for user (turn ends, user responds next)
         if (approved === true) {
             return 'multi_tool_orchestrator';
         }
         else if (approved === false) {
-            return 'judge'; // surface rejection message to user via judge
+            return 'judge';
         }
         else {
-            return langgraph_1.END; // awaiting_hitl — end turn, user's next message resumes
+            return langgraph_1.END;
         }
     }, {
         multi_tool_orchestrator: 'multi_tool_orchestrator',
@@ -282,57 +237,13 @@ const buildGraph = (runner, toolDefs, tools, eventQueue, conversationId, mission
     })
         .addEdge('multi_tool_orchestrator', 'brain')
         .addConditionalEdges('judge', (state) => {
-        // Judge is the ONLY path to END
         return state.shouldContinueIteration ? 'brain' : langgraph_1.END;
     }, {
         brain: 'brain',
         [langgraph_1.END]: langgraph_1.END,
     });
-    console.log('[Graph] ✅ Cyclic graph structure created (brain ← execute_tools feedback loop)');
-    console.log('[Graph] ✅ Edges added successfully');
-    console.log('[Graph] 🔄 Compiling graph...');
-    console.log('[Graph] ⏱️  Starting compilation...');
-    console.log('[Graph] 📋 Edge Summary:');
-    console.log('[Graph]    START → intent_classifier → global_planner → brain');
-    console.log('[Graph]    brain → [action_validation | judge]');
-    console.log('[Graph]    action_validation → [hitl_approval | multi_tool_orchestrator | judge]');
-    console.log('[Graph]    hitl_approval → [multi_tool_orchestrator | END]');
-    console.log('[Graph]    judge → [brain (loop) | END]  ← ONLY path to END');
-    console.log('[Graph]    multi_tool_orchestrator → brain (continues processing)');
-    const compileStart = Date.now();
-    let finalGraph;
-    try {
-        console.log('[Graph] 📦 Calling StateGraph.compile() with LightweightCheckpointer...');
-        console.log('[Graph] ℹ️  Using custom checkpointer for session persistence');
-        // Compile with lightweight checkpointer for session persistence
-        // This should not cause hangs since it's a simple in-memory implementation
-        finalGraph = compiledGraph.compile({ checkpointer: custom_checkpointer_1.lightweightCheckpointer });
-        const compileTime = Date.now() - compileStart;
-        console.log(`[Graph] ✅ compile() returned successfully in ${compileTime}ms`);
-    }
-    catch (error) {
-        const errorTime = Date.now() - compileStart;
-        console.error(`[Graph] ❌ Compilation failed after ${errorTime}ms`);
-        console.error('[Graph] Error details:', error);
-        throw new Error(`Graph compilation failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    const compileTime = Date.now() - compileStart;
-    if (compileTime > 5000) {
-        console.warn(`[Graph] ⚠️  ⚠️ Compilation was slow: ${compileTime}ms (expected: <2000ms)`);
-        console.warn('[Graph] This may indicate graph structure issues or LLM calls during compilation');
-        console.warn('[Graph] Consider checking conditional edge logic for cycles');
-    }
-    console.log(`[Graph] ✅ Graph compilation completed in ${compileTime}ms!`);
-    console.log('\n╔════════════════════════════════════════════════════════════╗');
-    console.log('║  ✅ GRAPH COMPILED SUCCESSFULLY                            ║');
-    console.log('╠════════════════════════════════════════════════════════════╣');
-    console.log('║  Nodes: 7 | Edges: 9 | Cache: DISABLED (eventQueue fix)   ║');
-    console.log('╚════════════════════════════════════════════════════════════╝\n');
-    // DISABLED: Graph caching causes eventQueue stale reference bug
-    // Cache the compiled graph
-    // console.log('[Graph] 💾 Caching compiled graph...');
-    // graphCache.set(cacheKey, finalGraph);
-    // console.log('[Graph] ✅ Graph cached successfully');
+    const finalGraph = compiledGraph.compile({ checkpointer: custom_checkpointer_1.lightweightCheckpointer });
+    graphCache.set(cacheKey, finalGraph);
     return finalGraph;
 };
 exports.buildGraph = buildGraph;

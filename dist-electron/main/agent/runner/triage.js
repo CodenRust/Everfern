@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.classifyIntentFast = classifyIntentFast;
 exports.classifyIntentAI = classifyIntentAI;
 exports.classifyIntentFallback = classifyIntentFallback;
 exports.classifyIntent = classifyIntent;
@@ -305,6 +306,14 @@ function classifyIntentFast(userInput, history) {
     if (normalized.length < 8) {
         return { intent: 'conversation', confidence: 0.8, reasoning: 'Fast: very short input' };
     }
+    // GUI automation - application launch pattern (higher confidence)
+    if (/\b(open|launch|start)\s+(spotify|discord|chrome|firefox|notepad|calculator|word|excel|powerpoint|slack|teams|zoom|vscode|terminal|cmd|powershell)\b/i.test(normalized)) {
+        return { intent: 'automate', confidence: 0.9, reasoning: 'Fast: Application launch pattern' };
+    }
+    // GUI automation - general keywords
+    if (/\b(open|click|type|launch|start|press|scroll|drag|move cursor|mouse|keyboard|gui|window|desktop|screen)\b/i.test(normalized)) {
+        return { intent: 'automate', confidence: 0.85, reasoning: 'Fast: GUI automation keywords' };
+    }
     // Strong fix/debug signals
     if (/\b(fix|debug|error|bug|crash|broken|not working|doesn't work|failing)\b/.test(normalized)) {
         return { intent: 'fix', confidence: 0.85, reasoning: 'Fast: fix/debug keywords' };
@@ -461,6 +470,22 @@ function classifyIntentFallback(userInput, history = []) {
             intent: 'analyze',
             confidence: 0.7,
             reasoning: 'Fallback: File attachment detected in recent context'
+        };
+    }
+    // GUI automation - application launch pattern (higher confidence)
+    if (/\b(open|launch|start)\s+(spotify|discord|chrome|firefox|notepad|calculator|word|excel|powerpoint|slack|teams|zoom|vscode|terminal|cmd|powershell)\b/i.test(normalized)) {
+        return {
+            intent: 'automate',
+            confidence: 0.75,
+            reasoning: 'Fallback: Application launch pattern detected'
+        };
+    }
+    // GUI automation - general keywords
+    if (/\b(open|click|type|launch|start|press|scroll|drag|move cursor|mouse|keyboard|gui|window|desktop|screen)\b/i.test(normalized)) {
+        return {
+            intent: 'automate',
+            confidence: 0.7,
+            reasoning: 'Fallback: GUI automation keywords detected'
         };
     }
     // Question patterns

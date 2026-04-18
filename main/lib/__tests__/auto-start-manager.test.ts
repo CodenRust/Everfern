@@ -12,7 +12,9 @@ import { AutoStartManager } from '../auto-start-manager';
 // Mock electron
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn(() => '/mock/path/to/everfern.exe')
+    getPath: vi.fn(() => '/mock/path/to/everfern.exe'),
+    setLoginItemSettings: vi.fn(),
+    getLoginItemSettings: vi.fn(() => ({ openAtLogin: false }))
   }
 }));
 
@@ -61,14 +63,14 @@ describe('AutoStartManager', () => {
       autoStartManager = new AutoStartManager('win32');
       const info = autoStartManager.getPlatformInfo();
       expect(info.platform).toBe('Windows');
-      expect(info.method).toContain('Registry');
+      expect(info.method).toContain('app.setLoginItemSettings');
     });
 
     it('should detect macOS platform', () => {
       autoStartManager = new AutoStartManager('darwin');
       const info = autoStartManager.getPlatformInfo();
       expect(info.platform).toBe('macOS');
-      expect(info.method).toContain('LaunchAgent');
+      expect(info.method).toContain('app.setLoginItemSettings');
     });
 
     it('should detect Linux platform', () => {
@@ -135,39 +137,19 @@ describe('AutoStartManager', () => {
     });
 
     it('should check if auto-start is enabled on macOS', async () => {
-      mockFs.existsSync.mockReturnValue(true);
+      vi.mocked(app.getLoginItemSettings).mockReturnValue({ openAtLogin: true } as any);
       const isEnabled = await autoStartManager.isEnabled();
       expect(isEnabled).toBe(true);
-      expect(mockFs.existsSync).toHaveBeenCalledWith(path.join('/home/user', 'Library', 'LaunchAgents', 'com.everfern.desktop.plist'));
+      expect(app.getLoginItemSettings).toHaveBeenCalled();
     });
 
     it('should enable auto-start on macOS', async () => {
-      mockFs.existsSync.mockReturnValue(false);
-
       await autoStartManager.enable();
-
-      expect(mockFs.mkdirSync).toHaveBeenCalledWith(path.join('/home/user', 'Library', 'LaunchAgents'), { recursive: true });
-      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        path.join('/home/user', 'Library', 'LaunchAgents', 'com.everfern.desktop.plist'),
-        expect.stringContaining('<?xml version="1.0"'),
-        'utf8'
-      );
-    });
-
-    it('should generate correct plist content', async () => {
-      await autoStartManager.enable();
-
-      const writeCall = mockFs.writeFileSync.mock.calls.find(call =>
-        call[0].toString().includes('com.everfern.desktop.plist')
-      );
-
-      expect(writeCall).toBeDefined();
-      const content = writeCall![1] as string;
-      expect(content).toContain('<?xml version="1.0"');
-      expect(content).toContain('<key>Label</key>');
-      expect(content).toContain('<string>com.everfern.desktop</string>');
-      expect(content).toContain('<string>/mock/path/to/everfern.exe</string>');
-      expect(content).toContain('<string>--auto-start</string>');
+      expect(app.setLoginItemSettings).toHaveBeenCalledWith({
+        openAtLogin: true,
+        path: '/mock/path/to/everfern.exe',
+        args: ['--auto-start']
+      });
     });
   });
 
@@ -176,19 +158,29 @@ describe('AutoStartManager', () => {
       autoStartManager = new AutoStartManager('win32');
     });
 
-    it('should validate platform support for Windows with winreg installed', async () => {
-      autoStartManager = new AutoStartManager('win32');
+    it('should validate platform support for Windows', async () => {
       const validation = await autoStartManager.validatePlatformSupport();
       expect(validation.supported).toBe(true);
     });
 
-    it('should handle Windows registry operations when winreg is available', async () => {
-      // This test would require winreg to be installed, so we'll just test the validation
-      autoStartManager = new AutoStartManager('win32');
-
-      // Test that it attempts to use winreg (will fail without the package)
+    it('should handle Windows auto-start operations using Electron API', async () => {
+      vi.mocked(app.getLoginItemSettings).mockReturnValue({ openAtLogin: true } as any);
       const isEnabled = await autoStartManager.isEnabled();
-      expect(isEnabled).toBe(false); // Should return false when winreg is not available
+      expect(isEnabled).toBe(true);
+      
+      await autoStartManager.enable();
+      expect(app.setLoginItemSettings).toHaveBeenCalledWith({
+        openAtLogin: true,
+        path: '/mock/path/to/everfern.exe',
+        args: ['--auto-start']
+      });
+
+      await autoStartManager.disable();
+      expect(app.setLoginItemSettings).toHaveBeenCalledWith({
+        openAtLogin: false,
+        path: '/mock/path/to/everfern.exe',
+        args: ['--auto-start']
+      });
     });
   });
 

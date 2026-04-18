@@ -134,3 +134,5 @@ export class ACPManager {
     return this.client;
   }
 }
+
+export const acpManager = new ACPManager();

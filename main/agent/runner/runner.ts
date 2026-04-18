@@ -32,9 +32,6 @@ import { memorySaveTool } from '../tools/memory-save';
 import { memorySearchTool } from '../tools/memory-search';
 import { webSearchTool } from '../tools/web-search';
 import { webFetchTool } from '../tools/web-fetch';
-import { runCommandTool } from '../tools/terminal/run-command';
-import { commandStatusTool } from '../tools/terminal/command-status';
-import { sendCommandInputTool } from '../tools/terminal/send-command-input';
 import { todoWriteTool } from '../tools/todo-write';
 import { askUserTool } from '../tools/ask-user';
 import { skillTool } from '../tools/skill-tool';
@@ -382,12 +379,8 @@ export class AgentRunner {
       this,
       this._buildToolDefinitions(),
       this.tools,
-      eventQueue,
-      convId,
-      missionTracker,
-      shouldAbort, // Pass abort callback to graph
     ));
-    console.log('[AgentRunner] ✅ Graph built successfully');
+    console.log('[AgentRunner] ✅ Graph built (or retrieved from cache)');
 
     await new Promise(resolve => setImmediate(resolve));
 
@@ -405,7 +398,19 @@ export class AgentRunner {
         globalAbortManager.checkAbort();
 
         console.log('[AgentRunner] 🔄 Getting graph state...');
-        const threadConfig = { configurable: { thread_id: convId }, recursionLimit: 100 };
+        const threadConfig = { 
+          configurable: { 
+            thread_id: convId,
+            executionContext: {
+              runner: this,
+              eventQueue,
+              missionTracker,
+              conversationId: convId,
+              shouldAbort,
+            }
+          }, 
+          recursionLimit: 100 
+        };
         const currentState = await graph.getState(threadConfig);
         console.log('[AgentRunner] ✅ Graph state retrieved');
         const { Command } = await import('@langchain/langgraph');

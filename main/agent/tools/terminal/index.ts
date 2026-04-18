@@ -1,0 +1,78 @@
+import { AgentTool, ToolResult } from '../../runner/types';
+import { CommandRegistry } from './registry';
+import * as os from 'os';
+
+/**
+ * Enhanced Terminal Tool
+ * Provides persistent command execution with status tracking.
+ */
+export const terminalTool: AgentTool = {
+  name: 'terminal_execute',
+  description: 'Execute a terminal command with persistence and tracking. Use for long-running tasks or when you need to monitor output.',
+  parameters: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: 'The command to execute' },
+      cwd: { type: 'string', description: 'Working directory (defaults to home)' },
+      id: { type: 'string', description: 'Optional unique ID for this command session' }
+    },
+    required: ['command']
+  },
+  execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void): Promise<ToolResult> => {
+    const registry = CommandRegistry.getInstance();
+    const command = args.command as string;
+    const cwd = (args.cwd as string) || os.homedir();
+    const id = (args.id as string) || `term_${Date.now()}`;
+
+    onUpdate?.(`Terminal [${id}]: Executing "${command}"...`);
+    
+    const info = await registry.execute(id, command, cwd);
+
+    if (info.status === 'completed') {
+      return {
+        success: true,
+        output: info.output || 'Command completed with no output.',
+        data: info
+      };
+    } else {
+      return {
+        success: false,
+        output: info.output || 'Command failed.',
+        error: `Exit code: ${info.exitCode}`,
+        data: info
+      };
+    }
+  }
+};
+
+/**
+ * Terminal Status Tool
+ * Check output of a running command.
+ */
+export const terminalStatusTool: AgentTool = {
+  name: 'terminal_status',
+  description: 'Check the status and output of a previously started terminal command.',
+  parameters: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The unique ID of the command session' }
+    },
+    required: ['id']
+  },
+  execute: async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const registry = CommandRegistry.getInstance();
+    const id = args.id as string;
+    const commands = registry.listCommands();
+    const info = commands.find(c => c.id === id);
+
+    if (!info) {
+      return { success: false, output: `No command found with ID: ${id}`, error: 'not_found' };
+    }
+
+    return {
+      success: true,
+      output: info.output || 'No output yet.',
+      data: info
+    };
+  }
+};

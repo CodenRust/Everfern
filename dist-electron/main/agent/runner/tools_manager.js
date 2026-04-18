@@ -41,19 +41,22 @@ const memory_save_1 = require("../tools/memory-save");
 const memory_search_1 = require("../tools/memory-search");
 const web_search_1 = require("../tools/web-search");
 const web_fetch_1 = require("../tools/web-fetch");
-const run_command_1 = require("../tools/terminal/run-command");
-const command_status_1 = require("../tools/terminal/command-status");
-const send_command_input_1 = require("../tools/terminal/send-command-input");
 const todo_write_1 = require("../tools/todo-write");
 const ask_user_1 = require("../tools/ask-user");
 const skill_tool_1 = require("../tools/skill-tool");
 const present_files_1 = require("../tools/present-files");
 const control_plane_1 = require("../tools/control-plane");
+const terminal_1 = require("../tools/terminal");
+const mcp_registry_tool_1 = require("../tools/mcp-registry-tool");
+const mcp_1 = require("../tools/mcp");
 const os = __importStar(require("os"));
 const getBaseTools = (runner) => {
     const platform = os.platform();
     const config = runner.config;
-    return [
+    // Static tools
+    const tools = [
+        terminal_1.terminalTool,
+        terminal_1.terminalStatusTool,
         planner_1.plannerTool,
         planner_1.updateStepTool,
         planner_1.executionPlanTool,
@@ -62,16 +65,20 @@ const getBaseTools = (runner) => {
         memory_save_1.memorySaveTool,
         memory_search_1.memorySearchTool,
         web_search_1.webSearchTool,
-        run_command_1.runCommandTool,
-        command_status_1.commandStatusTool,
-        send_command_input_1.sendCommandInputTool,
         todo_write_1.todoWriteTool,
         ask_user_1.askUserTool,
         skill_tool_1.skillTool,
         present_files_1.presentFilesTool,
         web_fetch_1.webFetchTool,
         (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission),
-        control_plane_1.allowFileDeleteTool
+        control_plane_1.allowFileDeleteTool,
+        mcp_registry_tool_1.searchMcpRegistryTool,
+        mcp_registry_tool_1.connectMcpServerTool,
+        mcp_registry_tool_1.listMcpToolsTool
     ];
+    // Add dynamically connected MCP tools
+    const mcpTools = mcp_1.mcpRegistry.listAllTools().map(name => mcp_1.mcpRegistry.getTool(name)).filter(Boolean);
+    tools.push(...mcpTools);
+    return tools;
 };
 exports.getBaseTools = getBaseTools;

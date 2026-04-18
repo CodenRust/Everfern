@@ -30,7 +30,7 @@ function adaptTool(
       try {
         const fakeId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const result = await executor(fakeId, args);
-        
+
         let outputText = '';
         if (result.content && Array.isArray(result.content)) {
           outputText = result.content
@@ -72,6 +72,7 @@ export async function getPiCodingTools(): Promise<AgentTool[]> {
     adaptTool(m.findToolDefinition, m.findTool.execute),
     adaptTool(m.grepToolDefinition, m.grepTool.execute),
     adaptTool(m.lsToolDefinition, m.lsTool.execute),
+    adaptTool(m.bashToolDefinition, m.bashTool.execute, 'executePwsh'),
   ];
 
   return loadedCodingTools;
