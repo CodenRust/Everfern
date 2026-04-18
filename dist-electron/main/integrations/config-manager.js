@@ -1045,7 +1045,6 @@ class ConfigManager extends events_1.EventEmitter {
             'integrations.discord.enabled',
             'integrations.telegram.botToken',
             'integrations.discord.botToken',
-            'integrations.telegram.webhookUrl',
             'integrations.discord.applicationId',
             'security.encryptionEnabled'
         ];

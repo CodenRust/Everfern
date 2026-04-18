@@ -34,9 +34,10 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
             throw new platform_interface_1.PlatformAuthError('telegram', 'Bot token is required');
         }
         try {
-            // Create bot instance
+            // Create bot instance with polling disabled initially
+            // We'll explicitly delete webhook and start polling later
             this.bot = new node_telegram_bot_api_1.default(telegramConfig.config.botToken, {
-                polling: !telegramConfig.config.webhookUrl
+                polling: false
             });
             // Get bot information
             this.botInfo = await this.bot.getMe();
@@ -46,13 +47,12 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
             }
             // Set up message handlers
             this.setupMessageHandlers();
-            // Set up webhook if configured
-            if (telegramConfig.config.webhookUrl) {
-                await this.setupWebhook();
-            }
-            else {
-                this.isPolling = true;
-            }
+            // Ensure no webhook is active before starting polling
+            // This fixes the "connection failed" issue when a webhook was previously set
+            await this.bot.deleteWebHook();
+            // Start polling
+            await this.bot.startPolling();
+            this.isPolling = true;
             this.reconnectAttempts = 0;
             this.emitStatusChange({
                 connected: true,
@@ -60,7 +60,7 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
                 details: {
                     botId: this.botInfo.id,
                     botUsername: this.botInfo.username,
-                    mode: telegramConfig.config.webhookUrl ? 'webhook' : 'polling'
+                    mode: 'polling'
                 }
             });
         }
@@ -86,11 +86,6 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
                 if (this.isPolling) {
                     await this.bot.stopPolling();
                     this.isPolling = false;
-                }
-                // Remove webhook if set
-                const telegramConfig = this.config;
-                if (telegramConfig.config.webhookUrl) {
-                    await this.bot.deleteWebHook();
                 }
                 this.bot = null;
                 this.botInfo = null;
@@ -139,6 +134,41 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
         }
     }
     /**
+     * Edit an existing message in Telegram
+     */
+    async editMessage(chatId, messageId, text, parseMode) {
+        if (!this.bot) {
+            throw new platform_interface_1.PlatformConnectionError('telegram', 'Bot not initialized');
+        }
+        try {
+            const formattedText = this.formatText(text, parseMode);
+            await this.bot.editMessageText(formattedText, {
+                chat_id: chatId,
+                message_id: parseInt(messageId),
+                parse_mode: this.mapParseMode(parseMode)
+            });
+        }
+        catch (error) {
+            // If editing fails (e.g., message too old or identical content),
+            // delete the old message and send a new one
+            if (error.code === 400 || error.message?.includes('message is not modified')) {
+                try {
+                    await this.bot.deleteMessage(chatId, parseInt(messageId));
+                    await this.bot.sendMessage(chatId, this.formatText(text, parseMode), {
+                        parse_mode: this.mapParseMode(parseMode)
+                    });
+                }
+                catch (deleteError) {
+                    console.error('Failed to delete and resend message:', deleteError);
+                }
+            }
+            else {
+                this.handleTelegramError(error);
+                throw error;
+            }
+        }
+    }
+    /**
      * Send typing indicator
      */
     async sendTyping(chatId) {
@@ -172,7 +202,7 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
                 details: {
                     botId: botInfo.id,
                     botUsername: botInfo.username,
-                    mode: this.isPolling ? 'polling' : 'webhook'
+                    mode: 'polling'
                 }
             };
         }
@@ -296,10 +326,6 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
             console.error('Telegram polling error:', error);
             this.handleConnectionError(error);
         });
-        this.bot.on('webhook_error', (error) => {
-            console.error('Telegram webhook error:', error);
-            this.handleConnectionError(error);
-        });
     }
     /**
      * Handle incoming Telegram message
@@ -320,6 +346,11 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
             if (telegramConfig.config.groupMentionOnly && !this.isBotMentioned(message)) {
                 return;
             }
+        }
+        // Handle /start command
+        if (message.text === '/start') {
+            this.handleStartCommand(message);
+            return;
         }
         // Convert to platform-agnostic format
         const incomingMessage = {
@@ -349,6 +380,32 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
             raw: message
         };
         this.emitMessage(incomingMessage);
+    }
+    /**
+     * Handle /start command
+     */
+    async handleStartCommand(message) {
+        if (!this.bot)
+            return;
+        try {
+            const welcomeMessage = `🤖 *Welcome to Everfern Bot!*
+
+I'm your AI assistant powered by Everfern. I can help you with:
+
+• Answering questions
+• Writing and analyzing code
+• Research and information gathering
+• Creative tasks and brainstorming
+• And much more!
+
+Just send me a message and I'll be happy to help! 😊`;
+            await this.bot.sendMessage(message.chat.id, welcomeMessage, {
+                parse_mode: 'Markdown'
+            });
+        }
+        catch (error) {
+            console.error('Error handling /start command:', error);
+        }
     }
     /**
      * Extract files from Telegram message
@@ -473,26 +530,6 @@ class TelegramPlatform extends platform_interface_1.MessagePlatform {
         catch (error) {
             this.handleTelegramError(error);
             throw error;
-        }
-    }
-    /**
-     * Set up webhook
-     */
-    async setupWebhook() {
-        if (!this.bot)
-            return;
-        const telegramConfig = this.config;
-        const webhookUrl = telegramConfig.config.webhookUrl;
-        const port = telegramConfig.config.webhookPort || 8443;
-        try {
-            await this.bot.setWebHook(webhookUrl, {
-                max_connections: 40,
-                allowed_updates: ['message', 'callback_query']
-            });
-            console.log(`Telegram webhook set up at ${webhookUrl}`);
-        }
-        catch (error) {
-            throw new platform_interface_1.PlatformConnectionError('telegram', `Failed to set up webhook: ${error}`);
         }
     }
     /**

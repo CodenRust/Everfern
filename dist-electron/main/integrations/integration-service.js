@@ -51,8 +51,7 @@ class IntegrationService extends events_1.EventEmitter {
         this.config = {
             telegram: {
                 enabled: false,
-                botToken: '',
-                webhookUrl: ''
+                botToken: ''
             },
             discord: {
                 enabled: false,
@@ -354,7 +353,6 @@ class IntegrationService extends events_1.EventEmitter {
                     enabled: true,
                     config: {
                         botToken: this.config.telegram.botToken,
-                        webhookUrl: this.config.telegram.webhookUrl,
                         respondToGroups: true,
                         groupMentionOnly: true
                     }
@@ -504,8 +502,7 @@ class IntegrationService extends events_1.EventEmitter {
     async handleConfigChange(oldConfig, newConfig) {
         // Check if platform configurations changed
         const telegramChanged = oldConfig.telegram.enabled !== newConfig.telegram.enabled ||
-            oldConfig.telegram.botToken !== newConfig.telegram.botToken ||
-            oldConfig.telegram.webhookUrl !== newConfig.telegram.webhookUrl;
+            oldConfig.telegram.botToken !== newConfig.telegram.botToken;
         const discordChanged = oldConfig.discord.enabled !== newConfig.discord.enabled ||
             oldConfig.discord.botToken !== newConfig.discord.botToken ||
             oldConfig.discord.applicationId !== newConfig.discord.applicationId ||

@@ -25,7 +25,6 @@ export interface IntegrationServiceConfig {
   telegram: {
     enabled: boolean;
     botToken: string;
-    webhookUrl?: string;
   };
   discord: {
     enabled: boolean;
@@ -85,8 +84,7 @@ export class IntegrationService extends EventEmitter {
     this.config = {
       telegram: {
         enabled: false,
-        botToken: '',
-        webhookUrl: ''
+        botToken: ''
       },
       discord: {
         enabled: false,
@@ -436,7 +434,6 @@ export class IntegrationService extends EventEmitter {
           enabled: true,
           config: {
             botToken: this.config.telegram.botToken,
-            webhookUrl: this.config.telegram.webhookUrl,
             respondToGroups: true,
             groupMentionOnly: true
           }
@@ -600,8 +597,7 @@ export class IntegrationService extends EventEmitter {
     // Check if platform configurations changed
     const telegramChanged =
       oldConfig.telegram.enabled !== newConfig.telegram.enabled ||
-      oldConfig.telegram.botToken !== newConfig.telegram.botToken ||
-      oldConfig.telegram.webhookUrl !== newConfig.telegram.webhookUrl;
+      oldConfig.telegram.botToken !== newConfig.telegram.botToken;
 
     const discordChanged =
       oldConfig.discord.enabled !== newConfig.discord.enabled ||

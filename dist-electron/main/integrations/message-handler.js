@@ -99,6 +99,7 @@ class MessageHandler extends events_1.EventEmitter {
     rateLimiter = new RateLimiter();
     activeMessages = new Map();
     pendingHitlRequests = new Map();
+    processedMessages = new Set(); // Track processed message IDs to prevent duplicates
     constructor(config) {
         super();
         this.config = config;
@@ -124,6 +125,20 @@ class MessageHandler extends events_1.EventEmitter {
     async handleMessage(context) {
         const { message } = context;
         const platform = message.platform;
+        // Create unique message identifier to prevent duplicate processing
+        const messageKey = `${platform}_${message.chat.id}_${message.id}`;
+        // Check if we've already processed this message
+        if (this.processedMessages.has(messageKey)) {
+            console.log(`[MessageHandler] ⏭️ Skipping duplicate message: ${messageKey}`);
+            return;
+        }
+        // Mark message as processed
+        this.processedMessages.add(messageKey);
+        // Clean up old processed messages (keep last 1000)
+        if (this.processedMessages.size > 1000) {
+            const messagesToDelete = Array.from(this.processedMessages).slice(0, 100);
+            messagesToDelete.forEach(key => this.processedMessages.delete(key));
+        }
         console.log(`[MessageHandler] 📥 Received message from ${platform}`);
         console.log(`[MessageHandler] User: ${message.user.name} (${message.user.id})`);
         console.log(`[MessageHandler] Chat: ${message.chat.name} (${message.chat.id})`);
@@ -565,6 +580,7 @@ class MessageHandler extends events_1.EventEmitter {
         }
         this.activeRunners.clear();
         this.activeMessages.clear();
+        this.processedMessages.clear();
         console.log('[MessageHandler] Shutdown complete');
     }
 }

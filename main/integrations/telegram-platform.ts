@@ -27,10 +27,6 @@ export interface TelegramConfig extends PlatformConfig {
   config: {
     /** Bot token from @BotFather */
     botToken: string;
-    /** Webhook URL (optional, uses polling if not provided) */
-    webhookUrl?: string;
-    /** Webhook port (default: 8443) */
-    webhookPort?: number;
     /** Bot username (without @) */
     botUsername?: string;
     /** Allowed chat IDs (empty = all allowed) */
@@ -68,9 +64,10 @@ export class TelegramPlatform extends MessagePlatform {
     }
 
     try {
-      // Create bot instance
+      // Create bot instance with polling disabled initially
+      // We'll explicitly delete webhook and start polling later
       this.bot = new TelegramBot(telegramConfig.config.botToken, {
-        polling: !telegramConfig.config.webhookUrl
+        polling: false
       });
 
       // Get bot information
@@ -84,12 +81,13 @@ export class TelegramPlatform extends MessagePlatform {
       // Set up message handlers
       this.setupMessageHandlers();
 
-      // Set up webhook if configured
-      if (telegramConfig.config.webhookUrl) {
-        await this.setupWebhook();
-      } else {
-        this.isPolling = true;
-      }
+      // Ensure no webhook is active before starting polling
+      // This fixes the "connection failed" issue when a webhook was previously set
+      await this.bot.deleteWebHook();
+
+      // Start polling
+      await this.bot.startPolling();
+      this.isPolling = true;
 
       this.reconnectAttempts = 0;
       this.emitStatusChange({
@@ -98,7 +96,7 @@ export class TelegramPlatform extends MessagePlatform {
         details: {
           botId: this.botInfo.id,
           botUsername: this.botInfo.username,
-          mode: telegramConfig.config.webhookUrl ? 'webhook' : 'polling'
+          mode: 'polling'
         }
       });
 
@@ -124,12 +122,6 @@ export class TelegramPlatform extends MessagePlatform {
         if (this.isPolling) {
           await this.bot.stopPolling();
           this.isPolling = false;
-        }
-
-        // Remove webhook if set
-        const telegramConfig = this.config as TelegramConfig;
-        if (telegramConfig.config.webhookUrl) {
-          await this.bot.deleteWebHook();
         }
 
         this.bot = null;
@@ -186,6 +178,41 @@ export class TelegramPlatform extends MessagePlatform {
   }
 
   /**
+   * Edit an existing message in Telegram
+   */
+  async editMessage(chatId: string, messageId: string, text: string, parseMode?: string): Promise<void> {
+    if (!this.bot) {
+      throw new PlatformConnectionError('telegram', 'Bot not initialized');
+    }
+
+    try {
+      const formattedText = this.formatText(text, parseMode);
+
+      await this.bot.editMessageText(formattedText, {
+        chat_id: chatId,
+        message_id: parseInt(messageId),
+        parse_mode: this.mapParseMode(parseMode)
+      });
+    } catch (error: any) {
+      // If editing fails (e.g., message too old or identical content),
+      // delete the old message and send a new one
+      if (error.code === 400 || error.message?.includes('message is not modified')) {
+        try {
+          await this.bot.deleteMessage(chatId, parseInt(messageId));
+          await this.bot.sendMessage(chatId, this.formatText(text, parseMode), {
+            parse_mode: this.mapParseMode(parseMode)
+          });
+        } catch (deleteError) {
+          console.error('Failed to delete and resend message:', deleteError);
+        }
+      } else {
+        this.handleTelegramError(error);
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Send typing indicator
    */
   async sendTyping(chatId: string): Promise<void> {
@@ -221,7 +248,7 @@ export class TelegramPlatform extends MessagePlatform {
         details: {
           botId: botInfo.id,
           botUsername: botInfo.username,
-          mode: this.isPolling ? 'polling' : 'webhook'
+          mode: 'polling'
         }
       };
     } catch (error: any) {
@@ -301,9 +328,71 @@ export class TelegramPlatform extends MessagePlatform {
    */
   protected formatText(text: string, parseMode?: string): string {
     if (parseMode === 'markdown') {
-      // Telegram uses MarkdownV2 which requires escaping special characters
-      return text
-        .replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
+      // Convert standard markdown to Telegram MarkdownV2 format
+      // In Telegram MarkdownV2: * = bold, _ = italic, ` = code
+      // Standard markdown: ** = bold, * = italic, ` = code
+
+      let formatted = text;
+
+      // Step 1: Temporarily replace markdown patterns with placeholders
+      const boldPattern = /\*\*(.+?)\*\*/g;
+      const italicPattern = /\*(.+?)\*/g;
+      const codePattern = /`(.+?)`/g;
+
+      const boldMatches: Array<{ placeholder: string; content: string }> = [];
+      const italicMatches: Array<{ placeholder: string; content: string }> = [];
+      const codeMatches: Array<{ placeholder: string; content: string }> = [];
+
+      // Extract bold text (**text**)
+      let boldIndex = 0;
+      formatted = formatted.replace(boldPattern, (match, content) => {
+        const placeholder = `__BOLD_${boldIndex}__`;
+        boldMatches.push({ placeholder, content });
+        boldIndex++;
+        return placeholder;
+      });
+
+      // Extract italic text (*text*)
+      let italicIndex = 0;
+      formatted = formatted.replace(italicPattern, (match, content) => {
+        const placeholder = `__ITALIC_${italicIndex}__`;
+        italicMatches.push({ placeholder, content });
+        italicIndex++;
+        return placeholder;
+      });
+
+      // Extract code text (`text`)
+      let codeIndex = 0;
+      formatted = formatted.replace(codePattern, (match, content) => {
+        const placeholder = `__CODE_${codeIndex}__`;
+        codeMatches.push({ placeholder, content });
+        codeIndex++;
+        return placeholder;
+      });
+
+      // Step 2: Escape special characters in the remaining text
+      formatted = formatted.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+
+      // Step 3: Restore markdown with proper Telegram formatting
+      // Restore code blocks (no escaping needed inside code)
+      codeMatches.forEach(({ placeholder, content }) => {
+        formatted = formatted.replace(placeholder, `\`${content}\``);
+      });
+
+      // Restore bold (**text** -> *text* in Telegram)
+      boldMatches.forEach(({ placeholder, content }) => {
+        // Escape special chars in content except those already escaped
+        const escaped = content.replace(/([_\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+        formatted = formatted.replace(placeholder, `*${escaped}*`);
+      });
+
+      // Restore italic (*text* -> _text_ in Telegram)
+      italicMatches.forEach(({ placeholder, content }) => {
+        const escaped = content.replace(/([*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+        formatted = formatted.replace(placeholder, `_${escaped}_`);
+      });
+
+      return formatted;
     } else if (parseMode === 'html') {
       // HTML mode - ensure proper HTML encoding
       return text
@@ -359,11 +448,6 @@ export class TelegramPlatform extends MessagePlatform {
       console.error('Telegram polling error:', error);
       this.handleConnectionError(error);
     });
-
-    this.bot.on('webhook_error', (error) => {
-      console.error('Telegram webhook error:', error);
-      this.handleConnectionError(error);
-    });
   }
 
   /**
@@ -388,6 +472,12 @@ export class TelegramPlatform extends MessagePlatform {
       if (telegramConfig.config.groupMentionOnly && !this.isBotMentioned(message)) {
         return;
       }
+    }
+
+    // Handle /start command
+    if (message.text === '/start') {
+      this.handleStartCommand(message);
+      return;
     }
 
     // Convert to platform-agnostic format
@@ -419,6 +509,33 @@ export class TelegramPlatform extends MessagePlatform {
     };
 
     this.emitMessage(incomingMessage);
+  }
+
+  /**
+   * Handle /start command
+   */
+  private async handleStartCommand(message: TelegramBot.Message): Promise<void> {
+    if (!this.bot) return;
+
+    try {
+      const welcomeMessage = `🤖 *Welcome to Everfern Bot!*
+
+I'm your AI assistant powered by Everfern. I can help you with:
+
+• Answering questions
+• Writing and analyzing code
+• Research and information gathering
+• Creative tasks and brainstorming
+• And much more!
+
+Just send me a message and I'll be happy to help! 😊`;
+
+      await this.bot.sendMessage(message.chat.id, welcomeMessage, {
+        parse_mode: 'Markdown'
+      });
+    } catch (error) {
+      console.error('Error handling /start command:', error);
+    }
   }
 
   /**
@@ -553,28 +670,6 @@ export class TelegramPlatform extends MessagePlatform {
     } catch (error: any) {
       this.handleTelegramError(error);
       throw error;
-    }
-  }
-
-  /**
-   * Set up webhook
-   */
-  private async setupWebhook(): Promise<void> {
-    if (!this.bot) return;
-
-    const telegramConfig = this.config as TelegramConfig;
-    const webhookUrl = telegramConfig.config.webhookUrl!;
-    const port = telegramConfig.config.webhookPort || 8443;
-
-    try {
-      await this.bot.setWebHook(webhookUrl, {
-        max_connections: 40,
-        allowed_updates: ['message', 'callback_query']
-      });
-
-      console.log(`Telegram webhook set up at ${webhookUrl}`);
-    } catch (error) {
-      throw new PlatformConnectionError('telegram', `Failed to set up webhook: ${error}`);
     }
   }
 

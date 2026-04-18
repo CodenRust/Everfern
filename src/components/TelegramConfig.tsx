@@ -15,7 +15,6 @@ interface TelegramConfigProps {
     config: {
         enabled: boolean;
         botToken: string;
-        webhookUrl?: string;
         connected: boolean;
         provider?: string;
         model?: string;
@@ -27,7 +26,6 @@ interface TelegramConfigProps {
 
 interface TelegramConfigData {
     botToken: string;
-    webhookUrl?: string;
     provider: string;
     model: string;
 }
@@ -45,17 +43,14 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
 }) => {
     const [formData, setFormData] = useState<TelegramConfigData>({
         botToken: config.botToken || '',
-        webhookUrl: config.webhookUrl || '',
         provider: config.provider || '',
         model: config.model || ''
     });
 
     const [validation, setValidation] = useState<{
         botToken: ValidationResult;
-        webhookUrl: ValidationResult;
     }>({
-        botToken: { isValid: true },
-        webhookUrl: { isValid: true }
+        botToken: { isValid: true }
     });
 
     const [hasChanges, setHasChanges] = useState(false);
@@ -110,29 +105,6 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
         return { isValid: true };
     };
 
-    // Validate webhook URL format
-    const validateWebhookUrl = (url: string): ValidationResult => {
-        if (!url.trim()) {
-            return { isValid: true }; // Webhook URL is optional
-        }
-
-        try {
-            const parsedUrl = new URL(url);
-            if (parsedUrl.protocol !== 'https:') {
-                return {
-                    isValid: false,
-                    message: "Webhook URL must use HTTPS protocol"
-                };
-            }
-            return { isValid: true };
-        } catch {
-            return {
-                isValid: false,
-                message: "Invalid URL format"
-            };
-        }
-    };
-
     // Handle input changes with validation
     const handleInputChange = (field: keyof TelegramConfigData, value: string) => {
         const newFormData = { ...formData, [field]: value };
@@ -142,20 +114,19 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
         let fieldValidation: ValidationResult;
         if (field === 'botToken') {
             fieldValidation = validateBotToken(value);
-        } else if (field === 'webhookUrl') {
-            fieldValidation = validateWebhookUrl(value);
         } else {
             fieldValidation = { isValid: true };
         }
 
-        setValidation(prev => ({
-            ...prev,
-            [field]: fieldValidation
-        }));
+        if (field === 'botToken') {
+            setValidation(prev => ({
+                ...prev,
+                [field]: fieldValidation
+            }));
+        }
 
         // Check if there are changes
         const hasFormChanges = newFormData.botToken !== config.botToken ||
-                              newFormData.webhookUrl !== config.webhookUrl ||
                               newFormData.provider !== (config.provider || '') ||
                               newFormData.model !== (config.model || '');
         setHasChanges(hasFormChanges);
@@ -171,15 +142,13 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
 
         // Validate all fields
         const botTokenValidation = validateBotToken(formData.botToken);
-        const webhookUrlValidation = validateWebhookUrl(formData.webhookUrl || '');
 
         setValidation({
-            botToken: botTokenValidation,
-            webhookUrl: webhookUrlValidation
+            botToken: botTokenValidation
         });
 
         // Check if all validations pass
-        if (!botTokenValidation.isValid || !webhookUrlValidation.isValid) {
+        if (!botTokenValidation.isValid) {
             return;
         }
 
@@ -239,7 +208,6 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
     useEffect(() => {
         setFormData({
             botToken: config.botToken || '',
-            webhookUrl: config.webhookUrl || '',
             provider: config.provider || '',
             model: config.model || ''
         });
@@ -289,7 +257,6 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
     }, [formData.provider]);
 
     const isFormValid = validation.botToken.isValid &&
-                       validation.webhookUrl.isValid &&
                        formData.provider.trim() !== '' &&
                        formData.model.trim() !== '';
     const canSave = isFormValid && hasChanges && formData.botToken.trim();
@@ -421,79 +388,6 @@ const TelegramConfig: React.FC<TelegramConfigProps> = ({
                             lineHeight: 1.4
                         }}>
                             Get your bot token from @BotFather on Telegram. Format: bot_id:bot_token
-                        </p>
-                    </div>
-
-                    {/* Webhook URL Field */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <label style={{
-                            fontSize: 14,
-                            fontWeight: 500,
-                            color: colors.textPrimary,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6
-                        }}>
-                            Webhook URL (Optional)
-                            <CustomTooltip content="HTTPS URL where Telegram will send updates. Leave empty to use polling mode.">
-                                <InformationCircleIcon
-                                    width={16}
-                                    height={16}
-                                    style={{ color: colors.textMuted, cursor: "help" }}
-                                />
-                            </CustomTooltip>
-                        </label>
-                        <input
-                            type="url"
-                            placeholder="https://your-domain.com/webhooks/telegram"
-                            value={formData.webhookUrl}
-                            onChange={(e) => handleInputChange('webhookUrl', e.target.value)}
-                            style={{
-                                padding: "12px 16px",
-                                borderRadius: 8,
-                                border: `1px solid ${
-                                    validation.webhookUrl.isValid ? colors.border : colors.borderError
-                                }`,
-                                backgroundColor: colors.inputBg,
-                                color: colors.textPrimary,
-                                fontSize: 14,
-                                outline: "none",
-                                transition: "border-color 0.2s"
-                            }}
-                            onFocus={(e) => {
-                                if (validation.webhookUrl.isValid) {
-                                    e.target.style.borderColor = colors.borderFocus;
-                                }
-                            }}
-                            onBlur={(e) => {
-                                e.target.style.borderColor = validation.webhookUrl.isValid
-                                    ? colors.border
-                                    : colors.borderError;
-                            }}
-                        />
-                        {!validation.webhookUrl.isValid && (
-                            <motion.div
-                                initial={{ opacity: 0, y: -5 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 6,
-                                    fontSize: 13,
-                                    color: colors.textError
-                                }}
-                            >
-                                <XCircleIcon width={16} height={16} />
-                                {validation.webhookUrl.message}
-                            </motion.div>
-                        )}
-                        <p style={{
-                            fontSize: 12,
-                            color: colors.textMuted,
-                            margin: 0,
-                            lineHeight: 1.4
-                        }}>
-                            Optional HTTPS URL for receiving Telegram updates. If not provided, polling will be used.
                         </p>
                     </div>
 

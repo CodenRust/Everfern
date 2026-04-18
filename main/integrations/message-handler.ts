@@ -30,7 +30,6 @@ export interface IntegrationConfig {
   telegram: {
     enabled: boolean;
     botToken: string;
-    webhookUrl?: string;
     connected: boolean;
     model?: string;
     provider?: string;
@@ -109,6 +108,7 @@ export class MessageHandler extends EventEmitter {
   private rateLimiter = new RateLimiter();
   private activeMessages = new Map<string, { messageId: string; chatId: string; platform: string }>();
   private pendingHitlRequests = new Map<string, { resolve: (response: string) => void; reject: (error: Error) => void; sessionId: string }>();
+  private processedMessages = new Set<string>(); // Track processed message IDs to prevent duplicates
 
   constructor(config: MessageHandlerConfig) {
     super();
@@ -138,6 +138,24 @@ export class MessageHandler extends EventEmitter {
   private async handleMessage(context: MessageContext): Promise<void> {
     const { message } = context;
     const platform = message.platform;
+
+    // Create unique message identifier to prevent duplicate processing
+    const messageKey = `${platform}_${message.chat.id}_${message.id}`;
+
+    // Check if we've already processed this message
+    if (this.processedMessages.has(messageKey)) {
+      console.log(`[MessageHandler] ⏭️ Skipping duplicate message: ${messageKey}`);
+      return;
+    }
+
+    // Mark message as processed
+    this.processedMessages.add(messageKey);
+
+    // Clean up old processed messages (keep last 1000)
+    if (this.processedMessages.size > 1000) {
+      const messagesToDelete = Array.from(this.processedMessages).slice(0, 100);
+      messagesToDelete.forEach(key => this.processedMessages.delete(key));
+    }
 
     console.log(`[MessageHandler] 📥 Received message from ${platform}`);
     console.log(`[MessageHandler] User: ${message.user.name} (${message.user.id})`);
@@ -692,6 +710,7 @@ export class MessageHandler extends EventEmitter {
 
     this.activeRunners.clear();
     this.activeMessages.clear();
+    this.processedMessages.clear();
     console.log('[MessageHandler] Shutdown complete');
   }
 }

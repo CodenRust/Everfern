@@ -370,7 +370,6 @@ async function autoStartEnabledBots(): Promise<void> {
             enabled: true,
             config: {
               botToken: integrationConfig.telegram.botToken,
-              webhookUrl: integrationConfig.telegram.webhookUrl,
               respondToGroups: true,
               groupMentionOnly: true
             }
@@ -1255,7 +1254,6 @@ interface IntegrationConfig {
   telegram: {
     enabled: boolean;
     botToken: string;
-    webhookUrl?: string;
     connected: boolean;
     model?: string;
     provider?: string;
@@ -1277,7 +1275,6 @@ let integrationConfig: IntegrationConfig = {
   telegram: {
     enabled: false,
     botToken: '',
-    webhookUrl: '',
     connected: false,
   },
   discord: {
@@ -1542,7 +1539,6 @@ ipcMain.handle('integration:test-connection', async (_event, platform: string): 
                 enabled: true,
                 config: {
                   botToken: integrationConfig.telegram.botToken,
-                  webhookUrl: integrationConfig.telegram.webhookUrl,
                   respondToGroups: true,
                   groupMentionOnly: false
                 }

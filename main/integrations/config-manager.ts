@@ -18,7 +18,6 @@ import { FSWatcher, watch } from 'fs';
 export interface TelegramConfig {
   enabled: boolean;
   botToken?: string; // Stored encrypted
-  webhookUrl?: string;
   allowedUsers?: string[];
   groupSettings: {
     requireMention: boolean;
@@ -1343,7 +1342,6 @@ export class ConfigManager extends EventEmitter {
       'integrations.discord.enabled',
       'integrations.telegram.botToken',
       'integrations.discord.botToken',
-      'integrations.telegram.webhookUrl',
       'integrations.discord.applicationId',
       'security.encryptionEnabled'
     ];
