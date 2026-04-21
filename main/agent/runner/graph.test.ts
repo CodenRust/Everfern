@@ -5,7 +5,7 @@ import { interrupt, Command } from '@langchain/langgraph';
 
 vi.mock('./nodes/triage', () => ({
   createTriageNode: vi.fn(() => async (state: any) => {
-    return { currentIntent: 'coding' };
+    return { currentIntent: 'question' };
   })
 }));
 
@@ -59,20 +59,44 @@ describe('Modern LangGraph HITL Architecture', () => {
   beforeEach(() => {
     mockRunner = {
       config: { maxIterations: 10 },
+      client: {
+        chat: vi.fn(async () => ({
+          content: JSON.stringify({
+            reason: 'task_complete',
+            explanation: 'Task completed successfully',
+            verdict: 'complete',
+            confidence: 1.0,
+            reasoning: 'Done'
+          }),
+          tool_calls: []
+        }))
+      },
       telemetry: {
         warn: vi.fn(),
         info: vi.fn(),
         action: vi.fn(),
         transition: vi.fn(),
+        metrics: vi.fn(),
       },
+      tools: [],
       _buildToolDefinitions: vi.fn(() => [])
     };
   });
 
   it('should pause execution at interrupt() and resume with user feedback using Command', async () => {
     const threadId = 'test-hitl-thread-' + Date.now();
-    const graph = buildGraph(mockRunner, [], [], [], 'test-conv-id', [], () => false);
-    const threadConfig = { configurable: { thread_id: threadId }, recursionLimit: 100 };
+    const graph = buildGraph(mockRunner, [], []);
+    const threadConfig = { 
+      configurable: { 
+        thread_id: threadId,
+        executionContext: {
+          runner: mockRunner,
+          eventQueue: [],
+          conversationId: 'test-conv-id'
+        }
+      }, 
+      recursionLimit: 100 
+    };
 
     const initialState = {
       messages: [{ role: 'user', content: 'create a report' }],

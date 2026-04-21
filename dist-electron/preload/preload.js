@@ -63,12 +63,22 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     // ── Config Store ───────────────────────────────────────────────
     saveConfig: (config) => electron_1.ipcRenderer.invoke('save-config', config),
     loadConfig: () => electron_1.ipcRenderer.invoke('load-config'),
+    // ── Voice Overlay ────────────────────────────────────────────────
+    voiceOverlay: {
+        onStateChange: (cb) => {
+            electron_1.ipcRenderer.on('voice-overlay:state', (_e, data) => cb(data));
+        },
+        removeListeners: () => {
+            electron_1.ipcRenderer.removeAllListeners('voice-overlay:state');
+        }
+    },
     // ── ACP (AI Completion Provider) ───────────────────────────────
     acp: {
         listProviders: () => electron_1.ipcRenderer.invoke('acp:list-providers'),
         setProvider: (cfg) => electron_1.ipcRenderer.invoke('acp:set-provider', cfg),
         healthCheck: () => electron_1.ipcRenderer.invoke('acp:health-check'),
         listModels: () => electron_1.ipcRenderer.invoke('acp:list-models'),
+        listTools: () => electron_1.ipcRenderer.invoke('acp:list-tools'),
         chat: (req) => electron_1.ipcRenderer.invoke('acp:chat', req),
         stream: (req) => electron_1.ipcRenderer.invoke('acp:stream', req),
         stop: () => electron_1.ipcRenderer.invoke('acp:stop'),
@@ -118,6 +128,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         onSurfaceAction: (cb) => {
             electron_1.ipcRenderer.on('acp:surface-action', (_e, data) => cb(data));
         },
+        onProtocolLink: (cb) => {
+            electron_1.ipcRenderer.on('acp:protocol-link', (_e, url) => cb(url));
+        },
         onUsage: (cb) => {
             electron_1.ipcRenderer.on('acp:usage', (_e, data) => cb(data));
         },
@@ -159,6 +172,20 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
                 cb(data);
             });
         },
+        /**
+         * Register a callback for sub-agent progress events.
+         * Event type: SubAgentProgressEvent (see src/app/chat/types.ts)
+         */
+        onSubAgentProgress: (cb) => {
+            electron_1.ipcRenderer.on('acp:sub-agent-progress', (_e, event) => cb(event));
+        },
+        /**
+         * Remove sub-agent progress event listener.
+         * Call this to clean up the listener when component unmounts.
+         */
+        removeSubAgentProgressListener: () => {
+            electron_1.ipcRenderer.removeAllListeners('acp:sub-agent-progress');
+        },
         removeStreamListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:stream-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:thought');
@@ -179,6 +206,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:plan-created');
             electron_1.ipcRenderer.removeAllListeners('acp:hitl-request');
             electron_1.ipcRenderer.removeAllListeners('acp:hitl-response-processed');
+            electron_1.ipcRenderer.removeAllListeners('acp:sub-agent-progress');
         },
     },
     // ── Chat History ───────────────────────────────────────────────

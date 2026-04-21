@@ -4,7 +4,6 @@ import { classifyIntent, classifyIntentFallback } from '../triage';
 import { AgentRunner } from '../runner';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
-import { decomposeTask, getAGIHints } from '../task-decomposer';
 
 export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[], missionTracker?: MissionTracker, shouldAbort?: () => boolean) => {
   const integrator = createMissionIntegrator(missionTracker);
@@ -59,25 +58,10 @@ export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[]
         phase: 'triage'
       });
 
-      const decomposed = decomposeTask(content, []);
-      const agiHints = getAGIHints(content);
-      runner.telemetry.info(`Graph expansion: ${decomposed.totalSteps} steps (Decomposition Mode: ${decomposed.executionMode})`);
-
-      eventQueue?.push({
-        type: 'task_analyzed',
-        analysis: {
-          complexity: decomposed.totalSteps > 5 ? 'complex' : 'simple',
-          canParallelize: decomposed.canParallelize,
-          suggestedApproach: decomposed.executionMode
-        }
-      });
-
       const result = {
         currentIntent: classification.intent,
         intentConfidence: classification.confidence,
-        taskPhase: 'planning' as const,
-        decomposedTask: decomposed,
-        agiHints: agiHints,
+        taskPhase: 'routing' as const, // Transit to routing/decomposer
       };
 
       integrator.completeNode('triage', `Intent classified as: ${classification.intent}`);

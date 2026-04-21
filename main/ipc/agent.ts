@@ -14,7 +14,7 @@ function loadConfigSync() {
     const configPath = path.join(os.homedir(), '.everfern', 'config.json');
     if (fs.existsSync(configPath)) {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      
+
       // Load API keys from ~/.everfern/keys/
       config.keys = {};
       const keysDir = path.join(os.homedir(), '.everfern', 'keys');
@@ -40,13 +40,45 @@ import { reflectAndRemember } from '../store/memory-manager';
 import { getAllModelsFlat, FlatModelEntry, PROVIDER_REGISTRY } from '../lib/providers';
 
 export function registerAgentHandlers() {
+  // Event-based channels (one-way communication via sender.send):
+  // - acp:sub-agent-progress: Sub-agent progress streaming events
+  //   Events are sent via sender.send('acp:sub-agent-progress', event)
+  //   Used by ProgressEventEmitter in computer-use.ts
+
   // Provider management
   ipcMain.handle('acp:list-providers', () => acpManager.listProviders());
   ipcMain.handle('acp:set-provider', async (_event, config) => {
     return acpManager.setProvider(config);
   });
   ipcMain.handle('acp:health-check', async () => acpManager.healthCheck());
-  
+
+  ipcMain.handle('acp:list-tools', async () => {
+    try {
+      const activeConfig = acpManager.getActiveConfig();
+      // Create a temporary runner just to get the list of tools
+      // This is safe because getBaseTools/initializePiTools are relatively lightweight
+      const client = acpManager.getClient();
+      if (!client) return { success: true, tools: [] };
+      
+      const runner = new AgentRunner(client, {
+        visionModel: activeConfig?.vlm?.model,
+        vlm: activeConfig?.vlm,
+      });
+      
+      await runner.waitForToolsReady();
+      
+      const tools = runner.tools.map(t => ({
+        name: t.name,
+        description: t.description,
+      }));
+      
+      return { success: true, tools };
+    } catch (error) {
+      console.error('[acp:list-tools] Error:', error);
+      return { success: false, error: String(error) };
+    }
+  });
+
   ipcMain.handle('acp:list-models', async () => {
     try {
       const config = acpManager.getActiveConfig();
@@ -199,8 +231,24 @@ export function registerAgentHandlers() {
 
     if (!client) throw new Error('No AI provider configured');
 
-    const runner = new AgentRunner(client);
-    
+    // Construct AgentRunnerConfig from active ACP config
+    const activeConfig = acpManager.getActiveConfig();
+    console.log('[AgentIPC] Active ACP Config:', {
+      provider: activeConfig?.provider,
+      model: activeConfig?.model,
+      hasVlm: !!activeConfig?.vlm,
+      vlmModel: activeConfig?.vlm?.model
+    });
+
+    const runnerConfig = {
+      visionModel: activeConfig?.vlm?.model,
+      vlm: activeConfig?.vlm,
+      ollamaBaseUrl: activeConfig?.baseUrl, // Fallback
+    };
+
+    console.log('[AgentIPC] Initializing AgentRunner with config:', JSON.stringify(runnerConfig, null, 2));
+    const runner = new AgentRunner(client, runnerConfig);
+
     // IPC Batching State
     let chunkBuffer = '';
     let thoughtBuffer = '';
@@ -258,7 +306,7 @@ export function registerAgentHandlers() {
         } else if (streamEvent.type === 'done') {
           flushBuffers();
           safeSend('acp:stream-chunk', { delta: '', done: true });
-          
+
           // Self-Improvement: Trigger non-blocking memory reflection
           reflectAndRemember(history, userInput, fullResponse, client);
         } else {

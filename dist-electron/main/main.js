@@ -82,6 +82,7 @@ console.log('[Startup] User data:', electron_1.app.getPath('userData'));
 // ── Check for Auto-Start Mode ───────────────────────────────────────
 const isAutoStartMode = process.argv.includes('--auto-start');
 console.log('[Startup] Auto-start mode:', isAutoStartMode);
+const electron_2 = require("electron");
 const chat_vectors_1 = require("./store/chat-vectors");
 const context_engine_1 = require("./context-engine");
 const vector_1 = require("./context-engine/vector");
@@ -122,6 +123,43 @@ try {
     historyStore = new history_1.ChatHistoryStore();
     // Register all modularized IPC handlers
     (0, ipc_1.setupIPC)(historyStore);
+    /**
+     * Ensures that ~/.everfern/SYSTEM_PROMPT.md exists, creating it with defaults if not.
+     */
+    function ensureSystemPromptExists() {
+        const everfernDir = path.join(os.homedir(), '.everfern');
+        const promptPath = path.join(everfernDir, 'SYSTEM_PROMPT.md');
+        try {
+            if (!fs.existsSync(everfernDir)) {
+                fs.mkdirSync(everfernDir, { recursive: true });
+            }
+            if (!fs.existsSync(promptPath)) {
+                console.log('[Startup] 📝 Creating default SYSTEM_PROMPT.md in ~/.everfern/');
+                const defaultPrompt = `# EverFern System Prompt
+
+You are EverFern, an autonomous AI workplace agent designed to help users with their daily tasks.
+You have access to a variety of tools, including GUI automation, terminal access, and web search.
+
+## Guidelines:
+1. Be concise and professional.
+2. Use tools whenever necessary to fulfill the user's request.
+3. For GUI automation, use the 'computer_use' tool.
+4. If you are unsure about a command, ask for clarification.
+
+Your goal is to be the ultimate workplace companion.
+`;
+                fs.writeFileSync(promptPath, defaultPrompt, 'utf-8');
+            }
+            else {
+                console.log('[Startup] ✅ SYSTEM_PROMPT.md already exists in ~/.everfern/');
+            }
+        }
+        catch (err) {
+            console.error('[Startup] ❌ Failed to ensure SYSTEM_PROMPT.md existence:', err);
+        }
+    }
+    // Ensure system prompt exists
+    ensureSystemPromptExists();
     console.log('[Startup] Singletons and IPC initialized.');
 }
 catch (err) {
@@ -136,6 +174,31 @@ let lastStreamEvent = null;
 // Full chat messages for JSON viewer
 let lastChatMessages = [];
 let mainWindow = null;
+// Handle protocol links on Windows
+const gotTheLock = electron_1.app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    console.log('[Startup] ⚠️ Already running, quitting...');
+    electron_1.app.quit();
+}
+else {
+    electron_1.app.on('second-instance', (event, commandLine) => {
+        console.log('[Startup] second-instance received:', commandLine);
+        // Someone tried to run a second instance, we should focus our window.
+        if (mainWindow) {
+            if (mainWindow.isMinimized())
+                mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            // commandLine is an array of strings that contains the extra parameters,
+            // like the protocol link.
+            const url = commandLine.find(arg => arg.startsWith('everfern-app://'));
+            if (url) {
+                console.log('[Startup] Protocol URL detected in second-instance:', url);
+                mainWindow.webContents.send('acp:protocol-link', url);
+            }
+        }
+    });
+}
 // Tracks the ShowUI install/run process so we can kill it on app quit
 let installProc = null;
 // Message handler for bot integrations
@@ -392,8 +455,49 @@ async function autoStartEnabledBots() {
     }
 }
 // ── App lifecycle ───────────────────────────────────────────────────
+const voice_overlay_1 = require("./voice-overlay");
+let voiceOverlayManager;
 electron_1.app.whenReady().then(async () => {
     console.log('[App] App ready, starting initialization...');
+    /**
+     * Ensures that ~/.everfern/SYSTEM_PROMPT.md exists, creating it with defaults if not.
+     */
+    function ensureSystemPromptExists() {
+        const everfernDir = path.join(os.homedir(), '.everfern');
+        const promptPath = path.join(everfernDir, 'SYSTEM_PROMPT.md');
+        try {
+            if (!fs.existsSync(everfernDir)) {
+                console.log('[Startup] 📂 Creating .everfern directory...');
+                fs.mkdirSync(everfernDir, { recursive: true });
+            }
+            if (!fs.existsSync(promptPath)) {
+                console.log('[Startup] 📝 Creating default SYSTEM_PROMPT.md in ~/.everfern/');
+                const defaultPrompt = `# EverFern System Prompt
+
+You are EverFern, an autonomous AI workplace agent designed to help users with their daily tasks.
+You have access to a variety of tools, including GUI automation, terminal access, and web search.
+
+## Guidelines:
+1. Be concise and professional.
+2. Use tools whenever necessary to fulfill the user's request.
+3. For GUI automation, use the 'computer_use' tool.
+4. If you are unsure about a command, ask for clarification.
+
+Your goal is to be the ultimate workplace companion.
+`;
+                fs.writeFileSync(promptPath, defaultPrompt, 'utf-8');
+            }
+            else {
+                console.log('[Startup] ✅ SYSTEM_PROMPT.md already exists in ~/.everfern/');
+            }
+        }
+        catch (err) {
+            console.error('[Startup] ❌ Failed to ensure SYSTEM_PROMPT.md existence:', err);
+        }
+    }
+    // Ensure system prompt exists
+    ensureSystemPromptExists();
+    voiceOverlayManager = new voice_overlay_1.VoiceOverlayManager();
     // ── Protocol Handlers ──────────────────────────────────────────────
     // Custom protocol for the main application (Next.js out folder)
     electron_1.protocol.handle('everfern-app', async (request) => {
@@ -509,6 +613,31 @@ electron_1.app.whenReady().then(async () => {
     });
     // ── Create Main Window ─────────────────────────────────────────────
     createWindow();
+    // Register as default protocol client for everfern-app
+    if (process.defaultApp) {
+        if (process.argv.length >= 2) {
+            electron_1.app.setAsDefaultProtocolClient('everfern-app', process.execPath, [path.resolve(process.argv[1])]);
+        }
+    }
+    else {
+        electron_1.app.setAsDefaultProtocolClient('everfern-app');
+    }
+    // Register Ctrl+Shift+P global shortcut for Debug Window
+    try {
+        const success = electron_2.globalShortcut.register('CommandOrControl+Shift+P', () => {
+            console.log('[Shortcut] Ctrl+Shift+P triggered, toggling Debug Window...');
+            (0, debug_1.toggleDebugWindow)();
+        });
+        if (!success) {
+            console.error('[Shortcut] ❌ Failed to register Ctrl+Shift+P shortcut');
+        }
+        else {
+            console.log('[Shortcut] ✅ Ctrl+Shift+P registered successfully');
+        }
+    }
+    catch (error) {
+        console.error('[Shortcut] ❌ Error registering Ctrl+Shift+P:', error);
+    }
     // ── Initialize Integration Services ─────────────────────────────────
     try {
         console.log('[App] Initializing integration services...');
@@ -746,7 +875,7 @@ electron_1.ipcMain.handle('save-config', async (_event, config) => {
                 apiKey: config.apiKey,
                 model: scrubbedConfig.model,
                 baseUrl: scrubbedConfig.baseUrl,
-                vlm: scrubbedConfig.vlm, // Pass VLM to manager
+                vlm: config.vlm, // Pass full VLM config including apiKey
             });
         }
         return { success: true };

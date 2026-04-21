@@ -34,7 +34,7 @@ Respond with JSON only:
 }`;
         console.log('[Brain] Building completion signal...');
         const startTime = Date.now();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('completion signal timed out')), 5000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('completion signal timed out')), 10000));
         const response = await Promise.race([
             runner.client.chat({
                 messages: [{ role: 'user', content: prompt }],
@@ -78,7 +78,7 @@ Respond with JSON only:
  * and sets a completionSignal so the judge can make an informed verdict
  * without relying on regex pattern matching.
  */
-const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbort) => {
+const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbort, systemPromptOverride) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
         // Check for abort signal before processing
@@ -95,6 +95,7 @@ const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbo
             toolDefs: tools,
             eventQueue,
             nodeName: 'brain',
+            systemPromptOverride: systemPromptOverride
         }), 'Processing request');
         // Only build a completion signal when there are no tool calls
         // (i.e. the brain is done for this turn and will route to judge)

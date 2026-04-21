@@ -40,6 +40,7 @@ const ai_client_1 = require("../../../lib/ai-client");
 const text_to_tool_1 = require("../../parsers/text-to-tool");
 const mission_integrator_1 = require("../mission-integrator");
 const message_utils_1 = require("../services/message-utils");
+const computer_use_1 = require("../../tools/computer-use");
 /**
  * AI-based prompt slimming decision
  * Replaces keyword-based intent checking with semantic analysis
@@ -163,6 +164,13 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             const iterations = state.iterations;
             let client = runner.client;
             let modelUsed = client.model;
+            // Telemetry Update
+            runner.telemetry.metrics(iterations);
+            let thoughtBuffer = '';
+            let isThinking = false;
+            let streamedText = '';
+            // Optima: Context Pruning & Normalization with enhanced performance
+            let normalizedMessages = (0, message_utils_1.normalizeMessages)(state.messages);
             // ── Vision Grounding ───────────────────────────────────────────────────
             const vlm = runner.config.vlm;
             const lastMsgContent = state.messages[state.messages.length - 1]?.content || '';
@@ -170,8 +178,9 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
                 vlm?.model &&
                 vlm?.provider &&
                 runner.shouldCaptureScreenshot(lastMsgContent);
+            let updatedMessages = null;
             if (needsVisionGrounding && vlm) {
-                runner.telemetry.info(`🔭 Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
+                runner.telemetry.info(` telescope Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
                 client = new ai_client_1.AIClient({
                     provider: vlm.provider,
                     apiKey: vlm.apiKey,
@@ -179,14 +188,35 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
                     baseUrl: vlm.baseUrl
                 });
                 modelUsed = vlm.model;
+                try {
+                    runner.telemetry.info(' camera Capturing desktop state for vision grounding...');
+                    const screenshotData = await (0, computer_use_1.captureScreen)();
+                    if (screenshotData && screenshotData.b64) {
+                        const lastMsgIdx = normalizedMessages.length - 1;
+                        const lastMsg = normalizedMessages[lastMsgIdx];
+                        if (lastMsg && lastMsg.role === 'user') {
+                            const originalContent = typeof lastMsg.content === 'string'
+                                ? [{ type: 'text', text: lastMsg.content }]
+                                : lastMsg.content;
+                            const newContent = [
+                                ...originalContent,
+                                {
+                                    type: 'image_url',
+                                    image_url: { url: `data:image/jpeg;base64,${screenshotData.b64}` }
+                                }
+                            ];
+                            // Create a copy of the normalized messages and update the last one
+                            updatedMessages = [...normalizedMessages];
+                            updatedMessages[lastMsgIdx] = { ...lastMsg, content: newContent };
+                            normalizedMessages = updatedMessages;
+                            runner.telemetry.info(' check_mark Screenshot attached to user message.');
+                        }
+                    }
+                }
+                catch (err) {
+                    runner.telemetry.warn(`Failed to capture screenshot for vision grounding: ${err instanceof Error ? err.message : String(err)}`);
+                }
             }
-            // Telemetry Update
-            runner.telemetry.metrics(iterations);
-            let thoughtBuffer = '';
-            let isThinking = false;
-            let streamedText = '';
-            // Optima: Context Pruning & Normalization with enhanced performance
-            const normalizedMessages = (0, message_utils_1.normalizeMessages)(state.messages);
             // Get current intent for AI-based decisions
             const currentIntent = state.currentIntent || 'unknown';
             // Use AI to determine if system prompt slimming is appropriate

@@ -4,14 +4,27 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
   packagerConfig: {
     asar: {
-      unpack: ['**/*.node', 'out/**/*'],
+      unpack: [
+        '**/*.node',
+        'out/**/*',
+        '**/node_modules/@jitsi/robotjs/**/*',
+        '**/node_modules/screenshot-desktop/**/*',
+        '**/node_modules/sharp/**/*',
+      ],
     },
   },
   rebuildConfig: {},
   makers: [
     {
-      name: '@electron-forge/maker-squirrel',
-      config: {},
+      name: '@electron-forge/maker-wix',
+      config: {
+        language: 1033,
+        manufacturer: 'EverFern Community',
+        description: 'EverFern — Your autonomous AI workplace agent.',
+        ui: {
+          chooseDirectory: true,
+        },
+      },
     },
     {
       name: '@electron-forge/maker-zip',

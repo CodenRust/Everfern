@@ -7,6 +7,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
+import type { SubAgentProgressEvent } from '../src/app/chat/types';
 
 // ── Type Definitions for Providers ────────────────────────────────
 
@@ -30,6 +31,9 @@ export interface FlatModelEntry {
   provider: string;     // display name of provider
   providerType: ProviderType;
 }
+
+// Re-export SubAgentProgressEvent for frontend use
+export type { SubAgentProgressEvent } from '../src/app/chat/types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── Window Controls ────────────────────────────────────────────
@@ -91,12 +95,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
   loadConfig: ()            => ipcRenderer.invoke('load-config'),
 
+  // ── Voice Overlay ────────────────────────────────────────────────
+  voiceOverlay: {
+    onStateChange: (cb: (data: { state: 'idle' | 'listening' | 'executing' }) => void) => {
+      ipcRenderer.on('voice-overlay:state', (_e, data) => cb(data));
+    },
+    removeListeners: () => {
+      ipcRenderer.removeAllListeners('voice-overlay:state');
+    }
+  },
+
   // ── ACP (AI Completion Provider) ───────────────────────────────
   acp: {
     listProviders: ()            => ipcRenderer.invoke('acp:list-providers'),
     setProvider:   (cfg: any)   => ipcRenderer.invoke('acp:set-provider', cfg),
     healthCheck:   ()            => ipcRenderer.invoke('acp:health-check'),
     listModels:    ()            => ipcRenderer.invoke('acp:list-models'),
+    listTools:     ()            => ipcRenderer.invoke('acp:list-tools'),
     chat:          (req: any)   => ipcRenderer.invoke('acp:chat', req),
     stream:        (req: any)   => ipcRenderer.invoke('acp:stream', req),
     stop:          ()            => ipcRenderer.invoke('acp:stop'),
@@ -147,6 +162,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onSurfaceAction: (cb: (data: any) => void) => {
       ipcRenderer.on('acp:surface-action', (_e, data) => cb(data));
     },
+    onProtocolLink: (cb: (url: string) => void) => {
+      ipcRenderer.on('acp:protocol-link', (_e, url) => cb(url));
+    },
     onUsage: (cb: (data: { promptTokens: number; completionTokens: number; totalTokens: number }) => void) => {
       ipcRenderer.on('acp:usage', (_e, data) => cb(data));
     },
@@ -189,6 +207,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
         cb(data);
       });
     },
+    /**
+     * Register a callback for sub-agent progress events.
+     * Event type: SubAgentProgressEvent (see src/app/chat/types.ts)
+     */
+    onSubAgentProgress: (cb: (event: SubAgentProgressEvent) => void) => {
+      ipcRenderer.on('acp:sub-agent-progress', (_e, event) => cb(event));
+    },
+    /**
+     * Remove sub-agent progress event listener.
+     * Call this to clean up the listener when component unmounts.
+     */
+    removeSubAgentProgressListener: () => {
+      ipcRenderer.removeAllListeners('acp:sub-agent-progress');
+    },
 
     removeStreamListeners: () => {
       ipcRenderer.removeAllListeners('acp:stream-chunk');
@@ -210,6 +242,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:plan-created');
       ipcRenderer.removeAllListeners('acp:hitl-request');
       ipcRenderer.removeAllListeners('acp:hitl-response-processed');
+      ipcRenderer.removeAllListeners('acp:sub-agent-progress');
     },
   },
 
@@ -338,11 +371,16 @@ export type ElectronAPI = {
   };
   saveConfig: (config: any) => Promise<{ success: boolean; error?: string }>;
   loadConfig: ()            => Promise<{ success: boolean; config: any; error?: string }>;
+  voiceOverlay: {
+    onStateChange: (cb: (data: { state: 'idle' | 'listening' | 'executing' }) => void) => void;
+    removeListeners: () => void;
+  };
   acp: {
     listProviders:         () => Promise<any[]>;
     setProvider:           (cfg: any) => Promise<{ ok: boolean; error?: string }>;
     healthCheck:           () => Promise<{ ok: boolean; error?: string; provider?: string }>;
     listModels:            () => Promise<{ success: boolean; models: string[] }>;
+    listTools:             () => Promise<{ success: boolean; tools: { name: string; description: string }[]; error?: string }>;
     chat:                  (req: any) => Promise<any>;
     stream:                (req: any) => Promise<any>;
     onStreamChunk:         (cb: (chunk: { delta: string; done: boolean }) => void) => void;
@@ -356,6 +394,7 @@ export type ElectronAPI = {
     onViewSkill:           (cb: (data: { name: string }) => void) => void;
     onSkillDetected:       (cb: (data: { skillName: string; skillDescription: string; reason: string }) => void) => void;
     onSurfaceAction:       (cb: (data: any) => void) => void;
+    onProtocolLink:        (cb: (url: string) => void) => void;
     onAgentPermissionRequest: (cb: () => void) => void;
     agentPermissionResponse: (granted: boolean) => Promise<{ success: boolean }>;
     playSound: (soundPath: string) => Promise<boolean>;
@@ -367,6 +406,16 @@ export type ElectronAPI = {
     onHitlRequest: (cb: (data: any) => void) => void;
     sendHitlResponse: (response: string) => void;
     onHitlResponseProcessed: (cb: (data: { message: string; shouldSendAsMessage: boolean }) => void) => void;
+    /**
+     * Register a callback for sub-agent progress events.
+     * @param cb - Callback that receives SubAgentProgressEvent (see src/app/chat/types.ts)
+     */
+    onSubAgentProgress: (cb: (event: SubAgentProgressEvent) => void) => void;
+    /**
+     * Remove sub-agent progress event listener.
+     * Call this to clean up the listener when component unmounts.
+     */
+    removeSubAgentProgressListener: () => void;
     removeStreamListeners: () => void;
   };
   history: {

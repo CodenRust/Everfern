@@ -27,7 +27,7 @@ const TASK_TYPE_SIGNALS = {
     build: /\b(create|build|make|scaffold|new project|new app|generate|setup|initialize|bootstrap)\b/i,
     fix: /\b(fix|debug|repair|error|bug|broken|failing|crash|not work|issue|exception|traceback)\b/i,
     analyze: /\b(analyze|analyse|csv|xlsx|data|dataset|chart|graph|plot|dashboard|insights|statistics|metrics|trends)\b/i,
-    automate: /\b(automate|schedule|cron|batch|pipeline|workflow|recurring|monitor|watch|trigger)\b/i,
+    automate: /\b(automate|schedule|cron|batch|pipeline|workflow|recurring|monitor|watch|trigger|open|launch|start|click|type|press|scroll|gui|desktop|screen|mouse|keyboard|app|application|spotify|discord|chrome|browser|window)\b/i,
     research: /\b(research|search|find|look up|investigate|what is|how does|explain|compare|review)\b/i,
     task: /\b(run|execute|install|configure|move|copy|delete|download|upload|deploy|publish)\b/i,
 };
@@ -187,9 +187,7 @@ function decomposeTask(userInput, availableTools) {
             steps.push(mk('Compile and summarize findings', undefined, gatherIds.length > 0 ? gatherIds : execDeps, false, 'low'));
             break;
         case 'automate':
-            steps.push(mk('Write automation script', 'write', execDeps, false, 'high'));
-            steps.push(mk('Test automation script', 'run_command', [`step_${stepId - 1}`], false, 'high'));
-            steps.push(mk('Schedule or deploy automation', 'run_command', [`step_${stepId - 1}`], false, 'medium'));
+            steps.push(mk(`Execute GUI automation task: ${userInput}`, 'computer_use', execDeps, false, 'high', 'critical'));
             break;
         default:
             if (analysis.requiresCommandExecution) {

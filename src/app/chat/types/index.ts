@@ -54,6 +54,45 @@ export interface ModelOption {
     logo: any;
 }
 
+// Sub-agent progress streaming types
+export type SubAgentProgressEventType =
+  | 'step'       // New step started
+  | 'reasoning'  // Agent reasoning/thinking
+  | 'action'     // Action execution
+  | 'screenshot' // Screenshot captured
+  | 'complete'   // Sub-agent completed
+  | 'abort';     // Sub-agent aborted
+
+export interface SubAgentProgressEvent {
+  type: SubAgentProgressEventType;
+  toolCallId: string;
+  timestamp: string;
+  stepNumber?: number;
+  totalSteps?: number;
+  content?: string;
+  action?: {
+    type: string;
+    params: Record<string, unknown>;
+    description: string;
+  };
+  screenshot?: {
+    base64: string;
+    width: number;
+    height: number;
+  };
+  metadata?: {
+    model?: string;
+    provider?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface SubAgentProgressBatch {
+  toolCallId: string;
+  events: SubAgentProgressEvent[];
+  timestamp: string;
+}
+
 export type {
     ToolCallDisplay as ToolCallDisplayType,
     Message as MessageType,

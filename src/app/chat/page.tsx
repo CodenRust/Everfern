@@ -31,6 +31,9 @@ import {
     MagnifyingGlassIcon,
     ChevronUpIcon,
     CommandLineIcon,
+    ArrowPathIcon,
+    EyeIcon,
+    StopCircleIcon,
 } from "@heroicons/react/24/outline";
 import { CheckIcon as CheckSolidIcon } from "@heroicons/react/24/solid";
 
@@ -85,7 +88,7 @@ import { ReasoningBranch, ReasoningPane, ProgressStepsIcon, ContextGridIcon, Pan
 import { resolveToolDisplay } from "./tool-labels";
 import { formatDuration } from '../../lib/formatDuration';
 import { useAutoCollapse } from '../../hooks/use-auto-collapse';
-import type { ToolCallDisplay, Message, FileAttachment, FolderContext, ModelOption } from './types';
+import type { ToolCallDisplay, Message, FileAttachment, FolderContext, ModelOption, SubAgentProgressEvent } from './types/index';
 import type { SurfaceData } from './SurfaceCanvas';
 import { stripAnsi, extractFileArtifacts } from './utils/helpers';
 
@@ -189,11 +192,15 @@ export default function ChatPage() {
     const [pullPct, setPullPct] = useState(0);
     const [isComputerUseActive, setIsComputerUseActive] = useState(false);
     const [computerUseStep, setComputerUseStep] = useState("");
+    const [currentComputerUseToolCallId, setCurrentComputerUseToolCallId] = useState<string | null>(null);
     const [liveToolCalls, setLiveToolCalls] = useState<ToolCallDisplay[]>([]);
     const [streamingContent, setStreamingContent] = useState("");
     const [streamingThought, setStreamingThought] = useState("");
     const [activePlanSteps, setActivePlanSteps] = useState<Array<{ id: string; description: string; tool?: string }> | null>(null);
     const [activePlanTitle, setActivePlanTitle] = useState<string | null>(null);
+
+    // Sub-agent progress state - stores progress events grouped by toolCallId
+    const [subAgentProgress, setSubAgentProgress] = useState<Map<string, SubAgentProgressEvent[]>>(new Map());
 
     // User question form state
     const [activeUserQuestions, setActiveUserQuestions] = useState<Array<{
@@ -221,6 +228,9 @@ export default function ChatPage() {
     // Current node tracking for better status display
     const [currentNode, setCurrentNode] = useState<string>("");
     const [currentPhase, setCurrentPhase] = useState<"triage" | "planning" | "execution" | "validation" | "completion" | undefined>(undefined);
+
+    // Sub-agent progress pane state
+    const [zoomedScreenshot, setZoomedScreenshot] = useState<string | null>(null);
 
     // Get user-friendly node names with enhanced phase context
     const getNodeDisplayName = (nodeName: string): string => {
@@ -545,6 +555,16 @@ export default function ChatPage() {
         };
     }, []);
 
+    // Cleanup sub-agent progress state and listener on unmount
+    useEffect(() => {
+        return () => {
+            // Clear sub-agent progress state on unmount
+            setSubAgentProgress(new Map());
+            // Listener cleanup is handled by removeStreamListeners() which is called
+            // at the start of each handleSend and after mission complete
+        };
+    }, []);
+
     const handleShowJsonViewer = async () => {
         try {
             // Try to get full chat history first, fall back to last event
@@ -712,6 +732,8 @@ export default function ChatPage() {
             if (!acpApi?.stream) return;
 
             acpApi.removeStreamListeners();
+            // Clear sub-agent progress state when starting a new message
+            setSubAgentProgress(new Map());
             acpApi.onAgentPermissionRequest(() => {
                 const soundUrl = acpApi?.getPermissionSoundUrl?.();
                 if (soundUrl) {
@@ -885,6 +907,8 @@ export default function ChatPage() {
                     setActivePlanTitle(plan.title || null);
                 }
             });
+
+            // HITL requests and other global listeners below...
 
             // Simplified mission complete handler without timeline
             acpApi.onMissionComplete(({ thinkingDuration }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
@@ -1159,7 +1183,11 @@ export default function ChatPage() {
                     if (toolName === 'ask_user_question') {
                         console.log('[Frontend] Received ask_user_question tool_start:', JSON.stringify({ toolName, toolArgs }, null, 2));
                     }
-                    if (toolName === 'computer_use') { setIsComputerUseActive(true); setComputerUseStep('Starting...'); }
+                    if (toolName === 'computer_use') {
+                        setIsComputerUseActive(true);
+                        setComputerUseStep('Starting...');
+                        if (toolCallId) setCurrentComputerUseToolCallId(toolCallId);
+                    }
 
                     const display = resolveToolDisplay(toolName, toolArgs);
                     console.log('[Frontend] Resolved display for', toolName, ':', display);
@@ -1286,7 +1314,11 @@ export default function ChatPage() {
                         console.error('[Frontend] Record:', JSON.stringify(record, null, 2));
                     }
 
-                    if (record.toolName === 'computer_use') { setIsComputerUseActive(false); setComputerUseStep(''); }
+                    if (record.toolName === 'computer_use' && record.toolCallId === currentComputerUseToolCallId) {
+                        setIsComputerUseActive(false);
+                        setComputerUseStep('');
+                        setCurrentComputerUseToolCallId(null);
+                    }
                     if (record.toolName === 'create_plan' || record.toolName === 'update_plan_step') { if (record.result?.success && record.result?.data) setCurrentPlan(record.result.data); }
                     if (record.toolName === 'execution_plan') {
                         if (record.result?.success && record.result?.data) {
@@ -1397,6 +1429,30 @@ export default function ChatPage() {
                     // Stop loading - wait for user to approve plan
                     setIsLoading(false);
                     api.removeStreamListeners();
+                });
+
+                // Listen to sub-agent progress events
+                api.onSubAgentProgress?.((event: SubAgentProgressEvent) => {
+                    console.log('[SubAgent Progress] Event received:', event.type, 'for toolCallId:', event.toolCallId);
+                    setSubAgentProgress(prev => {
+                        const newMap = new Map(prev);
+
+                        // If we have too many tool calls, remove the oldest one to prevent memory issues
+                        if (newMap.size >= 10 && !newMap.has(event.toolCallId)) {
+                            const firstKey = newMap.keys().next().value;
+                            if (firstKey) newMap.delete(firstKey);
+                        }
+
+                        // Get existing events and add new event
+                        const existingEvents = newMap.get(event.toolCallId) || [];
+                        const updatedEvents = [...existingEvents, event];
+
+                        // Limit to last 100 events per tool call
+                        const limitedEvents = updatedEvents.slice(-100);
+
+                        newMap.set(event.toolCallId, limitedEvents);
+                        return newMap;
+                    });
                 });
 
                 console.log('[Frontend handleSend] Registering NEW onStreamChunk handler');
@@ -2108,6 +2164,65 @@ export default function ChatPage() {
         />
     );
 
+    const handleRecordToggle = useCallback(async () => {
+        if (!isRecording) {
+            setVoiceLoading(true);
+            setVoiceTranscript("");
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mediaRecorder = new MediaRecorder(stream);
+                const audioChunks: BlobPart[] = [];
+                mediaRecorderRef.current = mediaRecorder;
+                audioStreamRef.current = stream;
+                mediaRecorder.ondataavailable = (event) => { audioChunks.push(event.data); };
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    if (voiceProvider === "deepgram" && voiceDeepgramKey) {
+                        try {
+                            const response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=en', { method: 'POST', headers: { 'Authorization': `Token ${voiceDeepgramKey}`, 'Content-Type': 'audio/webm' }, body: arrayBuffer });
+                            if (response.ok) {
+                                const result = await response.json();
+                                const transcript = result.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+                                setVoiceTranscript(transcript);
+                                setInputValue(transcript);
+                                if (transcript.trim()) {
+                                    handleSend(transcript);
+                                }
+                            }
+                            else { setVoiceTranscript("Failed to transcribe audio"); }
+                        } catch (error) { setVoiceTranscript("Error transcribing audio"); }
+                    }
+                    stream.getTracks().forEach(track => track.stop());
+                    setVoiceLoading(false);
+                    mediaRecorderRef.current = null;
+                    audioStreamRef.current = null;
+                };
+                mediaRecorder.start();
+                setIsRecording(true);
+                voiceTimeoutRef.current = setTimeout(() => { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') { mediaRecorderRef.current.stop(); setIsRecording(false); } }, 30000);
+            } catch (error) { setVoiceLoading(false); }
+        } else {
+            setIsRecording(false);
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
+            if (audioStreamRef.current) audioStreamRef.current.getTracks().forEach(track => track.stop());
+            if (voiceTimeoutRef.current) { clearTimeout(voiceTimeoutRef.current); voiceTimeoutRef.current = null; }
+        }
+    }, [isRecording, voiceProvider, voiceDeepgramKey, handleSend]);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            (window as any).electronAPI.voiceOverlay.onStateChange((data: any) => {
+                if (data.state === 'listening') {
+                    if (!isRecording) handleRecordToggle();
+                } else if (data.state === 'executing') {
+                    if (isRecording) handleRecordToggle();
+                }
+            });
+            return () => (window as any).electronAPI.voiceOverlay.removeListeners();
+        }
+    }, [isRecording, handleRecordToggle]);
+
     // ── Render ───────────────────────────────────────────────────────────────
     return (
         <>
@@ -2125,43 +2240,7 @@ export default function ChatPage() {
                     voiceLoading={voiceLoading}
                     voiceTranscript={voiceTranscript}
                     voicePlayback={voicePlayback}
-                    onRecordToggle={async () => {
-                        if (!isRecording) {
-                            setVoiceLoading(true);
-                            setVoiceTranscript("");
-                            try {
-                                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                                const mediaRecorder = new MediaRecorder(stream);
-                                const audioChunks: BlobPart[] = [];
-                                mediaRecorderRef.current = mediaRecorder;
-                                audioStreamRef.current = stream;
-                                mediaRecorder.ondataavailable = (event) => { audioChunks.push(event.data); };
-                                mediaRecorder.onstop = async () => {
-                                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                                    const arrayBuffer = await audioBlob.arrayBuffer();
-                                    if (voiceProvider === "deepgram" && voiceDeepgramKey) {
-                                        try {
-                                            const response = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=en', { method: 'POST', headers: { 'Authorization': `Token ${voiceDeepgramKey}`, 'Content-Type': 'audio/webm' }, body: arrayBuffer });
-                                            if (response.ok) { const result = await response.json(); const transcript = result.results?.channels?.[0]?.alternatives?.[0]?.transcript || ''; setVoiceTranscript(transcript); setInputValue(transcript); }
-                                            else { setVoiceTranscript("Failed to transcribe audio"); }
-                                        } catch (error) { setVoiceTranscript("Error transcribing audio"); }
-                                    }
-                                    stream.getTracks().forEach(track => track.stop());
-                                    setVoiceLoading(false);
-                                    mediaRecorderRef.current = null;
-                                    audioStreamRef.current = null;
-                                };
-                                mediaRecorder.start();
-                                setIsRecording(true);
-                                voiceTimeoutRef.current = setTimeout(() => { if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') { mediaRecorderRef.current.stop(); setIsRecording(false); } }, 30000);
-                            } catch (error) { setVoiceLoading(false); }
-                        } else {
-                            setIsRecording(false);
-                            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
-                            if (audioStreamRef.current) audioStreamRef.current.getTracks().forEach(track => track.stop());
-                            if (voiceTimeoutRef.current) { clearTimeout(voiceTimeoutRef.current); voiceTimeoutRef.current = null; }
-                        }
-                    }}
+                    onRecordToggle={handleRecordToggle}
                     onOutputToggle={() => setVoiceOutputEnabled(!voiceOutputEnabled)}
                     voiceOutputEnabled={voiceOutputEnabled}
                     voiceProvider={voiceProvider}
@@ -2604,29 +2683,147 @@ export default function ChatPage() {
                                     <AnimatePresence>
                                         {(isComputerUseActive || showPermissionModal) && (
                                             <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.2 }} style={{ width: "96%", maxWidth: 840, margin: "0 auto", position: "relative", zIndex: 1 }}>
-                                                <div style={{ width: "100%", background: "#161615", border: "1px solid rgba(255, 255, 255, 0.12)", borderBottom: "none", borderRadius: "20px 20px 0 0", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-                                                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                                                        <div style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: showPermissionModal ? "rgba(251, 191, 36, 0.15)" : "rgba(255, 255, 255, 0.05)", border: showPermissionModal ? "1px solid rgba(251, 191, 36, 0.3)" : "1px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                                            {showPermissionModal ? <span style={{ fontSize: 16 }}>🔒</span> : <Loader size={14} strokeWidth={2} className="text-zinc-300" />}
+                                                <div style={{ width: "100%", background: "#161615", border: "1px solid rgba(255, 255, 255, 0.12)", borderBottom: "none", borderRadius: "20px 20px 0 0", padding: "12px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+                                                    {/* Header with Title and Controls */}
+                                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                                            <div style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: showPermissionModal ? "rgba(251, 191, 36, 0.15)" : "rgba(255, 255, 255, 0.05)", border: showPermissionModal ? "1px solid rgba(251, 191, 36, 0.3)" : "1px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                                {showPermissionModal ? <span style={{ fontSize: 16 }}>🔒</span> : <Loader size={14} strokeWidth={2} className="text-zinc-300" />}
+                                                            </div>
+                                                            <div>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{showPermissionModal ? "Fern needs permission to access your system files" : "EverFern is controlling your PC"}</div>
+                                                                    {!showPermissionModal && <div style={{ width: 6, height: 6, borderRadius: 3, background: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />}
+                                                                </div>
+                                                                <div style={{ fontSize: 12, color: showPermissionModal ? "#fcd34d" : "#a1a1aa", marginTop: 2, fontFamily: showPermissionModal ? "inherit" : "monospace" }}>{showPermissionModal ? "Fern will be able to read and organize files in the folders you share." : computerUseStep || 'Preparing...'}</div>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{showPermissionModal ? "Fern needs permission to access your system files" : "EverFern is controlling your PC"}</div>
-                                                            <div style={{ fontSize: 12, color: showPermissionModal ? "#fcd34d" : "#a1a1aa", marginTop: 2, fontFamily: showPermissionModal ? "inherit" : "monospace" }}>{showPermissionModal ? "Fern will be able to read and organize files in the folders you share." : computerUseStep || 'Preparing...'}</div>
+
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                            {!showPermissionModal && isComputerUseActive && (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        (window as any).electronAPI?.acp?.stop?.();
+                                                                        setIsComputerUseActive(false);
+                                                                    }}
+                                                                    style={{
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        gap: 6,
+                                                                        padding: '6px 12px',
+                                                                        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                                                                        color: '#ef4444',
+                                                                        border: '1px solid rgba(239, 68, 68, 0.2)',
+                                                                        borderRadius: 12,
+                                                                        fontSize: 11,
+                                                                        fontWeight: 600,
+                                                                        cursor: 'pointer',
+                                                                        transition: 'all 0.2s ease'
+                                                                    }}
+                                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.2)'}
+                                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)'}
+                                                                >
+                                                                    <StopCircleIcon width={14} height={14} strokeWidth={2.5} /> Stop Agent
+                                                                </button>
+                                                            )}
+
+                                                            {showPermissionModal ? (
+                                                                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                                                    <button onClick={() => { setShowPermissionModal(false); setIsComputerUseActive(false); (window as any).electronAPI?.acp?.agentPermissionResponse?.(false); }} style={{ padding: "7px 15px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", backgroundColor: "transparent", color: "#a1a1aa", fontSize: 12, fontWeight: 600, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"} onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}>Deny</button>
+                                                                    <button onClick={() => { setPermissionsGranted(true); setShowPermissionModal(false); (window as any).electronAPI?.acp?.agentPermissionResponse?.(true); }} style={{ padding: "7px 18px", borderRadius: 14, border: "none", backgroundColor: "#fbbf24", color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 0 16px rgba(251, 191, 36, 0.3)" }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#f59e0b"; e.currentTarget.style.transform = "scale(1.03)"; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#fbbf24"; e.currentTarget.style.transform = "scale(1)"; }}>
+                                                                        <CheckCircleIcon width={13} height={13} strokeWidth={2.5} /> Allow Access
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ fontSize: 11, color: "#52525b", flexShrink: 0 }}>
+                                                                    <kbd style={{ padding: "2px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.04)", fontSize: 10 }}>⌘⇧X</kbd> to abort
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
-                                                    {showPermissionModal ? (
-                                                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                                                            <button onClick={() => { setShowPermissionModal(false); setIsComputerUseActive(false); (window as any).electronAPI?.acp?.agentPermissionResponse?.(false); }} style={{ padding: "7px 15px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)", backgroundColor: "transparent", color: "#a1a1aa", fontSize: 12, fontWeight: 600, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"} onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}>Deny</button>
-                                                            <button onClick={() => { setPermissionsGranted(true); setShowPermissionModal(false); (window as any).electronAPI?.acp?.agentPermissionResponse?.(true); }} style={{ padding: "7px 18px", borderRadius: 14, border: "none", backgroundColor: "#fbbf24", color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 0 16px rgba(251, 191, 36, 0.3)" }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#f59e0b"; e.currentTarget.style.transform = "scale(1.03)"; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#fbbf24"; e.currentTarget.style.transform = "scale(1)"; }}>
-                                                                <CheckCircleIcon width={13} height={13} strokeWidth={2.5} /> Allow Access
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <div style={{ fontSize: 11, color: "#52525b", flexShrink: 0 }}>
-                                                            <kbd style={{ padding: "2px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.04)", fontSize: 10 }}>⌘⇧X</kbd> to abort
+
+                                                    {/* Progress and Visual History */}
+                                                    {!showPermissionModal && isComputerUseActive && currentComputerUseToolCallId && (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                                                            {/* Screenshot History Strip */}
+                                                            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none', minHeight: 45 }}>
+                                                                {subAgentProgress.get(currentComputerUseToolCallId)?.filter(e => e.type === 'screenshot').map((e, idx) => (
+                                                                    <motion.div
+                                                                        key={idx}
+                                                                        initial={{ opacity: 0, scale: 0.9 }}
+                                                                        animate={{ opacity: 1, scale: 1 }}
+                                                                        style={{ position: 'relative', flexShrink: 0 }}
+                                                                    >
+                                                                        <div onClick={() => setZoomedScreenshot(e.screenshot?.base64 || null)} style={{ cursor: 'pointer', transition: 'transform 0.2s' }} onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'} onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
+                                                                            <Image
+                                                                                src={e.screenshot?.base64 || ''}
+                                                                                alt={`Step ${e.stepNumber}`}
+                                                                                width={80}
+                                                                                height={45}
+                                                                                style={{ borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', objectFit: 'cover' }}
+                                                                            />
+                                                                            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 40%)', borderRadius: 8 }} />
+                                                                            <div style={{ position: 'absolute', bottom: 2, right: 6, fontSize: 10, color: '#fff', fontWeight: 800 }}>{e.stepNumber}</div>
+                                                                        </div>
+                                                                    </motion.div>
+                                                                ))}
+                                                                {(!subAgentProgress.get(currentComputerUseToolCallId)?.some(e => e.type === 'screenshot')) && (
+                                                                    <div style={{ width: 80, height: 45, borderRadius: 8, border: '1px dashed rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                        <EyeIcon width={14} height={14} style={{ color: '#27272a' }} />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Action Log / Reasoning */}
+                                                            <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 14px', background: 'rgba(0,0,0,0.3)', borderRadius: 14, border: '1px solid rgba(255,255,255,0.06)', scrollbarWidth: 'none' }}>
+                                                                {subAgentProgress.get(currentComputerUseToolCallId)?.filter(e => e.type === 'reasoning' || e.type === 'action').slice(-15).map((e, idx) => (
+                                                                    <div key={idx} style={{ fontSize: 11.5, display: 'flex', gap: 10, lineHeight: 1.5, opacity: idx === (subAgentProgress.get(currentComputerUseToolCallId)?.filter(ev => ev.type === 'reasoning' || ev.type === 'action').length || 0) - 1 ? 1 : 0.6 }}>
+                                                                        <span style={{ color: '#52525b', flexShrink: 0, fontFamily: 'monospace' }}>{new Date(e.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                                                                        <div style={{ color: e.type === 'action' ? '#fff' : '#a1a1aa', fontWeight: e.type === 'action' ? 600 : 400 }}>
+                                                                            {e.type === 'action' ? (
+                                                                                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                                    <span style={{ color: '#6366f1' }}>▶</span> {e.action?.description}
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span>💭 {e.content}</span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                                {(!subAgentProgress.get(currentComputerUseToolCallId)?.some(e => e.type === 'reasoning' || e.type === 'action')) && (
+                                                                    <div style={{ fontSize: 11.5, color: '#52525b', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                        <ArrowPathIcon width={12} height={12} className="animate-spin" />
+                                                                        Waiting for agent strategy...
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    {/* Screenshot Zoom Overlay */}
+                                    <AnimatePresence>
+                                        {zoomedScreenshot && (
+                                            <motion.div
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                exit={{ opacity: 0 }}
+                                                onClick={() => setZoomedScreenshot(null)}
+                                                style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, cursor: 'zoom-out', backdropFilter: 'blur(8px)' }}
+                                            >
+                                                <motion.div
+                                                    initial={{ scale: 0.9, y: 20 }}
+                                                    animate={{ scale: 1, y: 0 }}
+                                                    style={{ maxWidth: '95%', maxHeight: '95%', position: 'relative' }}
+                                                >
+                                                    <img src={zoomedScreenshot} style={{ maxWidth: '100%', maxHeight: '85vh', borderRadius: 16, boxShadow: '0 30px 60px rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                                                    <div style={{ position: 'absolute', top: -48, right: 0, color: '#fff', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, background: 'rgba(255,255,255,0.1)', padding: '8px 16px', borderRadius: 20, backdropFilter: 'blur(4px)' }}>
+                                                        <XMarkIcon width={18} height={18} strokeWidth={2.5} /> Close Preview
+                                                    </div>
+                                                </motion.div>
                                             </motion.div>
                                         )}
                                     </AnimatePresence>

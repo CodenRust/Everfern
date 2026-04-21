@@ -20,7 +20,7 @@ async function run() {
 
     // 2. Read
     const imgBuffer = fs.readFileSync(outPath);
-    
+
     // Get dimensions
     let width = 1920, height = 1080;
     if (imgBuffer.length > 24 && imgBuffer.toString("ascii", 1, 4) === "PNG") {
@@ -28,19 +28,39 @@ async function run() {
        height = imgBuffer.readUInt32BE(20);
     }
 
-    // 3. Resize & Encode
-    const area = width * height;
-    const clampedArea = Math.min(Math.max(area, imageMinPixels), imageMaxPixels);
-    const scale = Math.sqrt(clampedArea / area);
-    
-    const roundSize = (v: number): number =>
-      Math.max(imageScaleFactor, Math.floor(Math.max(1, v) / imageScaleFactor) * imageScaleFactor);
-
-    let newW = roundSize(width * scale);
-    let newH = roundSize(height * scale);
-
+    // 3. Resize and Encode
     let encoded = "";
+    let newW = width;
+    let newH = height;
+
     if (sharp) {
+      // Compute resize dimensions
+      const area = width * height;
+      if (area > 0) {
+        const clampedArea = Math.min(
+          Math.max(area, imageMinPixels),
+          imageMaxPixels
+        );
+        const scale = Math.sqrt(clampedArea / area);
+
+        const roundSize = (v: number): number =>
+          Math.max(
+            imageScaleFactor,
+            Math.floor(Math.max(1, v) / imageScaleFactor) *
+            imageScaleFactor
+          );
+
+        newW = roundSize(width * scale);
+        newH = roundSize(height * scale);
+
+        const newArea = Math.max(1, newW * newH);
+        if (newArea > imageMaxPixels) {
+          const shrink = Math.sqrt(imageMaxPixels / newArea);
+          newW = roundSize(newW * shrink);
+          newH = roundSize(newH * shrink);
+        }
+      }
+
       const jpegBuffer = await sharp(imgBuffer)
         .resize(newW, newH, { fit: 'fill' })
         .jpeg({ quality: imageQuality })
@@ -48,8 +68,6 @@ async function run() {
       encoded = jpegBuffer.toString("base64");
     } else {
       encoded = imgBuffer.toString("base64");
-      newW = width;
-      newH = height;
     }
 
     parentPort?.postMessage({

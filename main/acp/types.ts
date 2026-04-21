@@ -114,7 +114,15 @@ export interface ACPStoredConfig {
   engine: 'local' | 'online' | 'everfern';
   provider: ProviderType;
   apiKey?: string;
+  baseUrl?: string;
   model?: string;
+  vlm?: {
+    engine: 'online' | 'local';
+    provider: string;
+    model: string;
+    baseUrl?: string;
+    apiKey?: string;
+  };
   timestamp: string;
 }
 

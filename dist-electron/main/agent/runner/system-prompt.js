@@ -114,6 +114,7 @@ async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sess
     // Read the Markdown file asynchronously
     let promptMd = '';
     const searchPaths = [
+        path.join(homedir, '.everfern', 'SYSTEM_PROMPT.md'),
         path.join(__dirname, 'prompts', 'SYSTEM_PROMPT.md'),
         path.join(__dirname, '..', '..', 'main', 'agent', 'prompts', 'SYSTEM_PROMPT.md'), // Fallback from dist-electron
         path.join(process.cwd(), 'main', 'agent', 'prompts', 'SYSTEM_PROMPT.md'),
@@ -200,6 +201,7 @@ function getSlimSystemPrompt(platform = 'win32', conversationId, sessionCreatedP
     // Read the Markdown file (cache this separately if needed)
     let promptMd = '';
     const searchPaths = [
+        path.join(homedir, '.everfern', 'SYSTEM_PROMPT.md'),
         path.join(__dirname, 'prompts', 'SYSTEM_PROMPT.md'),
         path.join(__dirname, '..', '..', 'main', 'agent', 'prompts', 'SYSTEM_PROMPT.md'), // Fallback from dist-electron
         path.join(process.cwd(), 'main', 'agent', 'prompts', 'SYSTEM_PROMPT.md'),

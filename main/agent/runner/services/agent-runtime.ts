@@ -5,6 +5,7 @@ import { GraphStateType, StreamEvent } from '../state';
 import { parseTextToToolCalls } from '../../parsers/text-to-tool';
 import { AgentRunner } from '../runner';
 import { normalizeMessages } from './message-utils';
+import { captureScreen } from '../../tools/computer-use';
 
 export interface AgentStepOptions {
   runner: AgentRunner;
@@ -35,34 +36,85 @@ export async function runAgentStep(
   let verifyIntentRetries = 0;
 
   try {
-    // Vision Grounding check - use pooled client for VLM
+    // 1. Initial message normalization for all subsequent steps
+    let normalizedMessages = normalizeMessages(state.messages);
+
+    // 2. Vision Grounding check - use pooled client for VLM
     const lastMsgContent = state.messages[state.messages.length - 1]?.content || '';
     const vlm = (runner as any).config.vlm;
+    let updatedMessages: ChatMessage[] | null = null;
+    
+    // Only use separate VLM if main model isn't vision-native
+    const mainProvider = runner.client.provider;
+    const isVisionNative = ['openai', 'anthropic', 'gemini', 'nvidia', 'google'].includes(mainProvider);
+
     if (iterations === 0 && vlm?.model && runner.shouldCaptureScreenshot(lastMsgContent)) {
-      clientConfig = {
-        provider: vlm.provider,
-        model: vlm.model,
-        apiKey: vlm.apiKey,
-        baseUrl: vlm.baseUrl
-      };
-      client = runner.getClient(clientConfig);
-      clientToRelease = client;
-      runner.telemetry.info(`Using VLM: ${vlm.model} (${vlm.provider})`);
+      // If native vision exists, keep main client but capture screenshot
+      // If not, switch to VLM client
+      if (!isVisionNative) {
+        clientConfig = {
+          provider: vlm.provider,
+          model: vlm.model,
+          apiKey: vlm.apiKey,
+          baseUrl: vlm.baseUrl
+        };
+        client = runner.getClient(clientConfig);
+        clientToRelease = client;
+        runner.telemetry.info(`Using VLM: ${vlm.model} (${vlm.provider})`);
+      } else {
+        runner.telemetry.info(`Using Native Vision: ${runner.client.model} (${mainProvider})`);
+      }
+
+      try {
+        runner.telemetry.info('📸 Capturing desktop state for vision grounding...');
+        const screenshotData = await captureScreen();
+        if (screenshotData && screenshotData.b64) {
+          const lastMsgIdx = normalizedMessages.length - 1;
+          const lastMsg = normalizedMessages[lastMsgIdx];
+          
+          if (lastMsg && lastMsg.role === 'user') {
+            const originalContent = typeof lastMsg.content === 'string' 
+              ? [{ type: 'text' as const, text: lastMsg.content }] 
+              : lastMsg.content;
+              
+            const newContent: ChatMessage['content'] = [
+              ...originalContent,
+              {
+                type: 'image_url' as const,
+                image_url: { url: `data:image/jpeg;base64,${screenshotData.b64}` }
+              }
+            ];
+            
+            // Create a copy of the normalized messages and update the last one
+            updatedMessages = [...normalizedMessages];
+            updatedMessages[lastMsgIdx] = { ...lastMsg, content: newContent };
+            normalizedMessages = updatedMessages;
+            runner.telemetry.info('✅ Screenshot attached to user message.');
+          }
+        }
+      } catch (err) {
+        runner.telemetry.warn(`Failed to capture screenshot for vision grounding: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
-    // Optima: Normalization
-    const normalizedMessages = normalizeMessages(state.messages);
-
-    // Inject system prompt override if provided
-    if (systemPromptOverride && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
-      normalizedMessages[0].content = systemPromptOverride;
+    // 3. Inject system prompt override or ensure one exists
+    if (systemPromptOverride) {
+      if (normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
+        normalizedMessages[0].content = systemPromptOverride;
+      } else {
+        // Insert new system message at the beginning
+        normalizedMessages.unshift({
+          role: 'system',
+          content: systemPromptOverride
+        });
+      }
     }
 
     let thoughtBuffer = '';
     let isThinking = false;
     let streamedText = '';
 
-    // Enhanced context pruning for better performance
+    // 4. Enhanced context pruning for better performance
     const prunedMessages = normalizedMessages.map((m, idx) => {
       if (m.role === "user" && Array.isArray(m.content)) {
         const hasImage = m.content.some((c: any) => c.type === 'image_url');
@@ -148,7 +200,23 @@ export async function runAgentStep(
       },
     };
 
-    const response = await client.chat(request);
+    let response = await client.chat(request);
+
+    // 5. Tool Call Nudge (Specialized Agents)
+    // If a specialized agent (like computer_use) fails to call a tool, nudge it once.
+    const isSpecializedAgent = ['computer_use_agent', 'coding_specialist', 'data_analyst', 'web_explorer'].includes(nodeName);
+    if (isSpecializedAgent && (!response.toolCalls || response.toolCalls.length === 0) && verifyIntentRetries === 0) {
+        verifyIntentRetries++;
+        runner.telemetry.warn(`[AgentRuntime] ${nodeName} failed to call a tool. Nudging...`);
+        
+        const nudgeMsg: ChatMessage = {
+          role: 'system',
+          content: `SYSTEM REMINDER: You are the ${nodeName}. You are specifically designed to use your specialized tools. YOU HAVE ALL NECESSARY PERMISSIONS. Do not explain why you cannot do something. Do not talk about the task. Use the 'computer_use' tool (or your other relevant tools) NOW to execute the next step of the plan. Output a tool call immediately.`
+        };
+        
+        const nudgeMessages = [...limitedMessages, nudgeMsg];
+        response = await client.chat({ ...request, messages: nudgeMessages });
+    }
 
     // Flush any remaining content in thoughtBuffer after streaming completes
     if (thoughtBuffer.trim()) {

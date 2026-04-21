@@ -8,6 +8,7 @@ import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 
 import { normalizeMessages } from '../services/message-utils';
+import { captureScreen } from '../../tools/computer-use';
 
 /**
  * AI-based prompt slimming decision
@@ -160,25 +161,6 @@ export const createCallModelNode = (
     let client = (runner as any).client; 
     let modelUsed = client.model;
 
-    // ── Vision Grounding ───────────────────────────────────────────────────
-    const vlm = (runner as any).config.vlm;
-    const lastMsgContent = state.messages[state.messages.length - 1]?.content || '';
-    const needsVisionGrounding = iterations === 0 &&
-      vlm?.model &&
-      vlm?.provider &&
-      (runner as any).shouldCaptureScreenshot(lastMsgContent);
-
-    if (needsVisionGrounding && vlm) {
-      runner.telemetry.info(`🔭 Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
-      client = new AIClient({
-        provider: vlm.provider as any,
-        apiKey: vlm.apiKey,
-        model: vlm.model,
-        baseUrl: vlm.baseUrl
-      });
-      modelUsed = vlm.model;
-    }
-
     // Telemetry Update
     runner.telemetry.metrics(iterations);
 
@@ -187,7 +169,59 @@ export const createCallModelNode = (
     let streamedText = '';
 
     // Optima: Context Pruning & Normalization with enhanced performance
-    const normalizedMessages = normalizeMessages(state.messages);
+    let normalizedMessages = normalizeMessages(state.messages);
+
+    // ── Vision Grounding ───────────────────────────────────────────────────
+    const vlm = (runner as any).config.vlm;
+    const lastMsgContent = state.messages[state.messages.length - 1]?.content || '';
+    const needsVisionGrounding = iterations === 0 &&
+      vlm?.model &&
+      vlm?.provider &&
+      (runner as any).shouldCaptureScreenshot(lastMsgContent);
+
+    let updatedMessages: ChatMessage[] | null = null;
+    if (needsVisionGrounding && vlm) {
+      runner.telemetry.info(` telescope Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
+      client = new AIClient({
+        provider: vlm.provider as any,
+        apiKey: vlm.apiKey,
+        model: vlm.model,
+        baseUrl: vlm.baseUrl
+      });
+      modelUsed = vlm.model;
+
+      try {
+        runner.telemetry.info(' camera Capturing desktop state for vision grounding...');
+        const screenshotData = await captureScreen();
+        if (screenshotData && screenshotData.b64) {
+          const lastMsgIdx = normalizedMessages.length - 1;
+          const lastMsg = normalizedMessages[lastMsgIdx];
+          
+          if (lastMsg && lastMsg.role === 'user') {
+            const originalContent = typeof lastMsg.content === 'string' 
+              ? [{ type: 'text' as const, text: lastMsg.content }] 
+              : lastMsg.content;
+              
+            const newContent: ChatMessage['content'] = [
+              ...originalContent,
+              {
+                type: 'image_url' as const,
+                image_url: { url: `data:image/jpeg;base64,${screenshotData.b64}` }
+              }
+            ];
+            
+            // Create a copy of the normalized messages and update the last one
+            updatedMessages = [...normalizedMessages];
+            updatedMessages[lastMsgIdx] = { ...lastMsg, content: newContent };
+            normalizedMessages = updatedMessages;
+            runner.telemetry.info(' check_mark Screenshot attached to user message.');
+          }
+        }
+      } catch (err) {
+        runner.telemetry.warn(`Failed to capture screenshot for vision grounding: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     
     // Get current intent for AI-based decisions
     const currentIntent = state.currentIntent || 'unknown';

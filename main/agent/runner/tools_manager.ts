@@ -30,37 +30,64 @@ export const getBaseTools = (runner: any): AgentTool[] => {
       plannerTool,
       updateStepTool,
       executionPlanTool,
-      createComputerUseTool(
-        runner.client,
-        platform,
-        config.visionModel,
-        config.showuiUrl,
-        config.ollamaBaseUrl,
-        config.checkPermission,
-        config.requestPermission,
-        config.vlm
-      ),
-      systemFilesTool,
-      memorySaveTool,
-      memorySearchTool,
-      webSearchTool,
-      todoWriteTool,
-      askUserTool,
-      skillTool,
-      presentFilesTool,
-      webFetchTool,
-      createWorkspaceRequestTool(config.requestPermission),
-      allowFileDeleteTool,
-      searchMcpRegistryTool,
-      connectMcpServerTool,
-      listMcpToolsTool,
-      createArtifactTool,
-      createSiteTool
-    ];
+  ];
 
-    // Add dynamically connected MCP tools
-    const mcpTools = mcpRegistry.listAllTools().map(name => mcpRegistry.getTool(name)).filter(Boolean) as AgentTool[];
-    tools.push(...mcpTools);
+  // Create computer_use tool with production build validation
+  let computerUseTool: AgentTool | null = null;
+  try {
+    computerUseTool = createComputerUseTool(
+      runner.client,
+      platform,
+      config.visionModel,
+      config.showuiUrl,
+      config.ollamaBaseUrl,
+      config.checkPermission,
+      config.requestPermission,
+      config.vlm
+    );
 
-    return tools;
+    // Validate tool instance has all required properties
+    if (!computerUseTool) {
+      console.warn('[ToolsManager] computer_use tool creation returned null');
+    } else if (!computerUseTool.name || !computerUseTool.description || !computerUseTool.parameters) {
+      console.warn('[ToolsManager] computer_use tool has missing properties:', {
+        name: computerUseTool.name,
+        hasDescription: !!computerUseTool.description,
+        hasParameters: !!computerUseTool.parameters,
+      });
+    } else {
+      console.log('[ToolsManager] ✅ computer_use tool created successfully with valid properties');
+      tools.push(computerUseTool);
+    }
+  } catch (error) {
+    console.error('[ToolsManager] Failed to create computer_use tool:', error instanceof Error ? error.message : String(error));
+  }
+
+  // Add remaining static tools
+  tools.push(
+    systemFilesTool,
+    memorySaveTool,
+    memorySearchTool,
+    webSearchTool,
+    todoWriteTool,
+    askUserTool,
+    skillTool,
+    presentFilesTool,
+    webFetchTool,
+    createWorkspaceRequestTool(config.requestPermission),
+    allowFileDeleteTool,
+    searchMcpRegistryTool,
+    connectMcpServerTool,
+    listMcpToolsTool,
+    createArtifactTool,
+    createSiteTool
+  );
+
+  // Add dynamically connected MCP tools
+  const mcpTools = mcpRegistry.listAllTools().map(name => mcpRegistry.getTool(name)).filter(Boolean) as AgentTool[];
+  tools.push(...mcpTools);
+
+  console.log(`[ToolsManager] Registered ${tools.length} base tools: ${tools.map(t => t.name).join(', ')}`);
+
+  return tools;
 };

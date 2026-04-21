@@ -61,27 +61,36 @@ const getBaseTools = (runner) => {
         planner_1.plannerTool,
         planner_1.updateStepTool,
         planner_1.executionPlanTool,
-        (0, computer_use_1.createComputerUseTool)(runner.client, platform, config.visionModel, config.showuiUrl, config.ollamaBaseUrl, config.checkPermission, config.requestPermission, config.vlm),
-        system_files_1.systemFilesTool,
-        memory_save_1.memorySaveTool,
-        memory_search_1.memorySearchTool,
-        web_search_1.webSearchTool,
-        todo_write_1.todoWriteTool,
-        ask_user_1.askUserTool,
-        skill_tool_1.skillTool,
-        present_files_1.presentFilesTool,
-        web_fetch_1.webFetchTool,
-        (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission),
-        control_plane_1.allowFileDeleteTool,
-        mcp_registry_tool_1.searchMcpRegistryTool,
-        mcp_registry_tool_1.connectMcpServerTool,
-        mcp_registry_tool_1.listMcpToolsTool,
-        create_artifact_1.createArtifactTool,
-        create_artifact_1.createSiteTool
     ];
+    // Create computer_use tool with production build validation
+    let computerUseTool = null;
+    try {
+        computerUseTool = (0, computer_use_1.createComputerUseTool)(runner.client, platform, config.visionModel, config.showuiUrl, config.ollamaBaseUrl, config.checkPermission, config.requestPermission, config.vlm);
+        // Validate tool instance has all required properties
+        if (!computerUseTool) {
+            console.warn('[ToolsManager] computer_use tool creation returned null');
+        }
+        else if (!computerUseTool.name || !computerUseTool.description || !computerUseTool.parameters) {
+            console.warn('[ToolsManager] computer_use tool has missing properties:', {
+                name: computerUseTool.name,
+                hasDescription: !!computerUseTool.description,
+                hasParameters: !!computerUseTool.parameters,
+            });
+        }
+        else {
+            console.log('[ToolsManager] ✅ computer_use tool created successfully with valid properties');
+            tools.push(computerUseTool);
+        }
+    }
+    catch (error) {
+        console.error('[ToolsManager] Failed to create computer_use tool:', error instanceof Error ? error.message : String(error));
+    }
+    // Add remaining static tools
+    tools.push(system_files_1.systemFilesTool, memory_save_1.memorySaveTool, memory_search_1.memorySearchTool, web_search_1.webSearchTool, todo_write_1.todoWriteTool, ask_user_1.askUserTool, skill_tool_1.skillTool, present_files_1.presentFilesTool, web_fetch_1.webFetchTool, (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission), control_plane_1.allowFileDeleteTool, mcp_registry_tool_1.searchMcpRegistryTool, mcp_registry_tool_1.connectMcpServerTool, mcp_registry_tool_1.listMcpToolsTool, create_artifact_1.createArtifactTool, create_artifact_1.createSiteTool);
     // Add dynamically connected MCP tools
     const mcpTools = mcp_1.mcpRegistry.listAllTools().map(name => mcp_1.mcpRegistry.getTool(name)).filter(Boolean);
     tools.push(...mcpTools);
+    console.log(`[ToolsManager] Registered ${tools.length} base tools: ${tools.map(t => t.name).join(', ')}`);
     return tools;
 };
 exports.getBaseTools = getBaseTools;

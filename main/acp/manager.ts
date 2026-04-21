@@ -40,10 +40,21 @@ export class ACPManager {
           actualApiKey = fs.readFileSync(keyPath, 'utf-8').trim();
         }
 
+        // Load VLM API key from isolated key file (vlm-<provider>.key)
+        let vlmConfig = stored.vlm;
+        if (vlmConfig?.provider) {
+          const vlmKeyPath = path.join(os.homedir(), '.everfern', 'keys', `vlm-${vlmConfig.provider}.key`);
+          if (fs.existsSync(vlmKeyPath)) {
+            vlmConfig = { ...vlmConfig, apiKey: fs.readFileSync(vlmKeyPath, 'utf-8').trim() };
+          }
+        }
+
         this.setProvider({
           provider: stored.provider as ProviderType,
           apiKey:   actualApiKey,
           model:    stored.model,
+          vlm:      vlmConfig,
+          baseUrl:  stored.baseUrl,
         });
       }
     } catch (err) {

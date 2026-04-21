@@ -13,7 +13,7 @@ import {
     Cog6ToothIcon,
     Cog8ToothIcon,
 } from "@heroicons/react/24/outline";
-import type { ToolCallDisplay } from '../types';
+import type { ToolCallDisplay } from '../types/index';
 import { MarkdownRenderer } from './MarkdownComponents';
 import { DiffViewer } from '@/components/diff-viewer';
 import { SyntaxHighlighter } from '../ArtifactsPanel';

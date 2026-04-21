@@ -1539,6 +1539,18 @@ export class AIClient {
       options: { temperature: req.temperature ?? this.config.temperature },
     };
     if (req.responseFormat === 'json') body['format'] = 'json';
+    
+    // Pass tools to Ollama if provided
+    if (req.tools && req.tools.length > 0) {
+      body['tools'] = req.tools.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters
+        }
+      }));
+    }
 
     const res = await fetch(`${this.config.baseUrl}/api/chat`, {
       method: 'POST',
@@ -1557,16 +1569,23 @@ export class AIClient {
 
     if (!isStreaming) {
       const data = await res.json();
+      const toolCalls = data.message?.tool_calls?.map((tc: any) => ({
+        id: `ollama-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        name: tc.function?.name || tc.name,
+        arguments: tc.function?.arguments || tc.args || {}
+      }));
+
       return {
         id: `ollama-${Date.now()}`,
         content: data.message?.content ?? '',
         model: data.model ?? this.config.model,
+        toolCalls: toolCalls?.length ? toolCalls : undefined,
         usage: data.eval_count ? {
           promptTokens: data.prompt_eval_count ?? 0,
           completionTokens: data.eval_count ?? 0,
           totalTokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
         } : undefined,
-        finishReason: 'stop',
+        finishReason: toolCalls?.length ? 'tool_calls' : 'stop',
       };
     }
 
@@ -1579,36 +1598,76 @@ export class AIClient {
     let responseId = `ollama-${Date.now()}`;
     let promptTokens = 0;
     let completionTokens = 0;
+    let lineBuffer = '';
+
+    const toolCallsMap: Record<number, { id: string; name: string; arguments: string }> = {};
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const text = dec.decode(value, { stream: true });
-      const lines = text.split('\n').filter(l => l.trim());
+      
+      lineBuffer += dec.decode(value, { stream: true });
+      const lines = lineBuffer.split('\n');
+      // Keep the last partial line in the buffer
+      lineBuffer = lines.pop() ?? '';
 
       for (const line of lines) {
+        if (!line.trim()) continue;
         try {
           const d = JSON.parse(line);
           if (d.message?.content) {
             fullContent += d.message.content;
             req.onStreamChunk!(d.message.content);
           }
+          
+          if (d.message?.tool_calls) {
+            for (let i = 0; i < d.message.tool_calls.length; i++) {
+              const tc = d.message.tool_calls[i];
+              if (!toolCallsMap[i]) {
+                toolCallsMap[i] = { 
+                  id: `ollama-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                  name: tc.function?.name || tc.name || '',
+                  arguments: ''
+                };
+              }
+              const entry = toolCallsMap[i];
+              if (tc.function?.arguments) {
+                entry.arguments += typeof tc.function.arguments === 'string' 
+                  ? tc.function.arguments 
+                  : JSON.stringify(tc.function.arguments);
+              }
+            }
+          }
+
           if (d.prompt_eval_count) promptTokens = d.prompt_eval_count;
           if (d.eval_count) completionTokens = d.eval_count;
-        } catch { }
+        } catch (e) {
+          console.error('[AIClient] Failed to parse Ollama stream line:', line, e);
+        }
       }
     }
+
+    const toolCalls = Object.values(toolCallsMap).map(tc => {
+      let args = {};
+      try {
+        args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+      } catch (e) { 
+        args = tc.arguments;
+      }
+      return { id: tc.id, name: tc.name, arguments: args as Record<string, any> };
+    });
 
     return {
       id: responseId,
       content: fullContent,
       model: this.config.model,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: completionTokens ? {
         promptTokens,
         completionTokens,
         totalTokens: promptTokens + completionTokens,
       } : undefined,
-      finishReason: 'stop',
+      finishReason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
     };
   }
 
@@ -1648,7 +1707,13 @@ export class AIClient {
       for (const line of lines) {
         try {
           const d = JSON.parse(line);
-          yield { id, delta: d.message?.content ?? '', done: d.done ?? false, model: d.model };
+          yield { 
+            id, 
+            delta: d.message?.content ?? '', 
+            toolCalls: d.message?.tool_calls,
+            done: d.done ?? false, 
+            model: d.model 
+          };
           if (d.done) return;
         } catch { /* skip */ }
       }

@@ -108,6 +108,45 @@ try {
   // Register all modularized IPC handlers
   setupIPC(historyStore);
 
+  /**
+   * Ensures that ~/.everfern/SYSTEM_PROMPT.md exists, creating it with defaults if not.
+   */
+  function ensureSystemPromptExists() {
+    const everfernDir = path.join(os.homedir(), '.everfern');
+    const promptPath = path.join(everfernDir, 'SYSTEM_PROMPT.md');
+
+    try {
+      if (!fs.existsSync(everfernDir)) {
+        fs.mkdirSync(everfernDir, { recursive: true });
+      }
+
+      if (!fs.existsSync(promptPath)) {
+        console.log('[Startup] 📝 Creating default SYSTEM_PROMPT.md in ~/.everfern/');
+        const defaultPrompt = `# EverFern System Prompt
+
+You are EverFern, an autonomous AI workplace agent designed to help users with their daily tasks.
+You have access to a variety of tools, including GUI automation, terminal access, and web search.
+
+## Guidelines:
+1. Be concise and professional.
+2. Use tools whenever necessary to fulfill the user's request.
+3. For GUI automation, use the 'computer_use' tool.
+4. If you are unsure about a command, ask for clarification.
+
+Your goal is to be the ultimate workplace companion.
+`;
+        fs.writeFileSync(promptPath, defaultPrompt, 'utf-8');
+      } else {
+        console.log('[Startup] ✅ SYSTEM_PROMPT.md already exists in ~/.everfern/');
+      }
+    } catch (err) {
+      console.error('[Startup] ❌ Failed to ensure SYSTEM_PROMPT.md existence:', err);
+    }
+  }
+
+  // Ensure system prompt exists
+  ensureSystemPromptExists();
+
   console.log('[Startup] Singletons and IPC initialized.');
 } catch (err) {
   console.error('[Startup] ❌ Critical failure during singleton initialization:', err);
@@ -125,6 +164,32 @@ let lastChatMessages: any[] = [];
 
 
 let mainWindow: BrowserWindow | null = null;
+
+// Handle protocol links on Windows
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  console.log('[Startup] ⚠️ Already running, quitting...');
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine) => {
+    console.log('[Startup] second-instance received:', commandLine);
+    // Someone tried to run a second instance, we should focus our window.
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+
+      // commandLine is an array of strings that contains the extra parameters,
+      // like the protocol link.
+      const url = commandLine.find(arg => arg.startsWith('everfern-app://'));
+      if (url) {
+        console.log('[Startup] Protocol URL detected in second-instance:', url);
+        mainWindow.webContents.send('acp:protocol-link', url);
+      }
+    }
+  });
+}
 
 // Tracks the ShowUI install/run process so we can kill it on app quit
 let installProc: import('child_process').ChildProcess | null = null;
@@ -407,9 +472,54 @@ async function autoStartEnabledBots(): Promise<void> {
 
 // ── App lifecycle ───────────────────────────────────────────────────
 
+import { VoiceOverlayManager } from './voice-overlay';
+
+let voiceOverlayManager: VoiceOverlayManager;
+
 app.whenReady().then(async () => {
   console.log('[App] App ready, starting initialization...');
 
+  /**
+   * Ensures that ~/.everfern/SYSTEM_PROMPT.md exists, creating it with defaults if not.
+   */
+  function ensureSystemPromptExists() {
+    const everfernDir = path.join(os.homedir(), '.everfern');
+    const promptPath = path.join(everfernDir, 'SYSTEM_PROMPT.md');
+
+    try {
+      if (!fs.existsSync(everfernDir)) {
+        console.log('[Startup] 📂 Creating .everfern directory...');
+        fs.mkdirSync(everfernDir, { recursive: true });
+      }
+
+      if (!fs.existsSync(promptPath)) {
+        console.log('[Startup] 📝 Creating default SYSTEM_PROMPT.md in ~/.everfern/');
+        const defaultPrompt = `# EverFern System Prompt
+
+You are EverFern, an autonomous AI workplace agent designed to help users with their daily tasks.
+You have access to a variety of tools, including GUI automation, terminal access, and web search.
+
+## Guidelines:
+1. Be concise and professional.
+2. Use tools whenever necessary to fulfill the user's request.
+3. For GUI automation, use the 'computer_use' tool.
+4. If you are unsure about a command, ask for clarification.
+
+Your goal is to be the ultimate workplace companion.
+`;
+        fs.writeFileSync(promptPath, defaultPrompt, 'utf-8');
+      } else {
+        console.log('[Startup] ✅ SYSTEM_PROMPT.md already exists in ~/.everfern/');
+      }
+    } catch (err) {
+      console.error('[Startup] ❌ Failed to ensure SYSTEM_PROMPT.md existence:', err);
+    }
+  }
+
+  // Ensure system prompt exists
+  ensureSystemPromptExists();
+
+  voiceOverlayManager = new VoiceOverlayManager();
   // ── Protocol Handlers ──────────────────────────────────────────────
 
   // Custom protocol for the main application (Next.js out folder)
@@ -540,6 +650,30 @@ app.whenReady().then(async () => {
 
   // ── Create Main Window ─────────────────────────────────────────────
   createWindow();
+
+  // Register as default protocol client for everfern-app
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('everfern-app', process.execPath, [path.resolve(process.argv[1])]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient('everfern-app');
+  }
+
+  // Register Ctrl+Shift+P global shortcut for Debug Window
+  try {
+    const success = globalShortcut.register('CommandOrControl+Shift+P', () => {
+      console.log('[Shortcut] Ctrl+Shift+P triggered, toggling Debug Window...');
+      toggleDebugWindow();
+    });
+    if (!success) {
+      console.error('[Shortcut] ❌ Failed to register Ctrl+Shift+P shortcut');
+    } else {
+      console.log('[Shortcut] ✅ Ctrl+Shift+P registered successfully');
+    }
+  } catch (error) {
+    console.error('[Shortcut] ❌ Error registering Ctrl+Shift+P:', error);
+  }
 
   // ── Initialize Integration Services ─────────────────────────────────
   try {
@@ -797,7 +931,7 @@ ipcMain.handle('save-config', async (_event, config) => {
         apiKey:   config.apiKey,
         model:    scrubbedConfig.model,
         baseUrl:  scrubbedConfig.baseUrl,
-        vlm:      scrubbedConfig.vlm, // Pass VLM to manager
+        vlm:      config.vlm, // Pass full VLM config including apiKey
       });
     }
 

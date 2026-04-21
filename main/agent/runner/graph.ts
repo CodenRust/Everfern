@@ -6,6 +6,13 @@ import { createExecuteToolsNode } from './nodes/execute_tools';
 import { createValidationNode } from './nodes/validation';
 import { createBrainNode } from './nodes/brain';
 import { createJudgeNode } from './nodes/judge';
+import { createDecomposerNode } from './nodes/decomposer';
+import { 
+  createComputerUseNode, 
+  createCodingSpecialistNode, 
+  createDataAnalystNode, 
+  createWebExplorerNode 
+} from './nodes/specialized_agents';
 import { AgentRunner } from './runner';
 import type { MissionTracker } from './mission-tracker';
 import { lightweightCheckpointer } from './custom-checkpointer';
@@ -43,16 +50,26 @@ export const buildGraph = (
   toolDefs: any[],
   tools: any[],
 ) => {
-  // Use a cache key based on tool definitions to allow re-use
-  // In a production app, toolDefs are usually static per version
-  const cacheKey = `graph_v3_${toolDefs.length}`;
+  // Create a hash of tool names to include in cache key
+  // This prevents reusing a cached graph when tool availability changes
+  const toolNames = toolDefs.map(t => t.name).sort().join(',');
+  const toolNamesHash = require('crypto').createHash('md5').update(toolNames).digest('hex').substring(0, 8);
+  const cacheKey = `graph_v4_specialized_${toolDefs.length}_${toolNamesHash}`;
 
   if (graphCache.has(cacheKey)) {
-    console.log('[Graph] 📦 Using CACHED execution graph');
+    console.log(`[Graph] 📦 Using CACHED execution graph (key: ${cacheKey})`);
+    console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
     return graphCache.get(cacheKey);
   }
 
-  console.log('[Graph] 🏗️  BUILDING NEW AGENT EXECUTION GRAPH (v3 Cached)');
+  console.log(`[Graph] 🏗️  BUILDING NEW AGENT EXECUTION GRAPH (v4 Specialized)`);
+  console.log(`[Graph] Cache key: ${cacheKey}`);
+  console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
+
+  // Warn if computer_use is missing
+  if (!toolDefs.find(t => t.name === 'computer_use')) {
+    console.warn(`[Graph] ⚠️ WARNING: computer_use tool is missing from tool definitions!`);
+  }
 
   const hitlNode = async (state: GraphStateType, config?: any) => {
     const { runner, eventQueue, missionTracker, conversationId, shouldAbort } = getContext(config);
@@ -68,13 +85,13 @@ export const buildGraph = (
       const formatToolCallSummary = (call: any) => {
         const name = call.name;
         const args = call.arguments || {};
-        
+
         // Specialize formatting for terminal commands
         if (name === 'terminal_execute' || name === 'executePwsh' || name === 'run_command' || name === 'bash') {
           const cmd = args.command || args.CommandLine || args.cmd || JSON.stringify(args);
           return `**${name}** — \`${cmd}\``;
         }
-        
+
         // Default formatting for other tools
         return `**${name}** — \`${JSON.stringify(args).slice(0, 120)}\``;
       };
@@ -142,7 +159,7 @@ export const buildGraph = (
       // Pause execution and wait for user response via Command({ resume: ... })
       const answer = interrupt(approvalRequest);
       const isApproved = String(answer).includes('[HITL_APPROVED]');
-      
+
       runner.telemetry.info(`HITL response received: ${isApproved ? 'APPROVED' : 'REJECTED'}`);
 
       return {
@@ -175,6 +192,12 @@ export const buildGraph = (
     return node(state);
   };
 
+  const decomposerNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    const node = createDecomposerNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
+    return node(state);
+  };
+
   const plannerNode = async (state: GraphStateType, config?: any) => {
     const ctx = getContext(config);
     const node = createPlannerNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
@@ -183,7 +206,47 @@ export const buildGraph = (
 
   const brainNode = async (state: GraphStateType, config?: any) => {
     const ctx = getContext(config);
-    const node = createBrainNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs, ctx.shouldAbort);
+    
+    // Inject plan context into brain prompt if it exists
+    let systemPromptOverride = undefined;
+    const plan = state.decomposedTask;
+    if (plan) {
+        systemPromptOverride = `You are the EverFern Orchestrator. 
+Your goal is to ensure the following execution plan is completed successfully.
+
+CURRENT EXECUTION PLAN:
+Title: ${plan.title}
+Steps:
+${plan.steps.map(s => `${s.id}: ${s.description} (Tool: ${s.tool})`).join('\n')}
+
+If a specialized agent failed to complete a step, identify the issue and use your tools to proceed.`;
+    }
+
+    const node = createBrainNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs, ctx.shouldAbort, systemPromptOverride);
+    return node(state);
+  };
+
+  const computerUseNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    const node = createComputerUseNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
+    return node(state);
+  };
+
+  const codingNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    const node = createCodingSpecialistNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
+    return node(state);
+  };
+
+  const dataAnalystNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    const node = createDataAnalystNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
+    return node(state);
+  };
+
+  const webExplorerNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    const node = createWebExplorerNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
     return node(state);
   };
 
@@ -207,8 +270,13 @@ export const buildGraph = (
 
   const compiledGraph = new StateGraph(GraphState)
     .addNode('intent_classifier', triageNode)
+    .addNode('task_decomposer', decomposerNode)
     .addNode('global_planner', plannerNode)
     .addNode('brain', brainNode)
+    .addNode('computer_use_agent', computerUseNode)
+    .addNode('coding_specialist', codingNode)
+    .addNode('data_analyst', dataAnalystNode)
+    .addNode('web_explorer', webExplorerNode)
     .addNode('action_validation', validatorNode)
     .addNode('hitl_approval', hitlNode)
     .addNode('multi_tool_orchestrator', orchestratorNode)
@@ -216,8 +284,50 @@ export const buildGraph = (
 
   compiledGraph
     .addEdge(START, 'intent_classifier')
-    .addEdge('intent_classifier', 'global_planner')
+    .addEdge('intent_classifier', 'task_decomposer')
+    .addConditionalEdges('task_decomposer', (state) => {
+        const intent = state.currentIntent;
+        if (intent === 'automate') return 'computer_use_agent';
+        if (intent === 'coding') return 'coding_specialist';
+        if (intent === 'analyze') return 'data_analyst';
+        if (intent === 'research') return 'web_explorer';
+        return 'global_planner';
+    }, {
+        computer_use_agent: 'computer_use_agent',
+        coding_specialist: 'coding_specialist',
+        data_analyst: 'data_analyst',
+        web_explorer: 'web_explorer',
+        global_planner: 'global_planner',
+    })
     .addEdge('global_planner', 'brain')
+    .addConditionalEdges('computer_use_agent', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+        return hasTools ? 'action_validation' : 'judge';
+    }, {
+        action_validation: 'action_validation',
+        judge: 'judge',
+    })
+    .addConditionalEdges('coding_specialist', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+        return hasTools ? 'action_validation' : 'judge';
+    }, {
+        action_validation: 'action_validation',
+        judge: 'judge',
+    })
+    .addConditionalEdges('data_analyst', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+        return hasTools ? 'action_validation' : 'judge';
+    }, {
+        action_validation: 'action_validation',
+        judge: 'judge',
+    })
+    .addConditionalEdges('web_explorer', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+        return hasTools ? 'action_validation' : 'judge';
+    }, {
+        action_validation: 'action_validation',
+        judge: 'judge',
+    })
     .addConditionalEdges('brain', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
         return hasTools ? 'action_validation' : 'judge';
@@ -250,7 +360,22 @@ export const buildGraph = (
         judge: 'judge',
         [END]: END
     })
-    .addEdge('multi_tool_orchestrator', 'brain')
+    .addConditionalEdges('multi_tool_orchestrator', (state) => {
+        // Route back to the node that initiated the tool call
+        const intent = state.currentIntent;
+        if (intent === 'automate') return 'judge'; // GUI tasks are autonomous, go to judge when done
+        if (intent === 'coding') return 'coding_specialist';
+        if (intent === 'analyze') return 'data_analyst';
+        if (intent === 'research') return 'web_explorer';
+        return 'brain';
+    }, {
+        computer_use_agent: 'computer_use_agent',
+        coding_specialist: 'coding_specialist',
+        data_analyst: 'data_analyst',
+        web_explorer: 'web_explorer',
+        judge: 'judge',
+        brain: 'brain',
+    })
     .addConditionalEdges('judge', (state) => {
         return state.shouldContinueIteration ? 'brain' : END;
     }, {
@@ -258,7 +383,7 @@ export const buildGraph = (
         [END]: END,
     });
 
-  const finalGraph = compiledGraph.compile({ 
+  const finalGraph = compiledGraph.compile({
     checkpointer: lightweightCheckpointer
   });
   graphCache.set(cacheKey, finalGraph);

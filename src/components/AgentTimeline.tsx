@@ -31,13 +31,18 @@ interface AgentTimelineProps {
     currentNode?: string;
     planSteps?: Array<{ id: string; description: string; tool?: string }> | null;
     planTitle?: string | null;
+    subAgentProgress?: Map<string, SubAgentProgressEvent[]>;
 }
+
+// Import SubAgentProgressEvent type
+import type { SubAgentProgressEvent } from "@/app/chat/types";
 
 // Timeline item types
 type TimelineItem =
     | { type: "tool"; data: ToolCallDisplay }
     | { type: "thought"; data: { id: string; content: string; isLive?: boolean } }
-    | { type: "plan"; data: { steps: Array<{ id: string; description: string; tool?: string }>; title?: string | null } };
+    | { type: "plan"; data: { steps: Array<{ id: string; description: string; tool?: string }>; title?: string | null } }
+    | { type: "subagent-progress"; data: SubAgentProgressEvent };
 
 const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
@@ -354,6 +359,569 @@ const PlanItem = ({
     );
 };
 
+// Sub-agent progress item - displays step-by-step progress for sub-agent executions
+const SubAgentProgressItem = ({
+    event,
+    isLast
+}: {
+    event: SubAgentProgressEvent;
+    isLast: boolean;
+}) => {
+    const [screenshotExpanded, setScreenshotExpanded] = useState(false);
+    const isLive = event.type === 'step' && !event.content;
+
+    // Render based on event type
+    if (event.type === 'step') {
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                {/* Timeline line */}
+                <div style={{
+                    width: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    paddingTop: 0,
+                }}>
+                    {/* Vertical line before dot */}
+                    <div style={{
+                        width: 2,
+                        height: 8,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+
+                    {/* Step indicator dot */}
+                    {isLive ? (
+                        <div style={{ position: "relative", width: 10, height: 10, flexShrink: 0 }}>
+                            <div style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: "50%",
+                                backgroundColor: "#6366f1",
+                                border: "2px solid #faf9f7",
+                                boxShadow: "0 0 0 1px #e8e6d9",
+                            }} />
+                            <motion.div
+                                animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+                                style={{
+                                    position: "absolute", inset: -2,
+                                    borderRadius: "50%",
+                                    backgroundColor: "#6366f1",
+                                }}
+                            />
+                        </div>
+                    ) : (
+                        <div style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            backgroundColor: "#22c55e",
+                            border: "2px solid #faf9f7",
+                            boxShadow: "0 0 0 1px #e8e6d9",
+                            flexShrink: 0,
+                        }} />
+                    )}
+
+                    {/* Vertical line after dot */}
+                    {!isLast && (
+                        <div style={{
+                            position: "absolute",
+                            top: 18,
+                            bottom: -20,
+                            width: 2,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+                </div>
+
+                {/* Step content */}
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "2px 0",
+                    }}>
+                        <span style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: isLive ? "#6366f1" : "#8a8886",
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase",
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                        }}>
+                            STEP {event.stepNumber}/{event.totalSteps}
+                        </span>
+
+                        {isLive && (
+                            <motion.div
+                                animate={{ opacity: [0.4, 1, 0.4] }}
+                                transition={{ repeat: Infinity, duration: 1.2 }}
+                                style={{ display: "flex", gap: 3, alignItems: "center" }}
+                            >
+                                {[0, 1, 2].map(i => (
+                                    <motion.div
+                                        key={i}
+                                        animate={{ opacity: [0.3, 1, 0.3] }}
+                                        transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
+                                        style={{ width: 3, height: 3, borderRadius: "50%", backgroundColor: "#6366f1" }}
+                                    />
+                                ))}
+                            </motion.div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (event.type === 'reasoning') {
+        const isThinking = !event.content || event.content.trim() === '';
+
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                {/* Timeline line */}
+                <div style={{
+                    width: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    position: "relative",
+                }}>
+                    {/* Vertical line before */}
+                    <div style={{
+                        width: 2,
+                        height: 12,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+
+                    {/* Branch point */}
+                    <div style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        backgroundColor: "#faf9f7",
+                        border: "2px solid #e8e6d9",
+                        flexShrink: 0,
+                        zIndex: 2,
+                    }} />
+
+                    {/* Vertical line after */}
+                    {!isLast && (
+                        <div style={{
+                            position: "absolute",
+                            top: 22,
+                            bottom: -20,
+                            width: 2,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+
+                    {/* Branch curve */}
+                    <svg
+                        width="40"
+                        height="40"
+                        viewBox="0 0 40 40"
+                        style={{
+                            position: "absolute",
+                            left: 9,
+                            top: 12,
+                            pointerEvents: "none",
+                        }}
+                    >
+                        <path
+                            d="M 0 0 Q 20 0 20 20 L 20 40"
+                            stroke="#e8e6d9"
+                            strokeWidth="2"
+                            fill="none"
+                        />
+                    </svg>
+                </div>
+
+                {/* Reasoning content */}
+                <div style={{ flex: 1, paddingLeft: 32, paddingTop: 8, paddingBottom: 20 }}>
+                    {isThinking ? (
+                        <LoadingBreadcrumb text="Thinking" className="mb-2" />
+                    ) : (
+                        <div style={{
+                            display: "flex", alignItems: "center", gap: 6,
+                            marginBottom: 6,
+                        }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                stroke="#b5b2aa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="1" />
+                                <circle cx="19" cy="12" r="1" />
+                                <circle cx="5" cy="12" r="1" />
+                            </svg>
+                            <span style={{
+                                fontSize: 11,
+                                color: "#8a8886",
+                                fontWeight: 600,
+                                letterSpacing: "0.04em",
+                                textTransform: "uppercase"
+                            }}>
+                                Reasoning
+                            </span>
+                        </div>
+                    )}
+                    {!isThinking && (
+                        <div style={{
+                            fontSize: 12.5,
+                            color: "#4a4846",
+                            whiteSpace: "pre-wrap",
+                            lineHeight: 1.75,
+                            borderLeft: "2px solid #e8e6d9",
+                            paddingLeft: 12,
+                            fontStyle: "italic",
+                            backgroundColor: "#faf9f7",
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                        }}>
+                            {event.content}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    if (event.type === 'action' && event.action) {
+        // Map action types to icons
+        const actionIcons: Record<string, string> = {
+            left_click: "🖱️",
+            right_click: "🖱️",
+            middle_click: "🖱️",
+            double_click: "🖱️",
+            mouse_move: "🖱️",
+            drag: "🖱️",
+            type: "⌨️",
+            key: "⌨️",
+            scroll_up: "📜",
+            scroll_down: "📜",
+            scroll: "📜",
+            wait: "⏱️",
+        };
+
+        const icon = actionIcons[event.action.type] || "🖱️";
+
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                {/* Timeline line */}
+                <div style={{
+                    width: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    paddingTop: 0,
+                }}>
+                    {/* Vertical line before dot */}
+                    <div style={{
+                        width: 2,
+                        height: 8,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+
+                    {/* Action dot */}
+                    <div style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        backgroundColor: "#22c55e",
+                        border: "2px solid #faf9f7",
+                        boxShadow: "0 0 0 1px #e8e6d9",
+                        flexShrink: 0,
+                    }} />
+
+                    {/* Vertical line after dot */}
+                    {!isLast && (
+                        <div style={{
+                            position: "absolute",
+                            top: 18,
+                            bottom: -20,
+                            width: 2,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+                </div>
+
+                {/* Action content */}
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "2px 0",
+                    }}>
+                        <span style={{ fontSize: 16 }}>{icon}</span>
+                        <span style={{
+                            fontSize: 12,
+                            color: "#4a4846",
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                        }}>
+                            Action: {event.action.description}
+                        </span>
+                    </div>
+
+                    {/* Show action parameters if available */}
+                    {event.action.params && Object.keys(event.action.params).length > 0 && (
+                        <div style={{
+                            marginTop: 4,
+                            fontSize: 11,
+                            color: "#8a8886",
+                            fontFamily: "'JetBrains Mono', monospace",
+                            paddingLeft: 24,
+                        }}>
+                            {Object.entries(event.action.params).map(([key, value]) => (
+                                <div key={key}>
+                                    {key}: {JSON.stringify(value)}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    if (event.type === 'screenshot' && event.screenshot) {
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                {/* Timeline line */}
+                <div style={{
+                    width: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    paddingTop: 0,
+                }}>
+                    {/* Vertical line before dot */}
+                    <div style={{
+                        width: 2,
+                        height: 8,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+
+                    {/* Screenshot dot */}
+                    <div style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        backgroundColor: "#22c55e",
+                        border: "2px solid #faf9f7",
+                        boxShadow: "0 0 0 1px #e8e6d9",
+                        flexShrink: 0,
+                    }} />
+
+                    {/* Vertical line after dot */}
+                    {!isLast && (
+                        <div style={{
+                            position: "absolute",
+                            top: 18,
+                            bottom: -20,
+                            width: 2,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+                </div>
+
+                {/* Screenshot content */}
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div
+                        onClick={() => setScreenshotExpanded(!screenshotExpanded)}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            cursor: "pointer",
+                            userSelect: "none",
+                            padding: "2px 0",
+                        }}
+                    >
+                        <span style={{ fontSize: 16 }}>📸</span>
+                        <span style={{
+                            fontSize: 12,
+                            color: "#4a4846",
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                        }}>
+                            Screenshot ({event.screenshot.width}x{event.screenshot.height})
+                        </span>
+
+                        <motion.svg
+                            animate={{ rotate: screenshotExpanded ? 180 : 0 }}
+                            transition={{ duration: 0.18 }}
+                            width={12} height={12} viewBox="0 0 24 24"
+                            fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            style={{ marginLeft: "auto", flexShrink: 0 }}
+                        >
+                            <polyline points="6 9 12 15 18 9" />
+                        </motion.svg>
+                    </div>
+
+                    <AnimatePresence>
+                        {screenshotExpanded && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                style={{ overflow: "hidden" }}
+                            >
+                                <div style={{
+                                    marginTop: 10,
+                                    maxWidth: 400,
+                                    borderRadius: 6,
+                                    overflow: "hidden",
+                                    border: "1px solid #e8e6d9",
+                                    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                                }}>
+                                    <img
+                                        src={event.screenshot.base64}
+                                        alt="Sub-agent screenshot"
+                                        style={{
+                                            width: "100%",
+                                            height: "auto",
+                                            display: "block",
+                                        }}
+                                    />
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            </div>
+        );
+    }
+
+    if (event.type === 'complete') {
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                {/* Timeline line */}
+                <div style={{
+                    width: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    paddingTop: 0,
+                }}>
+                    {/* Vertical line before dot */}
+                    <div style={{
+                        width: 2,
+                        height: 8,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+
+                    {/* Complete dot */}
+                    <div style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        backgroundColor: "#22c55e",
+                        border: "2px solid #faf9f7",
+                        boxShadow: "0 0 0 1px #e8e6d9",
+                        flexShrink: 0,
+                    }} />
+
+                    {/* Vertical line after dot */}
+                    {!isLast && (
+                        <div style={{
+                            position: "absolute",
+                            top: 18,
+                            bottom: -20,
+                            width: 2,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+                </div>
+
+                {/* Complete content */}
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "2px 0",
+                    }}>
+                        <span style={{
+                            fontSize: 12,
+                            color: "#22c55e",
+                            fontWeight: 600,
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                        }}>
+                            ✓ Sub-agent completed
+                        </span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (event.type === 'abort') {
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                {/* Timeline line */}
+                <div style={{
+                    width: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    paddingTop: 0,
+                }}>
+                    {/* Vertical line before dot */}
+                    <div style={{
+                        width: 2,
+                        height: 8,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+
+                    {/* Abort dot */}
+                    <div style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        backgroundColor: "#ef4444",
+                        border: "2px solid #faf9f7",
+                        boxShadow: "0 0 0 1px #e8e6d9",
+                        flexShrink: 0,
+                    }} />
+
+                    {/* Vertical line after dot */}
+                    {!isLast && (
+                        <div style={{
+                            position: "absolute",
+                            top: 18,
+                            bottom: -20,
+                            width: 2,
+                            backgroundColor: "#e8e6d9",
+                        }} />
+                    )}
+                </div>
+
+                {/* Abort content */}
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "2px 0",
+                    }}>
+                        <span style={{
+                            fontSize: 12,
+                            color: "#ef4444",
+                            fontWeight: 600,
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                        }}>
+                            ⊗ Aborted by user
+                        </span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return null;
+};
+
 // Single tool row on the main timeline
 const ToolRow = ({
     tc, isExpanded, onToggle, isLast,
@@ -606,7 +1174,7 @@ const ToolRow = ({
 };
 
 export const AgentTimeline = ({
-    toolCalls, thought, isLive, currentNode, planSteps, planTitle,
+    toolCalls, thought, isLive, currentNode, planSteps, planTitle, subAgentProgress,
 }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
     const [collapsed, setCollapsed] = useState(false);
@@ -654,10 +1222,21 @@ export const AgentTimeline = ({
                 type: "tool",
                 data: tc
             });
+
+            // Add sub-agent progress events for this tool if available
+            if (subAgentProgress && subAgentProgress.has(tc.id)) {
+                const progressEvents = subAgentProgress.get(tc.id) || [];
+                progressEvents.forEach(event => {
+                    items.push({
+                        type: "subagent-progress",
+                        data: event
+                    });
+                });
+            }
         });
 
         return items;
-    }, [toolCalls, thought, isLive, planSteps, planTitle]);
+    }, [toolCalls, thought, isLive, planSteps, planTitle, subAgentProgress]);
 
     const toggleTool = (id: string) => setExpandedToolId(p => p === id ? null : id);
 
@@ -821,6 +1400,27 @@ export const AgentTimeline = ({
                                             onToggle={() => toggleTool(item.data.id)}
                                             isLast={isLast}
                                         />
+                                    );
+                                }
+
+                                if (item.type === "subagent-progress") {
+                                    return (
+                                        <div
+                                            key={`progress-${item.data.toolCallId}-${item.data.timestamp}-${idx}`}
+                                            style={{
+                                                marginLeft: 20,
+                                                backgroundColor: "#faf9f7",
+                                                border: "1px solid #e8e6d9",
+                                                borderRadius: 8,
+                                                padding: 12,
+                                                marginBottom: 12,
+                                            }}
+                                        >
+                                            <SubAgentProgressItem
+                                                event={item.data}
+                                                isLast={isLast}
+                                            />
+                                        </div>
                                     );
                                 }
 

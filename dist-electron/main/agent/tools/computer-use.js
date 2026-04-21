@@ -38,9 +38,11 @@ exports.createComputerUseTool = createComputerUseTool;
 exports.captureScreen = captureScreen;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const electron_1 = require("electron");
 const ai_client_1 = require("../../lib/ai-client");
+const abort_manager_1 = require("../runner/abort-manager");
 // sharp is an optional native module — load lazily so a missing binary doesn't crash startup
 let sharp = null;
 try {
@@ -57,6 +59,131 @@ try {
 catch {
     console.warn('[ComputerUse] robotjs unavailable — falls back to shell');
 }
+// ── Progress Event Emitter ──────────────────────────────────────────────────
+/**
+ * Manages buffering and flushing of sub-agent progress events.
+ *
+ * Implements efficient event transmission with:
+ * - Time-based flushing (16ms intervals for ~60fps)
+ * - Size-based flushing (immediate flush at 10 events)
+ * - Graceful error handling (serialization failures don't crash agent)
+ *
+ * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
+ */
+class ProgressEventEmitter {
+    toolCallId;
+    sender;
+    buffer = [];
+    flushTimer = null;
+    FLUSH_INTERVAL_MS = 16; // ~60fps
+    MAX_BUFFER_SIZE = 10;
+    constructor(toolCallId, sender) {
+        this.toolCallId = toolCallId;
+        this.sender = sender;
+    }
+    /**
+     * Emit a progress event.
+     *
+     * Adds the event to the buffer and schedules a flush if not already scheduled.
+     * If the buffer size reaches MAX_BUFFER_SIZE, flushes immediately.
+     *
+     * Requirements: 7.2, 7.4
+     */
+    emit(event) {
+        // Add event to buffer
+        this.buffer.push(event);
+        // Flush immediately if buffer size >= MAX_BUFFER_SIZE
+        if (this.buffer.length >= this.MAX_BUFFER_SIZE) {
+            this.flush();
+        }
+        else {
+            // Schedule flush if not already scheduled
+            this.scheduleFlush();
+        }
+    }
+    /**
+     * Flush all buffered events to the frontend via IPC.
+     *
+     * Serializes buffered events to JSON and sends them via the 'acp:sub-agent-progress' channel.
+     * Clears the buffer after successful send. Handles serialization errors gracefully by logging
+     * and continuing execution (errors don't crash agent).
+     *
+     * Requirements: 4.2, 4.3, 4.4, 10.1, 10.2
+     */
+    flush() {
+        // Nothing to flush if buffer is empty
+        if (this.buffer.length === 0) {
+            return;
+        }
+        // Check if sender is available
+        if (!this.sender || this.sender.isDestroyed()) {
+            console.warn('[SubAgentProgress] IPC sender unavailable, skipping flush');
+            this.buffer = []; // Clear buffer to prevent memory buildup
+            return;
+        }
+        // Cancel any pending flush timer
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        // Attempt to serialize and send events
+        try {
+            // Serialize events to JSON
+            const serialized = JSON.stringify(this.buffer);
+            // Send via IPC channel
+            this.sender.send('acp:sub-agent-progress', serialized);
+            // Clear buffer after successful send
+            this.buffer = [];
+        }
+        catch (error) {
+            // Handle serialization errors gracefully - log and continue
+            console.error('[SubAgentProgress] Serialization failed:', error);
+            console.error('[SubAgentProgress] Failed events:', this.buffer);
+            // Clear buffer to prevent repeated failures and memory buildup
+            this.buffer = [];
+        }
+    }
+    /**
+     * Schedule a flush to occur after FLUSH_INTERVAL_MS.
+     *
+     * Only schedules a flush if one is not already scheduled (flushTimer is null).
+     * This implements time-based flushing at ~60fps (16ms intervals).
+     *
+     * Requirements: 7.3
+     */
+    scheduleFlush() {
+        // Only schedule if no flush is already scheduled
+        if (this.flushTimer !== null) {
+            return;
+        }
+        // Set timer for FLUSH_INTERVAL_MS
+        this.flushTimer = setTimeout(() => {
+            // Call flush when timer expires
+            this.flush();
+            // Timer reference is cleared in flush()
+        }, this.FLUSH_INTERVAL_MS);
+    }
+    /**
+     * Destroy the emitter and clean up resources.
+     *
+     * Flushes any remaining buffered events, cancels the flush timer,
+     * and clears the buffer. This method should be called when the
+     * sub-agent execution completes or is aborted.
+     *
+     * Requirements: 9.2
+     */
+    destroy() {
+        // Flush remaining events before cleanup
+        this.flush();
+        // Cancel flush timer if scheduled
+        if (this.flushTimer !== null) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        // Clear buffer to free memory
+        this.buffer = [];
+    }
+}
 // ── Constants & Configuration ───────────────────────────────────────────────
 const DEFAULT_MODEL = "qwen3-vl:235b-instruct-cloud";
 const DEFAULT_BASE_URL = "https://ollama.com/v1";
@@ -71,6 +198,7 @@ const COMPUTER_USE_TOOL_SPEC = {
             "* The screen's resolution is dynamically detected from the host system.",
             "* Whenever you intend to move the cursor to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.",
             "* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element.",
+            "* IMPORTANT: After every action, you will receive a new screenshot. You MUST verify that the action had the intended effect (e.g., if you typed into a search bar, verify the text appears there).",
         ].join("\n"),
         parameters: {
             type: "object",
@@ -139,6 +267,11 @@ const COMPUTER_USE_TOOL_SPEC = {
 };
 const SYSTEM_PROMPT = `You are Fern, an autonomous automation agent with full GUI control.
 - Be precise. Inspect screenshots carefully before acting.
+- **ADAPTABILITY & OBSTACLES**: If you encounter an ad, popup, overlay, or notification that blocks your path, you MUST close it or wait for it to disappear before proceeding. Do not ignore visual obstructions.
+- **VERIFICATION**: After every action, inspect the resulting screenshot to verify success.
+  - If a click didn't land or a field didn't focus, REPEAT the action.
+  - If typing failed because of an overlay, clear the obstacle and type again.
+  - NEVER claim a task is "searched" or "complete" if the visual state does not confirm it.
 - **AVAILABLE APPS**: Review the "CURRENT SYSTEM STATE:" section to see which applications are CURRENTLY OPEN. However, you CAN open any Windows application by searching the Start Menu.
 - **FINDING APPS**: If the app you need is not currently open:
   1. Click Windows Start button (bottom-left)
@@ -163,6 +296,10 @@ const SYSTEM_PROMPT = `You are Fern, an autonomous automation agent with full GU
   5. NEVER assume an input field is empty — always inspect the screenshot first
   6. Common fields with existing text: Search bars, URL fields, username/password fields, form inputs
 - **KEYS**: Use action=press(keys=["enter"]) to submit forms or send messages.
+- **COMPLETION**: When the task is done, you MUST:
+  1. Use action=answer(text="Detailed summary of what you did and the final result") to report back to the manager agent. This summary is what the user will see in the chat.
+  2. Then use action=terminate(status="success") to end the session.
+- NEVER just use terminate without providing an answer first. The manager agent depends on your answer to conclude the task for the user.
 - Always finish with action=answer and action=terminate(status="success").
 
 **COORDINATE GUIDELINES**:
@@ -171,7 +308,7 @@ const SYSTEM_PROMPT = `You are Fern, an autonomous automation agent with full GU
 - Contacts/Servers: Left sidebar (X < 250).
 
 **WORKFLOW**:
-Observation (Screenshot) -> Check Task Requirements -> Find/Open Needed Apps -> Reasoning -> Action -> Verification.`;
+Observation (Screenshot) -> Check Task Requirements -> Find/Open Needed Apps -> Reasoning -> Action -> Verification (New Screenshot).`;
 // ── Utilities ──────────────────────────────────────────────────────────────────
 function nowTs() {
     const d = new Date();
@@ -856,29 +993,62 @@ class ComputerUseTool {
         const imageW = vp.image_width;
         const imageH = vp.image_height;
         if (displayW && displayH) {
+            // Normalized coordinates (0-1000 range) — map to physical display
             if (x <= 1000 && y <= 1000) {
                 const normX = Math.max(0, Math.min(1, x / 1000));
                 const normY = Math.max(0, Math.min(1, y / 1000));
-                // Map to physical display resolution for accuracy
                 let absX = left + Math.floor(normX * displayW);
                 let absY = top + Math.floor(normY * displayH);
-                // Optional: If robotjs is configured for logical only, we would divide by scaleFactor here.
-                // But Qwen-VL reference and common usage with robotjs on Windows often prefers direct pixel alignment.
-                console.log(`[Coordinate Transform] relative input=(${x}, ${y}) physical_target=(${displayW}x${displayH}) → abs=(${absX}, ${absY})`);
+                console.log(`[Coordinate Transform] normalized input=(${x}, ${y}) → abs=(${absX}, ${absY})`);
                 return [absX, absY];
             }
+            // Pixel coordinates — since we send full-resolution screenshots,
+            // imageW === displayW and imageH === displayH, so scale is 1:1
             if (imageW && imageH) {
                 const scaleX = displayW / imageW;
                 const scaleY = displayH / imageH;
                 const absX = left + Math.round(x * scaleX);
                 const absY = top + Math.round(y * scaleY);
-                console.log(`[Coordinate Transform] pixel input=(${x}, ${y}) image_size=(${imageW}x${imageH}) scale=(${scaleX.toFixed(2)}, ${scaleY.toFixed(2)}) → abs=(${absX}, ${absY})`);
+                console.log(`[Coordinate Transform] pixel input=(${x}, ${y}) scale=(${scaleX.toFixed(2)}, ${scaleY.toFixed(2)}) → abs=(${absX}, ${absY})`);
                 return [absX, absY];
             }
+            // Fallback: assume 1:1 mapping
+            console.log(`[Coordinate Transform] pixel input=(${x}, ${y}) → abs=(${left + x}, ${top + y})`);
+            return [left + x, top + y];
         }
         console.log(`[Coordinate Transform] No viewport/scale, using offset only: (${left + x}, ${top + y})`);
         return [left + x, top + y];
     }
+}
+// ── Connection / Auth Error Detection ────────────────────────────────────────
+/**
+ * Returns true if the error indicates the VLM provider is unreachable
+ * (network-level failure: refused, timeout, DNS failure, etc.) or experiencing
+ * server errors (5xx) that should trigger retry-with-limit behavior.
+ */
+function isConnectionError(err) {
+    if (!(err instanceof Error))
+        return false;
+    const msg = err.message.toLowerCase();
+    return (msg.includes('econnrefused') ||
+        msg.includes('fetch failed') ||
+        msg.includes('etimedout') ||
+        msg.includes('enotfound') ||
+        /http 5\d\d:/.test(msg) // Match HTTP 500-599 server errors
+    );
+}
+/**
+ * Returns true if the error is an authentication failure (HTTP 401/403).
+ * These should trigger immediate exit — retrying won't help.
+ * We match on the status code in the error message, not on words like
+ * "unauthorized" which can appear in 500 error bodies from some providers.
+ */
+function isAuthError(err) {
+    if (!(err instanceof Error))
+        return false;
+    const msg = err.message;
+    // Match "[provider] HTTP 401:" or "[provider] HTTP 403:" patterns
+    return /HTTP 40[13]:/.test(msg);
 }
 // ── ComputerUseAgent (Sub-Agent Loop) ─────────────────────────────────────────
 class ComputerUseAgent {
@@ -912,87 +1082,209 @@ class ComputerUseAgent {
         this.terminated = "aborted";
         console.log(`[Sub-Agent] 🛑 Received external abort signal.`);
     }
-    async run(onUpdate) {
+    async run(onUpdate, onProgress) {
         if (this.messages.length === 1) {
             await this.appendInitialObservation();
             this.baseCount = this.messages.length;
         }
         console.log(`\n[Sub-Agent] 🚀 VLM PROOF: Using Model="${this.model}" via Provider="${this.client.provider}"`);
         console.log(`[Sub-Agent] 📡 Base URL: ${JSON.stringify(this.client.config?.baseUrl || "builtin")}`);
+        let errorCount = 0;
+        const MAX_ERRORS = 3;
         for (let step = 1; step <= this.maxTurns; step++) {
-            if (this.aborted)
-                break;
-            console.log(`\n[Sub-Agent] 👁️  Step ${step}/${this.maxTurns}`);
-            onUpdate?.(`Sub-Agent Turn ${step}/${this.maxTurns}...`);
-            const response = await this.client.chat({
-                messages: this.messages,
-                model: this.model,
-                temperature: this.temperature,
-                tools: [COMPUTER_USE_TOOL_SPEC],
-            });
-            if (this.aborted)
-                break;
-            const content = typeof response.content === "string" ? response.content : "";
-            if (content) {
-                console.log(`[Sub-Agent] 🧠 Reasoning: ${content}`);
-            }
-            this.messages.push({
-                role: "assistant",
-                content: response.content || "",
-                tool_calls: response.toolCalls,
-            });
-            let toolCalls = response.toolCalls || [];
-            // FALLBACK: If no formal tool calls, try parsing the text content for action=... format
-            if (toolCalls.length === 0 && content) {
-                const parsed = this.parseTextActions(content);
-                if (parsed.length > 0) {
-                    console.log(`[Sub-Agent] 🧩 Parsed ${parsed.length} text-based actions from reasoning.`);
-                    toolCalls = parsed;
+            try {
+                if (this.aborted || abort_manager_1.globalAbortManager.streamAborted) {
+                    console.log(`[Sub-Agent] 🛑 Run loop aborted at step ${step}.`);
+                    this.terminated = "aborted";
+                    break;
+                }
+                console.log(`\n[Sub-Agent] 👁️  Step ${step}/${this.maxTurns}`);
+                onUpdate?.(`Sub-Agent Turn ${step}/${this.maxTurns}...`);
+                // Emit step progress event
+                onProgress?.({
+                    type: 'step',
+                    toolCallId: '',
+                    timestamp: new Date().toISOString(),
+                    stepNumber: step,
+                    totalSteps: this.maxTurns,
+                });
+                // Ollama Cloud vision models don't support tool calling — omit tools to avoid 500 errors
+                const shouldSendTools = this.client.provider !== 'ollama-cloud';
+                const response = await this.client.chat({
+                    messages: this.messages,
+                    model: this.model,
+                    temperature: this.temperature,
+                    tools: shouldSendTools ? [COMPUTER_USE_TOOL_SPEC] : undefined,
+                });
+                // Reset error count on successful communication
+                errorCount = 0;
+                if (this.aborted)
+                    break;
+                const content = typeof response.content === "string" ? response.content : "";
+                if (content) {
+                    console.log(`[Sub-Agent] 🧠 Reasoning: ${content}`);
+                    onProgress?.({
+                        type: 'reasoning',
+                        toolCallId: '',
+                        timestamp: new Date().toISOString(),
+                        stepNumber: step,
+                        content: content,
+                    });
+                }
+                this.messages.push({
+                    role: "assistant",
+                    content: response.content || "",
+                    tool_calls: response.toolCalls,
+                });
+                let toolCalls = response.toolCalls || [];
+                // FALLBACK: If no formal tool calls, try parsing the text content
+                if (toolCalls.length === 0 && content) {
+                    const parsed = this.parseTextActions(content);
+                    if (parsed.length > 0) {
+                        console.log(`[Sub-Agent] 🧩 Parsed ${parsed.length} text-based actions from reasoning.`);
+                        toolCalls = parsed;
+                    }
+                }
+                if (toolCalls.length === 0) {
+                    if (step < this.maxTurns) {
+                        console.warn(`[Sub-Agent] ⚠️ No actions detected at step ${step}. Adding system reminder...`);
+                        this.messages.push({
+                            role: "system",
+                            content: "You provided reasoning but no tool call. You MUST use the action=... format to perform an action (e.g. action=left_click(coordinate=[x, y])). Just thinking about it won't work."
+                        });
+                        continue;
+                    }
+                    else {
+                        console.error(`[Sub-Agent] ❌ Reached max turns (${this.maxTurns}) without completion.`);
+                        break;
+                    }
+                }
+                for (const toolCall of toolCalls) {
+                    let args;
+                    try {
+                        args = typeof toolCall.arguments === "string" ? JSON.parse(toolCall.arguments) : toolCall.arguments;
+                    }
+                    catch (e) {
+                        console.warn("[Sub-Agent] Failed to parse tool arguments", toolCall.arguments);
+                        this.messages.push({
+                            role: "tool",
+                            tool_call_id: toolCall.id,
+                            content: "Error: Failed to parse tool arguments. Ensure you use valid JSON."
+                        });
+                        continue;
+                    }
+                    onUpdate?.(`Executing ${args.action}...`);
+                    console.log(`[Sub-Agent] ▶ Executing: ${args.action}`);
+                    try {
+                        const result = await this.tool.call(args);
+                        const payload = result.payload;
+                        onProgress?.({
+                            type: 'action',
+                            toolCallId: '',
+                            timestamp: new Date().toISOString(),
+                            stepNumber: step,
+                            action: {
+                                type: args.action,
+                                params: args,
+                                description: this.formatActionDescription(args),
+                            },
+                        });
+                        if (payload.status === "answer") {
+                            this.finalAnswer = payload.text || "Task finished.";
+                            console.log(`[Sub-Agent] ✅ Final Answer received: ${this.finalAnswer}`);
+                        }
+                        if (payload.status === "terminate") {
+                            this.terminated = payload.result || "success";
+                            console.log(`[Sub-Agent] 🏁 Termination received: ${this.terminated}`);
+                        }
+                        if (payload.screenshot) {
+                            this.lastScreenshot = payload.screenshot;
+                            onProgress?.({
+                                type: 'screenshot',
+                                toolCallId: '',
+                                timestamp: new Date().toISOString(),
+                                stepNumber: step,
+                                screenshot: {
+                                    base64: payload.screenshot,
+                                    width: payload.downscaled_size?.width || payload.display?.width || 1920,
+                                    height: payload.downscaled_size?.height || payload.display?.height || 1080,
+                                },
+                            });
+                        }
+                        this.messages.push({
+                            role: "tool",
+                            tool_call_id: toolCall.id,
+                            content: result.asContent(),
+                        });
+                    }
+                    catch (toolErr) {
+                        console.error(`[Sub-Agent] ❌ Tool execution error:`, toolErr);
+                        this.messages.push({
+                            role: "tool",
+                            tool_call_id: toolCall.id,
+                            content: `Error executing tool: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`
+                        });
+                    }
+                }
+                this.trimMessages();
+                if (this.terminated || this.finalAnswer) {
+                    console.log(`[Sub-Agent] 🏁 Exiting loop: terminated=${!!this.terminated}, finalAnswer=${!!this.finalAnswer}`);
+                    break;
                 }
             }
-            if (toolCalls.length === 0) {
-                // If still no actions, provide a system reminder
-                console.warn(`[Sub-Agent] ⚠️ No actions detected. Adding system reminder...`);
+            catch (chatErr) {
+                console.error(`[Sub-Agent] ❌ Chat error at step ${step}:`, chatErr);
+                if (isAuthError(chatErr)) {
+                    // Auth errors (401/403) won't resolve with retries — exit immediately
+                    const clientConfig = this.client.config;
+                    const baseUrl = clientConfig?.baseUrl || 'unknown';
+                    const provider = clientConfig?.provider || 'unknown';
+                    const errorMsg = chatErr instanceof Error ? chatErr.message : String(chatErr);
+                    const isOllamaCloud = provider === 'ollama-cloud' ||
+                        (typeof baseUrl === 'string' && baseUrl.includes('ollama.com'));
+                    const verifySteps = isOllamaCloud
+                        ? `1. Your Ollama Cloud API key is correct and has not expired\n2. The key has access to model "${this.model}"\n3. Check your Vision Provider settings and re-enter the API key`
+                        : `1. Your API key for "${provider}" is correct\n2. The key has not expired or been revoked\n3. Check your Vision Provider settings`;
+                    this.finalAnswer = `VLM provider rejected the request (authentication failed). Please verify:\n${verifySteps}\n\nError: ${errorMsg}`;
+                    console.error('[Sub-Agent] 🛑 Authentication error — terminating immediately.');
+                    break;
+                }
+                if (isConnectionError(chatErr)) {
+                    errorCount++;
+                    console.warn(`[Sub-Agent] ⚠️ Connection error (${errorCount}/${MAX_ERRORS})`);
+                    if (errorCount >= MAX_ERRORS) {
+                        const clientConfig = this.client.config;
+                        const baseUrl = clientConfig?.baseUrl || 'unknown';
+                        const provider = clientConfig?.provider || 'unknown';
+                        const errorMsg = chatErr instanceof Error ? chatErr.message : String(chatErr);
+                        const isOllamaCloud = provider === 'ollama-cloud' ||
+                            (typeof baseUrl === 'string' && baseUrl.includes('ollama.com'));
+                        const is5xx = /HTTP 5\d\d:/.test(errorMsg);
+                        let verifySteps;
+                        if (isOllamaCloud && is5xx) {
+                            verifySteps = `1. The model "${this.model}" is available on Ollama Cloud (cloud models typically require a "-cloud" suffix, e.g. "qwen3-vl:235b-instruct-cloud")\n2. Your Ollama Cloud API key is valid\n3. Check https://ollama.com for available cloud models`;
+                        }
+                        else if (isOllamaCloud) {
+                            verifySteps = `1. Your Ollama Cloud API key is valid and not expired\n2. The baseUrl is correct: ${baseUrl}\n3. The model "${this.model}" is available on Ollama Cloud`;
+                        }
+                        else {
+                            verifySteps = `1. Ollama (or your configured VLM provider) is running\n2. The baseUrl is correct: ${baseUrl}\n3. The model "${this.model}" is available`;
+                        }
+                        this.finalAnswer = `Unable to reach VLM provider after ${MAX_ERRORS} consecutive attempts. Please verify:\n${verifySteps}\n\nConnection error: ${errorMsg}`;
+                        console.error('[Sub-Agent] 🛑 Max connection errors reached. Terminating early.');
+                        break;
+                    }
+                }
+                if (step === this.maxTurns)
+                    break;
                 this.messages.push({
                     role: "system",
-                    content: "You provided reasoning but no tool call. You MUST use the action=... format to perform an action (e.g. action=left_click(coordinate=[x, y])). Just thinking about it won't work."
-                });
-                continue;
-            }
-            for (const toolCall of toolCalls) {
-                let args;
-                try {
-                    args = typeof toolCall.arguments === "string" ? JSON.parse(toolCall.arguments) : toolCall.arguments;
-                }
-                catch (e) {
-                    console.warn("[Sub-Agent] Failed to parse tool arguments", toolCall.arguments);
-                    continue;
-                }
-                onUpdate?.(`Sub-Agent executing ${args.action}...`);
-                console.log(`[Sub-Agent] ▶ Executing: ${args.action} ${JSON.stringify(args)}`);
-                const result = await this.tool.call(args);
-                const payload = result.payload;
-                if (payload.status === "answer") {
-                    this.finalAnswer = payload.text || "Task finished.";
-                }
-                if (payload.status === "terminate") {
-                    this.terminated = payload.result || "success";
-                }
-                if (payload.screenshot) {
-                    this.lastScreenshot = payload.screenshot;
-                }
-                this.messages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: result.asContent(),
+                    content: `Error from AI provider: ${chatErr instanceof Error ? chatErr.message : String(chatErr)}. Please try again.`
                 });
             }
-            this.trimMessages();
-            if (this.terminated || this.finalAnswer)
-                break;
         }
         return {
-            finalAnswer: this.finalAnswer || "Sub-agent task completed.",
+            finalAnswer: this.finalAnswer || (this.terminated === 'success' ? `Task completed successfully: ${this.task}` : `Task ended: ${this.terminated || 'unknown'}`),
             lastScreenshot: this.lastScreenshot,
         };
     }
@@ -1089,6 +1381,79 @@ class ComputerUseAgent {
         content.push({ type: "text", text: contextText });
         this.messages.push({ role: "user", content });
     }
+    /**
+     * Formats action parameters into a human-readable description
+     * Requirements: 3.3, 3.4
+     */
+    formatActionDescription(args) {
+        const action = args.action;
+        switch (action) {
+            case 'left_click':
+                if (args.coordinate) {
+                    return `Left click at (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Left click';
+            case 'right_click':
+                if (args.coordinate) {
+                    return `Right click at (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Right click';
+            case 'middle_click':
+                if (args.coordinate) {
+                    return `Middle click at (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Middle click';
+            case 'double_click':
+                if (args.coordinate) {
+                    return `Double click at (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Double click';
+            case 'triple_click':
+                if (args.coordinate) {
+                    return `Triple click at (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Triple click';
+            case 'mouse_move':
+                if (args.coordinate) {
+                    return `Move mouse to (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Move mouse';
+            case 'left_click_drag':
+                if (args.coordinate) {
+                    return `Drag to (${args.coordinate[0]}, ${args.coordinate[1]})`;
+                }
+                return 'Drag';
+            case 'scroll':
+                const pixels = args.pixels || 0;
+                const direction = pixels > 0 ? 'down' : 'up';
+                return `Scroll ${direction} ${Math.abs(pixels)} pixels`;
+            case 'hscroll':
+                const hpixels = args.pixels || 0;
+                const hdirection = hpixels > 0 ? 'right' : 'left';
+                return `Scroll ${hdirection} ${Math.abs(hpixels)} pixels`;
+            case 'type':
+                const text = args.text || '';
+                const truncated = text.length > 50 ? text.substring(0, 50) + '...' : text;
+                return `Type "${truncated}"`;
+            case 'key':
+            case 'press':
+                const keys = args.keys || [];
+                return `Press ${keys.join(' + ')}`;
+            case 'wait':
+                const time = args.time || 1;
+                return `Wait ${time} second${time !== 1 ? 's' : ''}`;
+            case 'zoom':
+                const factor = args.zoom_factor || 1;
+                return `Zoom ${factor}x`;
+            case 'answer':
+                return 'Provide answer';
+            case 'terminate':
+                const status = args.status || 'success';
+                return `Terminate (${status})`;
+            default:
+                return `Execute ${action}`;
+        }
+    }
     trimMessages() {
         const base = this.messages.slice(0, this.baseCount);
         const dynamic = this.messages.slice(this.baseCount);
@@ -1115,7 +1480,9 @@ function createComputerUseTool(originalClient, _platform = process.platform, _vi
     const tool = new ComputerUseTool(screenshotDir);
     // Use either the provided VLM config or fall back to original client
     const subAgentClient = vlm ? new ai_client_1.AIClient({
-        provider: vlm.provider || 'openai',
+        // When the UI saves engine="cloud" with provider="ollama", map to "ollama-cloud"
+        // so AIClient uses https://ollama.com as the default baseUrl instead of localhost:11434
+        provider: (vlm.engine === 'cloud' && vlm.provider === 'ollama' ? 'ollama-cloud' : vlm.provider) || 'openai',
         apiKey: vlm.apiKey,
         baseUrl: vlm.baseUrl,
         model: vlm.model
@@ -1139,17 +1506,36 @@ function createComputerUseTool(originalClient, _platform = process.platform, _vi
             onUpdate?.(`Initializing sub-agent for task: "${task}"...`);
             const agent = new ComputerUseAgent(subAgentClient, tool, subAgentModel, task);
             activeAgentInstance = agent;
+            // Create ProgressEventEmitter for sub-agent progress streaming
+            // Requirements: 5.1, 5.2, 5.3, 5.4
+            const mainWindow = global.mainWindow;
+            const sender = mainWindow?.webContents || null;
+            const toolCallId = crypto.randomUUID();
+            const progressEmitter = new ProgressEventEmitter(toolCallId, sender);
             try {
-                const { finalAnswer, lastScreenshot } = await agent.run((update) => onUpdate?.(update));
+                const { finalAnswer, lastScreenshot } = await agent.run((update) => onUpdate?.(update), (event) => {
+                    // Set toolCallId for each event before emitting
+                    event.toolCallId = toolCallId;
+                    progressEmitter.emit(event);
+                });
                 const b64 = lastScreenshot?.split(',')[1];
+                // Emit completion event
+                progressEmitter.emit({
+                    type: 'complete',
+                    toolCallId: toolCallId,
+                    timestamp: new Date().toISOString(),
+                });
+                const finalOutput = finalAnswer || `Successfully completed GUI task: ${task}`;
                 return {
                     success: true,
-                    output: finalAnswer,
+                    output: finalOutput,
                     base64Image: b64,
-                    data: { task, finalAnswer: finalAnswer }
+                    data: { task, finalAnswer: finalOutput, screenshot: b64 }
                 };
             }
             finally {
+                // Destroy emitter to flush remaining events and clean up
+                progressEmitter.destroy();
                 if (activeAgentInstance === agent) {
                     activeAgentInstance = null;
                 }

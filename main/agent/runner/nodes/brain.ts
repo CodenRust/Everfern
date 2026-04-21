@@ -46,7 +46,7 @@ Respond with JSON only:
     const startTime = Date.now();
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('completion signal timed out')), 5000)
+      setTimeout(() => reject(new Error('completion signal timed out')), 10000)
     );
 
     const response = await Promise.race([
@@ -101,7 +101,8 @@ export const createBrainNode = (
   eventQueue?: StreamEvent[],
   missionTracker?: MissionTracker,
   toolDefs?: ToolDefinition[],
-  shouldAbort?: () => boolean
+  shouldAbort?: () => boolean,
+  systemPromptOverride?: string
 ) => {
   const integrator = createMissionIntegrator(missionTracker);
 
@@ -125,6 +126,7 @@ export const createBrainNode = (
         toolDefs: tools,
         eventQueue,
         nodeName: 'brain',
+        systemPromptOverride: systemPromptOverride
       }),
       'Processing request'
     );

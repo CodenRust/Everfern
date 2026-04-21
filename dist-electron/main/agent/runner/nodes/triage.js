@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createTriageNode = void 0;
 const triage_1 = require("../triage");
 const mission_integrator_1 = require("../mission-integrator");
-const task_decomposer_1 = require("../task-decomposer");
 const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
     const integrator = (0, mission_integrator_1.createMissionIntegrator)(missionTracker);
     return async (state) => {
@@ -52,23 +51,10 @@ const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
                 confidence: classification.confidence,
                 phase: 'triage'
             });
-            const decomposed = (0, task_decomposer_1.decomposeTask)(content, []);
-            const agiHints = (0, task_decomposer_1.getAGIHints)(content);
-            runner.telemetry.info(`Graph expansion: ${decomposed.totalSteps} steps (Decomposition Mode: ${decomposed.executionMode})`);
-            eventQueue?.push({
-                type: 'task_analyzed',
-                analysis: {
-                    complexity: decomposed.totalSteps > 5 ? 'complex' : 'simple',
-                    canParallelize: decomposed.canParallelize,
-                    suggestedApproach: decomposed.executionMode
-                }
-            });
             const result = {
                 currentIntent: classification.intent,
                 intentConfidence: classification.confidence,
-                taskPhase: 'planning',
-                decomposedTask: decomposed,
-                agiHints: agiHints,
+                taskPhase: 'routing', // Transit to routing/decomposer
             };
             integrator.completeNode('triage', `Intent classified as: ${classification.intent}`);
             return result;

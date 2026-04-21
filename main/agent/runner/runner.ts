@@ -62,9 +62,30 @@ export class AgentRunner {
     this.skills = []; // Initialize empty, will be loaded asynchronously
 
     this.tools = getBaseTools(this);
+    console.log(`[AgentRunner] Constructor: Initialized ${this.tools.length} base tools.`);
+    
+    // Start async initialization but don't block constructor
     this.initializePiTools();
-    this.initializeSkills(); // Load skills asynchronously
+    this.initializeSkills();
     this.telemetry = new TelemetryLogger();
+  }
+
+  /**
+   * Ensure all asynchronous tool/skill initialization is complete
+   */
+  public async waitForToolsReady() {
+    console.log('[AgentRunner] 🔄 Waiting for tools/skills to be ready...');
+    
+    // Skills are already loaded in initializeSkills call from constructor
+    // but we can ensure they are loaded here too if needed
+    if (this.skills.length === 0) {
+      await this.initializeSkills();
+    }
+    
+    // Pi tools are already loaded in initializePiTools call from constructor
+    await this.initializePiTools();
+    
+    console.log(`[AgentRunner] ✅ All tools ready. Total tools: ${this.tools.length}`);
   }
 
   /**
@@ -72,7 +93,9 @@ export class AgentRunner {
    */
   private async initializeSkills() {
     try {
+      if (this.skills.length > 0) return;
       this.skills = await loadSkillsAsync();
+      console.log(`[AgentRunner] ✅ Skills loaded: ${this.skills.length}`);
     } catch (error) {
       console.error('[AgentRunner] Failed to load skills asynchronously:', error);
       this.skills = []; // Fallback to empty array
@@ -80,9 +103,15 @@ export class AgentRunner {
   }
 
   private async initializePiTools() {
-    const piTools = await getPiCodingTools();
-    if (!this.tools.find(t => t.name === piTools[0].name)) {
-      this.tools.push(...piTools, this.createSpawnAgentTool());
+    try {
+      const piTools = await getPiCodingTools();
+      if (!this.tools.find(t => t.name === piTools[0].name)) {
+        console.log(`[AgentRunner] 🔄 Registering ${piTools.length} Pi coding tools...`);
+        this.tools.push(...piTools, this.createSpawnAgentTool());
+        console.log(`[AgentRunner] ✅ Pi coding tools registered. Total tools: ${this.tools.length}`);
+      }
+    } catch (error) {
+      console.error('[AgentRunner] Failed to initialize Pi tools:', error);
     }
   }
 
@@ -222,11 +251,52 @@ export class AgentRunner {
   }
 
   public _buildToolDefinitions(): ToolDefinition[] {
-    return this.tools.map(t => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters as Record<string, unknown>,
-    }));
+    const toolDefs: ToolDefinition[] = [];
+
+    console.log(`[ToolDefinitions] Building tool definitions for ${this.tools.length} tools...`);
+
+    for (const t of this.tools) {
+      // Validate that tool has required properties
+      if (!t.name || !t.description || !t.parameters) {
+        console.warn(`[ToolDefinitions] Skipping tool with missing properties:`, {
+          name: t.name || 'MISSING',
+          hasDescription: !!t.description,
+          hasParameters: !!t.parameters,
+        });
+        if (t.name === 'computer_use') {
+          console.error(`[ToolDefinitions] ❌ CRITICAL: computer_use tool is missing required properties!`, {
+            description: t.description ? 'present' : 'missing',
+            parameters: t.parameters ? 'present' : 'missing'
+          });
+        }
+        continue;
+      }
+
+      // Add valid tool definition
+      toolDefs.push({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters as Record<string, unknown>,
+      });
+
+      // Log computer_use tool specifically
+      if (t.name === 'computer_use') {
+        console.log(`[ToolDefinitions] ✅ computer_use tool included in definitions:`, {
+          descLength: t.description.length,
+          paramKeys: Object.keys(t.parameters.properties || {})
+        });
+      }
+    }
+
+    console.log(`[ToolDefinitions] Built ${toolDefs.length} tool definitions`);
+    console.log(`[ToolDefinitions] Tool names: ${toolDefs.map(t => t.name).join(', ')}`);
+
+    // Warn if computer_use is missing
+    if (!toolDefs.find(t => t.name === 'computer_use')) {
+      console.warn(`[ToolDefinitions] ⚠️ WARNING: computer_use tool is missing from tool definitions!`);
+    }
+
+    return toolDefs;
   }
 
   async run(
@@ -334,11 +404,8 @@ export class AgentRunner {
 
     this.telemetry.begin(textInput);
 
-
-
-    this.telemetry.updateSpinner('Loading tool definitions...');
-    const piTools = await getPiCodingTools();
-    if (!this.tools.find(t => t.name === piTools[0].name)) this.tools.push(...piTools);
+    // Ensure all tools and skills are fully loaded before proceeding
+    await this.waitForToolsReady();
 
     this.telemetry.updateSpinner('Pre-loading system prompt...');
     const platform = os.platform();
@@ -408,8 +475,8 @@ export class AgentRunner {
         globalAbortManager.checkAbort();
 
         console.log('[AgentRunner] 🔄 Getting graph state...');
-        const threadConfig = { 
-          configurable: { 
+        const threadConfig = {
+          configurable: {
             thread_id: convId,
             executionContext: {
               runner: this,
@@ -418,8 +485,8 @@ export class AgentRunner {
               conversationId: convId,
               shouldAbort,
             }
-          }, 
-          recursionLimit: 100 
+          },
+          recursionLimit: 100
         };
         const currentState = await graph.getState(threadConfig);
         console.log('[AgentRunner] ✅ Graph state retrieved');

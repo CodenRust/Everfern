@@ -72,12 +72,40 @@ function loadConfigSync() {
 const memory_manager_1 = require("../store/memory-manager");
 const providers_1 = require("../lib/providers");
 function registerAgentHandlers() {
+    // Event-based channels (one-way communication via sender.send):
+    // - acp:sub-agent-progress: Sub-agent progress streaming events
+    //   Events are sent via sender.send('acp:sub-agent-progress', event)
+    //   Used by ProgressEventEmitter in computer-use.ts
     // Provider management
     electron_1.ipcMain.handle('acp:list-providers', () => manager_1.acpManager.listProviders());
     electron_1.ipcMain.handle('acp:set-provider', async (_event, config) => {
         return manager_1.acpManager.setProvider(config);
     });
     electron_1.ipcMain.handle('acp:health-check', async () => manager_1.acpManager.healthCheck());
+    electron_1.ipcMain.handle('acp:list-tools', async () => {
+        try {
+            const activeConfig = manager_1.acpManager.getActiveConfig();
+            // Create a temporary runner just to get the list of tools
+            // This is safe because getBaseTools/initializePiTools are relatively lightweight
+            const client = manager_1.acpManager.getClient();
+            if (!client)
+                return { success: true, tools: [] };
+            const runner = new runner_1.AgentRunner(client, {
+                visionModel: activeConfig?.vlm?.model,
+                vlm: activeConfig?.vlm,
+            });
+            await runner.waitForToolsReady();
+            const tools = runner.tools.map(t => ({
+                name: t.name,
+                description: t.description,
+            }));
+            return { success: true, tools };
+        }
+        catch (error) {
+            console.error('[acp:list-tools] Error:', error);
+            return { success: false, error: String(error) };
+        }
+    });
     electron_1.ipcMain.handle('acp:list-models', async () => {
         try {
             const config = manager_1.acpManager.getActiveConfig();
@@ -212,7 +240,21 @@ function registerAgentHandlers() {
         }
         if (!client)
             throw new Error('No AI provider configured');
-        const runner = new runner_1.AgentRunner(client);
+        // Construct AgentRunnerConfig from active ACP config
+        const activeConfig = manager_1.acpManager.getActiveConfig();
+        console.log('[AgentIPC] Active ACP Config:', {
+            provider: activeConfig?.provider,
+            model: activeConfig?.model,
+            hasVlm: !!activeConfig?.vlm,
+            vlmModel: activeConfig?.vlm?.model
+        });
+        const runnerConfig = {
+            visionModel: activeConfig?.vlm?.model,
+            vlm: activeConfig?.vlm,
+            ollamaBaseUrl: activeConfig?.baseUrl, // Fallback
+        };
+        console.log('[AgentIPC] Initializing AgentRunner with config:', JSON.stringify(runnerConfig, null, 2));
+        const runner = new runner_1.AgentRunner(client, runnerConfig);
         // IPC Batching State
         let chunkBuffer = '';
         let thoughtBuffer = '';
