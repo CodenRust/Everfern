@@ -185,7 +185,7 @@ JSON:
 }`;
 
           const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Judge timed out')), 7000)
+            setTimeout(() => reject(new Error('Judge timed out')), 15000)
           );
 
           const response = await Promise.race([

@@ -57,15 +57,13 @@ exports.PROVIDER_MODELS = {
     ],
     ollama: [], // populated dynamically at runtime
     'ollama-cloud': [
-        'llama3.3',
-        'llama3.2',
-        'llama3.1',
-        'qwen2.5',
-        'mistral',
-        'phi4',
-        'llava',
+        'qwen3-vl:235b-instruct-cloud',
+        'kimi-k2.6:cloud',
+        'glm-5.1:cloud',
         'gemma4:31b-cloud',
-        'nomic-embed-text',
+        'kimi-k2.5:cloud',
+        'minimax-m2.7:cloud',
+        'glm-5:cloud'
     ],
     lmstudio: [], // populated dynamically at runtime
     everfern: [
@@ -285,6 +283,10 @@ function formatModelName(id) {
         'meta/llama-3.3-70b-instruct': 'Llama 3.3 70B (NIM)',
         'meta/llama-3.2-90b-vision-instruct': 'Llama 3.2 90B Vision (NIM)',
         'google/gemma-4-31b-it': 'Gemma 4 31B (NIM)',
+        'qwen3-vl:235b-instruct-cloud': 'Qwen3 VL 235B (Cloud)',
+        'kimi-k2.6:cloud': 'Kimi K2.6 (Cloud)',
+        'glm-5.1:cloud': 'GLM 5.1 (Cloud)',
+        'gemma4:31b-cloud': 'Gemma 4 31B (Cloud)',
     };
     return knownNames[id] ?? id;
 }

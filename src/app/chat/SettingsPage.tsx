@@ -731,8 +731,18 @@ export default function SettingsPage({
                         <div>
                             <Label>Model Name</Label>
                             <div style={{ position: 'relative' }}>
-                                <CpuChipIcon width={14} height={14} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#8a8886' }} />
-                                <Input type="text" placeholder={settingsVlmCloudProvider === 'openai' ? 'gpt-4o' : 'qwen3-vl:235b-instruct-cloud'} value={settingsVlmCloudModel} onChange={e => setSettingsVlmCloudModel(e.target.value)} style={{ paddingLeft: 40, fontFamily: 'monospace' }} />
+                                {settingsVlmCloudProvider === 'ollama' ? (
+                                    <Select value={settingsVlmCloudModel} onChange={e => setSettingsVlmCloudModel(e.target.value)}>
+                                        <option value="qwen3-vl:235b-instruct-cloud">Qwen3 VL 235B (Default)</option>
+                                        <option value="kimi-k2.6:cloud">Kimi K2.6 Cloud</option>
+                                        <option value="glm-5.1:cloud">GLM 5.1 Cloud</option>
+                                    </Select>
+                                ) : (
+                                    <>
+                                        <CpuChipIcon width={14} height={14} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#8a8886' }} />
+                                        <Input type="text" placeholder={settingsVlmCloudProvider === 'openai' ? 'gpt-4o' : 'qwen3-vl:235b-instruct-cloud'} value={settingsVlmCloudModel} onChange={e => setSettingsVlmCloudModel(e.target.value)} style={{ paddingLeft: 40, fontFamily: 'monospace' }} />
+                                    </>
+                                )}
                             </div>
                         </div>
                         {settingsVlmCloudProvider !== 'ollama' && (

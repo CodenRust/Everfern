@@ -176,14 +176,13 @@ export class ChatHistoryStore {
         );
       }
 
-      // 2. Sync Messages (Surgical: Delete all and re-insert for simplicity in this version, or update existing)
-      // For history, usually messages are immutable or appended. A full sync is safer for now.
-      await dbOps.run('DELETE FROM messages WHERE conversation_id = ?', [conversation.id]);
-
+      // 2. Sync Messages (Upsert to prevent UNIQUE constraint failures on concurrent saves)
       for (const msg of conversation.messages) {
         const msgId = msg.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         await dbOps.run(
-          'INSERT INTO messages (id, conversation_id, role, content, thought, tool_calls, has_timeline, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          `INSERT OR REPLACE INTO messages 
+           (id, conversation_id, role, content, thought, tool_calls, has_timeline, created_at) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM messages WHERE id = ?), ?))`,
           [
             msgId,
             conversation.id,
@@ -192,7 +191,8 @@ export class ChatHistoryStore {
             msg.thought || null,
             msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
             msg.hasTimeline ? 1 : 0,
-            new Date().toISOString() // In a real app we'd preserve message timestamps
+            msgId,
+            new Date().toISOString()
           ]
         );
       }

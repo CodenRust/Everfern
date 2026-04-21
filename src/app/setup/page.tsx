@@ -1024,11 +1024,22 @@ export default function SetupPage() {
                                         <div style={{ display: "flex", flexDirection: "column", gap: 6, textAlign: "left" }}>
                                             <label style={{ fontSize: 12, fontWeight: 600, color: "#8a8886", textTransform: "uppercase", letterSpacing: "0.05em" }}>Model Name</label>
                                             <div style={{ position: "relative" }}>
-                                                <input type="text" placeholder={vlmCloudProvider === 'openai' ? "gpt-4o" : "qwen3-vl:235b-instruct-cloud"} value={vlmCloudModel} onChange={(e) => setVlmCloudModel(e.target.value)}
-                                                    style={{ width: "100%", padding: "14px 18px 14px 46px", backgroundColor: "rgba(32, 30, 36,0.04)", border: "1px solid rgba(32, 30, 36,0.1)", borderRadius: 14, color: "#201e24", fontSize: 14, fontFamily: "monospace", outline: "none", transition: "all 0.2s", boxSizing: "border-box" }}
-                                                    onFocus={e => { e.target.style.borderColor = "rgba(32, 30, 36,0.2)"; e.target.style.backgroundColor = "rgba(32,30,36,0.06)"; }}
-                                                    onBlur={e => { e.target.style.borderColor = "rgba(32, 30, 36,0.1)"; e.target.style.backgroundColor = "rgba(32,30,36,0.04)"; }} />
-                                                <Cpu size={16} style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "#8a8886" }} />
+                                                {vlmCloudProvider === 'ollama' ? (
+                                                    <select value={vlmCloudModel} onChange={(e) => setVlmCloudModel(e.target.value)}
+                                                        style={{ width: "100%", padding: "14px 18px", backgroundColor: "rgba(32, 30, 36,0.04)", border: "1px solid rgba(32, 30, 36,0.1)", borderRadius: 14, color: "#201e24", fontSize: 14, outline: "none", cursor: "pointer", transition: "all 0.2s" }}>
+                                                        <option value="qwen3-vl:235b-instruct-cloud">Qwen3 VL 235B (Default)</option>
+                                                        <option value="kimi-k2.6:cloud">Kimi K2.6 Cloud</option>
+                                                        <option value="glm-5.1:cloud">GLM 5.1 Cloud</option>
+                                                    </select>
+                                                ) : (
+                                                    <>
+                                                        <input type="text" placeholder={vlmCloudProvider === 'openai' ? "gpt-4o" : "qwen3-vl:235b-instruct-cloud"} value={vlmCloudModel} onChange={(e) => setVlmCloudModel(e.target.value)}
+                                                            style={{ width: "100%", padding: "14px 18px 14px 46px", backgroundColor: "rgba(32, 30, 36,0.04)", border: "1px solid rgba(32, 30, 36,0.1)", borderRadius: 14, color: "#201e24", fontSize: 14, fontFamily: "monospace", outline: "none", transition: "all 0.2s", boxSizing: "border-box" }}
+                                                            onFocus={e => { e.target.style.borderColor = "rgba(32, 30, 36,0.2)"; e.target.style.backgroundColor = "rgba(32,30,36,0.06)"; }}
+                                                            onBlur={e => { e.target.style.borderColor = "rgba(32, 30, 36,0.1)"; e.target.style.backgroundColor = "rgba(32,30,36,0.04)"; }} />
+                                                        <Cpu size={16} style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "#8a8886" }} />
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                         {vlmCloudProvider !== 'ollama' && (

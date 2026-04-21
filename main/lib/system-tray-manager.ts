@@ -20,6 +20,7 @@ export class SystemTrayManager {
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private config: SystemTrayConfig;
+  private isQuitting = false;
 
   constructor(config: SystemTrayConfig = {}) {
     this.config = {
@@ -158,6 +159,7 @@ export class SystemTrayManager {
         label: 'Quit EverFern',
         click: () => {
           console.log('[SystemTray] Quit requested from tray menu');
+          this.isQuitting = true;
           app.quit();
         }
       }
@@ -350,6 +352,11 @@ export class SystemTrayManager {
   setupWindowEvents(): void {
     if (!this.mainWindow) return;
 
+    // Mark as quitting when app.quit() is called from any source
+    app.on('before-quit', () => {
+      this.isQuitting = true;
+    });
+
     // Update tray menu when window visibility changes
     this.mainWindow.on('show', () => {
       this.updateTrayMenu();
@@ -360,9 +367,9 @@ export class SystemTrayManager {
     });
 
     // Handle window close event - minimize to tray instead of quitting
-    // This is the ONLY event we intercept to avoid breaking system-generated minimize events
+    // Skip interception if a real quit was requested (e.g. from tray menu)
     this.mainWindow.on('close', (event) => {
-      if (this.config.minimizeToTray && this.tray) {
+      if (!this.isQuitting && this.config.minimizeToTray && this.tray) {
         event.preventDefault();
         this.hideToTray();
         console.log('[SystemTray] Window close intercepted, minimized to tray');

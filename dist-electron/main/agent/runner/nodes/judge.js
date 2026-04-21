@@ -149,7 +149,7 @@ JSON:
   "confidence": 0.0-1.0,
   "reasoning": "brief reason"
 }`;
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Judge timed out')), 7000));
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Judge timed out')), 15000));
                     const response = await Promise.race([
                         runner.client.chat({
                             messages: [{ role: 'user', content: judgePrompt }],
