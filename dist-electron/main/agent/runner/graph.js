@@ -260,7 +260,25 @@ If a specialized agent failed to complete a step, identify the issue and use you
         .addNode('judge', judgeNode);
     compiledGraph
         .addEdge(langgraph_1.START, 'intent_classifier')
-        .addEdge('intent_classifier', 'task_decomposer')
+        .addConditionalEdges('intent_classifier', (state) => {
+        // Skip task decomposition for conversational intents or very short inputs
+        // that likely don't need a multi-step plan.
+        const intent = state.currentIntent;
+        const lastUserMsg = state.messages.filter(m => {
+            const msg = m;
+            return msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human';
+        }).pop();
+        const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '';
+        const isVeryShort = content.length < 15;
+        if (intent === 'conversation' || (intent === 'question' && isVeryShort)) {
+            console.log(`[Graph] ⏭️  Skipping task_decomposer for ${intent} intent (short input)`);
+            return 'global_planner';
+        }
+        return 'task_decomposer';
+    }, {
+        task_decomposer: 'task_decomposer',
+        global_planner: 'global_planner',
+    })
         .addConditionalEdges('task_decomposer', (state) => {
         const intent = state.currentIntent;
         if (intent === 'automate')

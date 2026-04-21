@@ -114,11 +114,9 @@ electron_1.app.commandLine.appendSwitch('ignore-gpu-blocklist');
 })();
 const ipc_1 = require("./ipc");
 // ── Singletons ──────────────────────────────────────────────────────
-let acpManager;
 let historyStore;
 try {
-    console.log('[Startup] Initializing ACPManager...');
-    acpManager = new manager_1.ACPManager();
+    console.log('[Startup] ACPManager singleton already initialized');
     console.log('[Startup] Initializing ChatHistoryStore...');
     historyStore = new history_1.ChatHistoryStore();
     // Register all modularized IPC handlers
@@ -656,7 +654,7 @@ Your goal is to be the ultimate workplace companion.
             if (hasConfiguredBot) {
                 messageHandler = new message_handler_1.MessageHandler({
                     integrationConfig,
-                    acpManager,
+                    acpManager: manager_1.acpManager,
                     botManager
                 });
                 console.log('[App] MessageHandler initialized successfully');
@@ -839,8 +837,9 @@ electron_1.ipcMain.handle('save-config', async (_event, config) => {
     try {
         const configDir = path.join(os.homedir(), '.everfern');
         const configPath = path.join(configDir, 'config.json');
-        if (!fs.existsSync(configDir))
+        if (!fs.existsSync(configDir)) {
             fs.mkdirSync(configDir, { recursive: true });
+        }
         // Multi-file Key Isolation (Main Provider)
         if (config.apiKey && config.provider) {
             const keysDir = path.join(configDir, 'keys');
@@ -870,7 +869,7 @@ electron_1.ipcMain.handle('save-config', async (_event, config) => {
         fs.writeFileSync(configPath, JSON.stringify(scrubbedConfig, null, 2));
         // Immediately activate the new provider (with the key)
         if (config.provider) {
-            acpManager.setProvider({
+            manager_1.acpManager.setProvider({
                 provider: config.provider,
                 apiKey: config.apiKey,
                 model: scrubbedConfig.model,
@@ -920,6 +919,7 @@ function loadConfigSync() {
                     }
                 }
             }
+            console.log(`[Config] ✅ Loaded config: provider=${config.provider}, model=${config.model}`);
             return config;
         }
         return null;
@@ -1450,7 +1450,7 @@ electron_1.ipcMain.handle('integration:save-config', async (_event, config) => {
                 // Create new MessageHandler with updated config
                 messageHandler = new message_handler_1.MessageHandler({
                     integrationConfig,
-                    acpManager,
+                    acpManager: manager_1.acpManager,
                     botManager
                 });
                 console.log('[Integration] MessageHandler reinitialized with updated config');

@@ -525,4 +525,101 @@ const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
     );
 };
 
-export { ToolCallTag, ToolCallRow, WriteDiffCard };
+const ComputerUseResultCard = ({ tc }: { tc: ToolCallDisplay }) => {
+    if (tc.status !== 'done') return null;
+    
+    // Parse output if it's valid JSON from the backend tool
+    let tcData: any = tc.data || {};
+    if (tc.output) {
+        try {
+            const parsed = JSON.parse(tc.output);
+            if (typeof parsed === 'object' && parsed !== null) {
+                tcData = { ...tcData, ...parsed };
+            }
+        } catch(e) {}
+    }
+
+    // We try to extract a final success text from output
+    const outputMatch = tcData.detail || (tc.output && tc.output.includes('Success: ') ? tc.output.split('Success: ')[1] : tc.output || 'Computer action completed successfully.');
+    
+    // Generic display names depending on the agent logic
+    const appName = typeof tcData?.appName === 'string' && tcData.appName.trim() ? tcData.appName : "Application";
+    const appLogo = typeof tcData?.appLogo === 'string' && tcData.appLogo.trim() ? tcData.appLogo : "";
+
+    return (
+        <AnimatePresence>
+            <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12,
+                    marginTop: 12,
+                    marginBottom: 12,
+                    maxWidth: 600,
+                }}
+            >
+                {/* Result Message Bubble */}
+                <div style={{
+                    backgroundColor: 'rgba(34,197,94,0.06)',
+                    border: '1px solid rgba(34,197,94,0.2)',
+                    borderRadius: 12,
+                    padding: '14px 16px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10
+                }}>
+                    <div style={{
+                        marginTop: 2,
+                        backgroundColor: '#22c55e',
+                        borderRadius: 4,
+                        width: 16,
+                        height: 16,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                    }}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                    </div>
+                    <div style={{ fontSize: 13.5, color: '#064e3b', fontWeight: 500, lineHeight: 1.5, wordBreak: 'break-word' }}>
+                        {outputMatch}
+                    </div>
+                </div>
+
+                {/* Metadata Row */}
+                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, fontSize: 12 }}>
+                    {/* Tool Used Pill */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: 20 }}>
+                        <span style={{ fontWeight: 500 }}>Tool used</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: '#22c55e', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="9" y1="21" x2="9" y2="9"></line>
+                            </svg>
+                            {appName}
+                        </div>
+                    </div>
+
+                    {/* Duration */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: 20 }}>
+                        <span>Duration</span>
+                        <span style={{ fontWeight: 600, color: '#111827' }}>{(tc.durationMs ? tc.durationMs / 1000 : 2.3).toFixed(1)}s</span>
+                    </div>
+
+                    {/* Status Placeholder */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: 20 }}>
+                        <span>Status</span>
+                        <span style={{ fontWeight: 600, color: '#22c55e' }}>Success</span>
+                    </div>
+                </div>
+            </motion.div>
+        </AnimatePresence>
+    );
+};
+
+export { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard };

@@ -77,7 +77,7 @@ import {
 import { WaveformIcon, FernStarburst } from './components/UIIcons';
 import { MarkdownRenderer, StreamingMarkdown } from './components/MarkdownComponents';
 import { ContextTokenRing, VoiceButton, RateLimitContinueButton } from './components/UIHelpers';
-import { ToolCallTag, ToolCallRow, WriteDiffCard } from './components/ToolCallComponents';
+import { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard } from './components/ToolCallComponents';
 import { ReportContainer } from './components/ReportComponents';
 import { PlanReviewCard, AgentWorkspaceCards } from './components/PlanComponents';
 import { HitlApprovalForm, UserQuestionForm } from './components/FormComponents';
@@ -175,7 +175,7 @@ export default function ChatPage() {
     const [executionPlan, setExecutionPlan] = useState<{ title?: string; content: string } | null>(null);
     const [isExecutionPlanPaneOpen, setIsExecutionPlanPaneOpen] = useState<boolean>(true);
     const [reportPane, setReportPane] = useState<{ label: string; path: string } | null>(null);
-    const [contextItems, setContextItems] = useState<{ id: string; type: 'file' | 'web' | 'app'; label: string; base64Image?: string }[]>([]);
+    const [contextItems, setContextItems] = useState<{ id: string; type: 'file' | 'web' | 'app'; label: string; base64Image?: string; appName?: string; appLogo?: string }[]>([]);
     const [isValidatingModel, setIsValidatingModel] = useState(false);
     const [modelValidationStatus, setModelValidationStatus] = useState<"none" | "success" | "error">("none");
     const [showOnboarding, setShowOnboarding] = useState(false);
@@ -1365,7 +1365,7 @@ export default function ChatPage() {
                     if (record.result?.success) {
                         if (record.toolName === 'read_file') { setContextItems(prev => { const exists = prev.some(i => i.label === record.result.data?.name || i.label === record.args.path); if (!exists) return [...prev, { id: crypto.randomUUID(), type: 'file', label: record.result.data?.name || record.args.path }]; return prev; }); }
                         else if (record.toolName === 'web_search') { setContextItems(prev => [...prev, { id: crypto.randomUUID(), type: 'web', label: record.args.query }]); }
-                        else if (record.toolName === 'computer_use') { setContextItems(prev => { const action = record.args.action || 'computer_use'; const target = record.args.query ? ` "${record.args.query}"` : ''; return [...prev.filter(i => i.type !== 'app'), { id: crypto.randomUUID(), type: 'app', label: `Computer Use: ${action}${target}`, base64Image: record.result?.base64Image }]; }); }
+                        else if (record.toolName === 'computer_use') { setContextItems(prev => { const action = record.args.action || 'computer_use'; const target = record.args.query ? ` "${record.args.query}"` : ''; return [...prev.filter(i => i.type !== 'app'), { id: crypto.randomUUID(), type: 'app', label: `Computer Use: ${action}${target}`, base64Image: record.result?.base64Image, appName: record.result?.appName, appLogo: record.result?.appLogo }]; }); }
                     }
                     const key = record.toolCallId || (record.toolName + '_running');
                     const existingId = toolCallMap.current.get(key);
@@ -1534,7 +1534,7 @@ export default function ChatPage() {
                             const assistantMsg: Message = {
                                 id: crypto.randomUUID(),
                                 role: "assistant",
-                                content: cleanContent || "Working...",
+                                content: cleanContent || "",
                                 thought: finalThought,
                                 timestamp: new Date(),
                                 toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
@@ -1929,7 +1929,7 @@ export default function ChatPage() {
                     (window as any).electronAPI?.acp?.stop?.();
 
                     // Commit the current streaming content as a stopped message
-                    const stoppedContent = streamingContent || "Working...";
+                    const stoppedContent = streamingContent || "";
                     const finalToolCalls = liveToolCalls.map(t =>
                         t.status === 'running' ? { ...t, status: 'done' as const } : t
                     );
@@ -2528,13 +2528,17 @@ export default function ChatPage() {
                                                             )}
                                                             {(() => {
                                                                 const { cleanContent, artifacts } = extractFileArtifacts(msg.content || '');
-                                                                const hasContent = cleanContent && cleanContent.trim().length > 0;
+                                                                let displayContent = cleanContent.trim();
+                                                                if (displayContent === 'Working...' || displayContent === 'Working') {
+                                                                    displayContent = '';
+                                                                }
+                                                                const hasContent = displayContent.length > 0;
                                                                 const hasToolCalls = msg.toolCalls && msg.toolCalls.length > 0;
 
                                                                 return (
                                                                     <>
                                                                         {hasContent ? (
-                                                                            <StreamingMarkdown content={cleanContent} isLive={false} isLatest={idx === messages.length - 1} />
+                                                                            <StreamingMarkdown content={displayContent} isLive={false} isLatest={idx === messages.length - 1} />
                                                                         ) : hasToolCalls ? (
                                                                             <div style={{ fontSize: 13, color: '#9ca3af', fontStyle: 'italic', padding: '8px 0' }}>
                                                                                 Executing actions...
@@ -2572,6 +2576,9 @@ export default function ChatPage() {
                                                             {msg.toolCalls?.filter(tc => tc.toolName === 'write' || tc.toolName === 'write_to_file' || tc.toolName === 'write_file').map(tc => (
                                                                 <WriteDiffCard key={`write-${tc.id}`} tc={tc} />
                                                             ))}
+                                                            {msg.toolCalls?.filter(tc => tc.toolName === 'computer_use').map(tc => (
+                                                                <ComputerUseResultCard key={`cu-${tc.id}`} tc={tc} />
+                                                            ))}
                                                             <RateLimitContinueButton content={msg.content} onContinue={() => handleSend("continue")} />
                                                         </>
                                                     )}
@@ -2605,7 +2612,10 @@ export default function ChatPage() {
                                                     const { cleanContent: artifactCleanContent, artifacts } = extractFileArtifacts(streamingContent || '');
 
                                                     // Scrub tool calls from streaming content
-                                                    const cleanContent = artifactCleanContent.replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/gi, '').trim();
+                                                    let cleanContent = artifactCleanContent.replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/gi, '').trim();
+                                                    if (cleanContent === 'Working...' || cleanContent === 'Working') {
+                                                        cleanContent = '';
+                                                    }
 
                                                     return (
                                                         <>
@@ -2966,13 +2976,27 @@ export default function ChatPage() {
                                     <div style={{ width: 420, display: "flex", flexDirection: "column", padding: "24px 16px", overflowY: "auto", height: "100%" }}>
                                         {((currentPlan || contextItems.length > 0) && !(executionPlan && isExecutionPlanPaneOpen)) && (
                                             <>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                                                    <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                                        </svg>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
+                                                    {/* Title Row */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                                                            </div>
+                                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Active Context</span>
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: 4 }}>
+                                                            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></div>
+                                                        </div>
                                                     </div>
-                                                    <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Active Context</span>
+                                                    
+                                                    {/* Tabs Component Row */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #e5e7eb', paddingBottom: 8 }}>
+                                                        <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', borderBottom: '2px solid #22c55e', paddingBottom: 6 }}>Overview</span>
+                                                        <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280', paddingBottom: 6, display: 'flex', gap: 6, alignItems: 'center' }}>Resources <span style={{ backgroundColor: '#e5e7eb', color: '#374151', fontSize: 11, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>2</span></span>
+                                                        <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280', paddingBottom: 6 }}>Permissions</span>
+                                                        <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280', paddingBottom: 6 }}>History</span>
+                                                    </div>
                                                 </div>
                                                 <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
                                                     <AgentWorkspaceCards plan={currentPlan} contextItems={contextItems} setTooltip={setTooltipState} />

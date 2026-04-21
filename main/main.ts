@@ -29,7 +29,7 @@ if (process.platform === 'win32') {
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { ACPManager } from './acp/manager';
+import { acpManager } from './acp/manager';
 import type { ProviderType } from './acp/types';
 import { ChatHistoryStore } from './store/history';
 import { AgentRunner } from './agent/runner/runner';
@@ -96,12 +96,10 @@ import { setupIPC } from './ipc';
 
 // ── Singletons ──────────────────────────────────────────────────────
 
-let acpManager: ACPManager;
 let historyStore: ChatHistoryStore;
 
 try {
-  console.log('[Startup] Initializing ACPManager...');
-  acpManager = new ACPManager();
+  console.log('[Startup] ACPManager singleton already initialized');
   console.log('[Startup] Initializing ChatHistoryStore...');
   historyStore = new ChatHistoryStore();
 
@@ -894,7 +892,10 @@ ipcMain.handle('save-config', async (_event, config) => {
   try {
     const configDir  = path.join(os.homedir(), '.everfern');
     const configPath = path.join(configDir, 'config.json');
-    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
 
     // Multi-file Key Isolation (Main Provider)
     if (config.apiKey && config.provider) {
@@ -981,6 +982,7 @@ function loadConfigSync() {
           }
         }
       }
+      console.log(`[Config] ✅ Loaded config: provider=${config.provider}, model=${config.model}`);
       return config;
     }
     return null;

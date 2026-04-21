@@ -46,6 +46,8 @@ const AgentWorkspaceCards = ({ plan, contextItems, setTooltip }: { plan: any | n
     const [contextExpanded, setContextExpanded] = useState(true);
 
     if (!plan && contextItems.length === 0) return null;
+    
+    const hasComputerUse = contextItems.some((i: any) => i.type === 'app');
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
@@ -92,10 +94,12 @@ const AgentWorkspaceCards = ({ plan, contextItems, setTooltip }: { plan: any | n
 
             {contextItems.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={{ width: "100%", backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 16, overflow: "hidden" }}>
-                    <div onClick={() => setContextExpanded(!contextExpanded)} style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", borderBottom: contextExpanded ? "1px solid #e8e6d9" : "none" }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "#201e24", textTransform: "uppercase", letterSpacing: "0.03em" }}>Active Context</span>
-                        <ChevronDownIcon width={14} height={14} color="#8a8886" style={{ transform: contextExpanded ? "rotate(180deg)" : "none", transition: "0.2s" }} />
-                    </div>
+                    {hasComputerUse ? null : (
+                        <div onClick={() => setContextExpanded(!contextExpanded)} style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", borderBottom: contextExpanded ? "1px solid #e8e6d9" : "none" }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#201e24", textTransform: "uppercase", letterSpacing: "0.03em" }}>Active Context</span>
+                            <ChevronDownIcon width={14} height={14} color="#8a8886" style={{ transform: contextExpanded ? "rotate(180deg)" : "none", transition: "0.2s" }} />
+                        </div>
+                    )}
                     <AnimatePresence>
                         {contextExpanded && (
                             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} style={{ overflow: "hidden" }}>
@@ -104,30 +108,171 @@ const AgentWorkspaceCards = ({ plan, contextItems, setTooltip }: { plan: any | n
                                         const isFolder = item.label.startsWith("Folder:");
                                         return (
                                             <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                                                <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "#f5f4f0", border: "1px solid #e8e6d9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
-                                                    {isFolder || item.type === 'file' ? (
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                                                    ) : item.type === 'web' ? (
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1-4-10z"></path></svg>
-                                                    ) : (
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
-                                                    )}
-                                                </div>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0 }}>
-                                                    <span
-                                                        onMouseEnter={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, content: item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '') })}
-                                                        onMouseMove={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, content: item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '') })}
-                                                        onMouseLeave={() => setTooltip({ visible: false, x: 0, y: 0, content: "" })}
-                                                        style={{ fontSize: 14, fontWeight: 400, color: "#A0A0A0", lineHeight: 1.5, marginTop: 4, wordBreak: "break-all", cursor: "default" }}
-                                                    >
-                                                        <span style={{ color: "#F0F0F0", fontWeight: 500 }}>{isFolder ? "Folder:" : item.type === "web" ? "URL:" : "File:"}</span> {item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '').split(/[/\\]/).pop()}
-                                                    </span>
-                                                    {item.base64Image && (
-                                                        <div style={{ marginTop: 2, borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)" }}>
-                                                            <img src={`data:image/jpeg;base64,${item.base64Image}`} alt="vision context" style={{ width: "100%", display: "block" }} />
+                                                {item.type !== 'app' && (
+                                                    <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "#f5f4f0", border: "1px solid #e8e6d9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                                                        {isFolder || item.type === 'file' ? (
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                                        ) : item.type === 'web' ? (
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1-4-10z"></path></svg>
+                                                        ) : (
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#717171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {item.type === 'app' ? (
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minWidth: 0, paddingTop: 4 }}>
+                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: -4 }}>
+                                                            <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em" }}>CURRENT CONTEXT</span>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.1)', padding: '4px 8px', borderRadius: 6 }}>
+                                                                <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a' }}>Active</span>
+                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                                            </div>
                                                         </div>
-                                                    )}
-                                                </div>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                                            {item.appLogo ? (
+                                                                <img src={item.appLogo} alt="App Logo" style={{ width: 22, height: 22, borderRadius: 6, objectFit: 'contain' }} />
+                                                            ) : (
+                                                                <div style={{ width: 22, height: 22, borderRadius: 6, backgroundColor: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                                                                </div>
+                                                            )}
+                                                            <span style={{ color: '#4b5563', fontSize: 14, fontWeight: 500 }}>{item.label}</span>
+                                                        </div>
+                                                        {item.base64Image && (
+                                                            <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #e5e7eb", position: 'relative', backgroundColor: '#f9fafb', boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
+                                                                <img src={`data:image/jpeg;base64,${item.base64Image}`} alt="vision context" style={{ width: "100%", display: "block" }} />
+                                                            </div>
+                                                        )}
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                                                            {/* Context Details */}
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                                <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.04em' }}>CONTEXT DETAILS</div>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                        <div style={{ width: 120, color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>Type
+                                                                        </div>
+                                                                        <div style={{ color: '#111827', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>Computer Use
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                        <div style={{ width: 120, color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>Status
+                                                                        </div>
+                                                                        <div style={{ color: '#111827', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                            <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e' }}></span>Active
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                        <div style={{ width: 120, color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Started
+                                                                        </div>
+                                                                        <div style={{ color: '#111827', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Just now
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                        <div style={{ width: 120, color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>Agent
+                                                                        </div>
+                                                                        <div style={{ color: '#111827', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><path d="M16 16s-1.5-2-4-2-4 2-4 2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>Computer Use Agent
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                        <div style={{ width: 120, color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>Model
+                                                                        </div>
+                                                                        <div style={{ color: '#111827', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>gemma4:31b-cloud
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                                        <div style={{ width: 120, color: '#6b7280', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>Permissions
+                                                                        </div>
+                                                                        <div style={{ color: '#111827', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>2 Granted
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Permissions Array */}
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.04em' }}>PERMISSIONS</span>
+                                                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#4b5563', border: '1px solid #e5e7eb', padding: '4px 10px', borderRadius: 14 }}>Manage</span>
+                                                                </div>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 4 }}>
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                                                            </div>
+                                                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                                <span style={{ fontSize: 13, color: '#111827', fontWeight: 500 }}>System Control</span>
+                                                                                <span style={{ fontSize: 11, color: '#6b7280' }}>Control applications and system</span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: 12 }}>Granted</span>
+                                                                    </div>
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                                                                            </div>
+                                                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                                                <span style={{ fontSize: 13, color: '#111827', fontWeight: 500 }}>Window Management</span>
+                                                                                <span style={{ fontSize: 11, color: '#6b7280' }}>Capture and control windows</span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: 12 }}>Granted</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Recent Actions */}
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.04em' }}>RECENT ACTIONS</span>
+                                                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#4b5563', border: '1px solid #e5e7eb', padding: '4px 10px', borderRadius: 14 }}>View all</span>
+                                                                </div>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 4 }}>
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                            <div style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                                                            </div>
+                                                                            <span style={{ fontSize: 13, color: '#111827', fontWeight: 500 }}>{item.label.includes('Wait') ? 'Waited 1s' : item.label.includes('Type') ? `Typed text` : `Launched Application`}</span>
+                                                                        </div>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                                            <span style={{ fontSize: 11, color: '#9ca3af' }}>2.1s ago</span>
+                                                                            <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: 12 }}>Success</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0 }}>
+                                                        <span
+                                                            onMouseEnter={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, content: item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '') })}
+                                                            onMouseMove={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, content: item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '') })}
+                                                            onMouseLeave={() => setTooltip({ visible: false, x: 0, y: 0, content: "" })}
+                                                            style={{ fontSize: 14, fontWeight: 400, color: "#201e24", lineHeight: 1.5, marginTop: 4, wordBreak: "break-all", cursor: "default" }}
+                                                        >
+                                                            <span style={{ color: "#8a8886", fontWeight: 500 }}>{isFolder ? "Folder:" : item.type === "web" ? "URL:" : "File:"}</span> {item.label.replace(/^(Folder:|File:|URL:)?\s*/i, '').split(/[/\\]/).pop()}
+                                                        </span>
+                                                        {item.base64Image && (
+                                                            <div style={{ marginTop: 2, borderRadius: 8, overflow: "hidden", border: "1px solid #e8e6d9" }}>
+                                                                <img src={`data:image/jpeg;base64,${item.base64Image}`} alt="vision context" style={{ width: "100%", display: "block" }} />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
