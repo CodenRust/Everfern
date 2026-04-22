@@ -30,7 +30,7 @@ const createWorkspaceRequestTool = (requestPermission) => ({
         },
         required: []
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const pathValue = args['path'];
         const reason = args['reason'] || 'Requesting workspace access.';
         if (requestPermission) {
@@ -78,7 +78,7 @@ exports.allowFileDeleteTool = {
         },
         required: ['directory']
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const dir = args['directory'];
         return {
             success: true,

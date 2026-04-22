@@ -30,6 +30,12 @@ export async function runAgentStep(
   const iterations = state.iterations || 0;
   runner.telemetry.metrics(iterations);
 
+  // Emit transition as thought for frontend visibility
+  const icon = nodeName === 'data_analyst' ? '📊' : 
+               nodeName === 'coding_specialist' ? '💻' : 
+               nodeName === 'web_explorer' ? '🌐' : '🧭';
+  eventQueue?.push({ type: 'thought', content: `\n${icon} ${nodeName.replace(/_/g, ' ').toUpperCase()}: Initializing step...` });
+
   let client = runner.client;
   let clientToRelease: AIClient | null = null;
   let clientConfig: any = null;

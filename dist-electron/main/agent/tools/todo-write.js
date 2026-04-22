@@ -69,7 +69,7 @@ exports.todoWriteTool = {
         },
         required: ['tasks']
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const tasks = args.tasks;
         let planPath = args.planPath;
         if (!tasks || !Array.isArray(tasks)) {

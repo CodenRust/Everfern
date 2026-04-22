@@ -14,7 +14,7 @@ exports.memorySaveTool = {
         },
         required: ['content']
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
             const content = args.content;
             const metadata = args.metadata;

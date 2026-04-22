@@ -46,7 +46,7 @@ export const presentFilesTool: AgentTool = {
     required: ['files']
   },
 
-  async execute(args, onUpdate): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     // Handle different input formats
     let files: PresentFile[] = [];
     

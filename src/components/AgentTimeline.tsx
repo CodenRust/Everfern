@@ -206,16 +206,21 @@ const ThoughtItem = ({ content, isLive, isLast }: { content: string; isLive?: bo
                     backgroundColor: "#faf9f7",
                     padding: "8px 12px",
                     borderRadius: 8,
+                    position: 'relative'
                 }}>
                     {content}
                     {isLive && (
                         <motion.span
-                            animate={{ opacity: [1, 0] }}
-                            transition={{ repeat: Infinity, duration: 0.5 }}
+                            animate={{ opacity: [1, 0, 1] }}
+                            transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
                             style={{
-                                display: "inline-block", width: 2, height: "1em",
-                                backgroundColor: "#6366f1", marginLeft: 3,
-                                verticalAlign: "text-bottom",
+                                display: "inline-block",
+                                width: 2,
+                                height: "1.2em",
+                                backgroundColor: "#6366f1",
+                                marginLeft: 4,
+                                verticalAlign: "middle",
+                                boxShadow: "0 0 8px rgba(99, 102, 241, 0.4)"
                             }}
                         />
                     )}

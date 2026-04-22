@@ -166,7 +166,7 @@ export const webSearchTool: AgentTool = {
     required: ['query'],
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const query = String(args['query'] ?? '').trim();
 
     if (!query) {

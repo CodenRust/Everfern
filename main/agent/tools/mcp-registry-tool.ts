@@ -1,4 +1,4 @@
-import { AgentTool } from '../runner/types';
+import { AgentTool, ToolResult } from '../runner/types';
 import { mcpRegistry } from './mcp';
 
 /**
@@ -18,7 +18,7 @@ export const searchMcpRegistryTool: AgentTool = {
         },
         required: ['keyword']
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
         const keyword = (args.keyword as string).toLowerCase();
         onUpdate?.(`Searching MCP Registry for: ${keyword}...`);
 
@@ -109,7 +109,7 @@ export const connectMcpServerTool: AgentTool = {
         },
         required: ['name']
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
         const { name, command, docker, args: cmdArgs, env } = args as any;
         
         onUpdate?.(`Connecting to MCP server: ${name}...`);
@@ -155,7 +155,7 @@ export const listMcpToolsTool: AgentTool = {
         properties: {},
         required: []
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
         const tools = mcpRegistry.listAllTools();
         const servers = mcpRegistry.getServers();
 

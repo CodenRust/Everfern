@@ -25,7 +25,7 @@ export const webFetchTool: AgentTool = {
     required: ['url']
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const url = String(args['url'] ?? '').trim();
     const maxLength = Number(args['maxLength'] ?? 10000);
 

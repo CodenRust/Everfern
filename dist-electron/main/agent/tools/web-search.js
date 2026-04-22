@@ -140,7 +140,7 @@ exports.webSearchTool = {
         },
         required: ['query'],
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const query = String(args['query'] ?? '').trim();
         if (!query) {
             return { success: false, output: 'No search query provided', error: 'query is required' };

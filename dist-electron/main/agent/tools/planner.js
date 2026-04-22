@@ -50,13 +50,30 @@ exports.plannerTool = {
         },
         required: ['title', 'steps'],
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const title = String(args['title'] ?? 'Untitled Plan').trim();
         const rawSteps = Array.isArray(args['steps'])
             ? args['steps'].filter(s => typeof s === 'string')
             : [];
         if (rawSteps.length === 0) {
             return { success: false, output: 'No steps provided', error: 'steps array is empty' };
+        }
+        // ── Dedup Guard: if a plan already exists, return it instead of creating a duplicate ──
+        if (_plans.size > 0) {
+            const existingPlan = Array.from(_plans.values())[_plans.size - 1];
+            console.log(`[Planner] ⚠️ Plan already exists (${existingPlan.id}), returning existing plan instead of creating duplicate.`);
+            const formatted = [
+                `📋 **${existingPlan.title}** (Plan ID: \`${existingPlan.id}\`)`,
+                '',
+                ...existingPlan.steps.map((s, i) => `${i + 1}. ${s.status === 'done' ? '✅' : '☐'} ${s.description} (Step ID: \`${s.id}\`)`),
+                '',
+                '**A plan already exists. Do NOT create another plan. Proceed with executing the next pending step immediately.**',
+            ].join('\n');
+            return {
+                success: true,
+                output: formatted,
+                data: existingPlan,
+            };
         }
         const steps = rawSteps.map(s => ({
             id: (0, crypto_1.randomUUID)(),
@@ -106,7 +123,7 @@ exports.updateStepTool = {
         },
         required: ['plan_id', 'step_id', 'status'],
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const planId = String(args['plan_id'] ?? '');
         const stepId = String(args['step_id'] ?? '');
         const status = String(args['status'] ?? '');
@@ -147,7 +164,7 @@ exports.executionPlanTool = {
         },
         required: ['title', 'content'],
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const title = String(args['title'] ?? 'Execution Plan').trim();
         const content = String(args['content'] ?? '').trim();
         if (!content) {

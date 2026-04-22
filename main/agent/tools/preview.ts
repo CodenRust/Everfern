@@ -26,7 +26,7 @@ export function createPreviewTool(chatId: string, onShow?: (name: string) => voi
       },
       required: ['filename', 'content']
     },
-    async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
       const { filename, content } = args as { filename: string; content: string };
       
       const artifactDir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);

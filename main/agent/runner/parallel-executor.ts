@@ -171,10 +171,27 @@ export async function executeSynchronizedParallelGroup(
             toolArgs: tc.args
         });
 
+        // Add a thought event to show what's happening
+        eventQueue?.push({
+            type: 'thought',
+            content: `\n🛠️  Executing ${tc.name}...`
+        });
+
         try {
-            const result = await tool.execute(tc.args, (update) => {
-                eventQueue?.push({ type: 'tool_update', toolName: tc.name, update });
-            });
+            const result = await tool.execute(
+                tc.args, 
+                (update) => {
+                    eventQueue?.push({ type: 'tool_update', toolName: tc.name, update });
+                    // Also emit as a thought for visibility if it's a long running tool
+                    if (update.length > 5 && !update.includes('Running')) {
+                        eventQueue?.push({ type: 'thought', content: `\n⏳ ${update}` });
+                    }
+                },
+                (event) => {
+                    eventQueue?.push(event);
+                },
+                tc.id
+            );
 
             const record: ToolCallRecord = {
                 toolName: tc.name,

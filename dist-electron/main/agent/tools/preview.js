@@ -60,7 +60,7 @@ function createPreviewTool(chatId, onShow) {
             },
             required: ['filename', 'content']
         },
-        async execute(args) {
+        async execute(args, onUpdate, emitEvent, toolCallId) {
             const { filename, content } = args;
             const artifactDir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
             if (!fs.existsSync(artifactDir)) {

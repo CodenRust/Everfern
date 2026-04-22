@@ -24,7 +24,7 @@ exports.webFetchTool = {
         },
         required: ['url']
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const url = String(args['url'] ?? '').trim();
         const maxLength = Number(args['maxLength'] ?? 10000);
         if (!url) {

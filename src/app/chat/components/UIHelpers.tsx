@@ -119,11 +119,10 @@ const RateLimitContinueButton = ({ content, onContinue }: { content: string; onC
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 8,
-                    boxShadow: '0 4px 12px rgba(251, 191, 36, 0.2)',
                     transition: 'all 0.2s'
                 }}
-                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(251, 191, 36, 0.3)'; }}
-                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(251, 191, 36, 0.2)'; }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f59e0b'; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#fbbf24'; }}
             >
                 <PaperAirplaneIcon width={16} height={16} style={{ transform: 'rotate(-45deg)', marginTop: -2 }} />
                 Continue Mission

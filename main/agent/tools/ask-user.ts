@@ -44,7 +44,7 @@ export const askUserTool: AgentTool = {
     required: ['questions']
   },
 
-  async execute(args, onUpdate): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     // Handle both formats: { questions: [...] } or { question: "...", options: [...] }
     let questions: any[];
 

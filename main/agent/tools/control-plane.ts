@@ -33,7 +33,7 @@ export const createWorkspaceRequestTool = (
     required: []
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const pathValue = args['path'];
     const reason = args['reason'] || 'Requesting workspace access.';
 
@@ -83,7 +83,7 @@ export const allowFileDeleteTool: AgentTool = {
     required: ['directory']
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const dir = args['directory'];
     return {
       success: true,

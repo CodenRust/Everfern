@@ -19,7 +19,7 @@ export const skillTool: AgentTool = {
     required: ['name']
   },
 
-  async execute(args, onUpdate): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const skillName = (args.name as string || '').toLowerCase();
     
     onUpdate?.(`🔍 Resolving skill "${skillName}"...`);

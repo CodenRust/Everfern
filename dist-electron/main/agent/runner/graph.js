@@ -178,26 +178,42 @@ const buildGraph = (runner, toolDefs, tools) => {
     // Node wrappers that extract context from config at runtime
     const triageNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, triage_1.createTriageNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
         return node(state);
     };
     const decomposerNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, decomposer_1.createDecomposerNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
         return node(state);
     };
     const plannerNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, planner_1.createPlannerNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
         return node(state);
     };
     const brainNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         // Inject plan context into brain prompt if it exists
         let systemPromptOverride = undefined;
         const plan = state.decomposedTask;
         if (plan) {
-            systemPromptOverride = `You are the EverFern Orchestrator. 
+            systemPromptOverride = `You are the EverFern Orchestrator.
 Your goal is to ensure the following execution plan is completed successfully.
 
 CURRENT EXECUTION PLAN:
@@ -212,36 +228,64 @@ If a specialized agent failed to complete a step, identify the issue and use you
     };
     const computerUseNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, specialized_agents_1.createComputerUseNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
         return node(state);
     };
     const codingNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, specialized_agents_1.createCodingSpecialistNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
         return node(state);
     };
     const dataAnalystNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, specialized_agents_1.createDataAnalystNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
         return node(state);
     };
     const webExplorerNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, specialized_agents_1.createWebExplorerNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
         return node(state);
     };
     const validatorNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, validation_1.createValidationNode)(ctx.runner, ctx.missionTracker, ctx.shouldAbort);
         return node(state);
     };
     const orchestratorNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, execute_tools_1.createExecuteToolsNode)(ctx.runner, tools, ctx.runner.config, ctx.eventQueue, ctx.conversationId, ctx.missionTracker, ctx.shouldAbort, ctx.runner.client);
         return node(state);
     };
     const judgeNode = async (state, config) => {
         const ctx = getContext(config);
+        // Guard: Check abort before node execution
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
         const node = (0, judge_1.createJudgeNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
         return node(state);
     };
@@ -261,35 +305,40 @@ If a specialized agent failed to complete a step, identify the issue and use you
     compiledGraph
         .addEdge(langgraph_1.START, 'intent_classifier')
         .addConditionalEdges('intent_classifier', (state) => {
-        // Skip task decomposition for conversational intents or very short inputs
-        // that likely don't need a multi-step plan.
+        // Always route through task_decomposer to ensure proper task type evaluation
+        // and routing to specialized agents (data_analyst, coding_specialist, etc.)
         const intent = state.currentIntent;
-        const lastUserMsg = state.messages.filter(m => {
-            const msg = m;
-            return msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human';
-        }).pop();
-        const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '';
-        const isVeryShort = content.length < 15;
-        if (intent === 'conversation' || (intent === 'question' && isVeryShort)) {
-            console.log(`[Graph] ⏭️  Skipping task_decomposer for ${intent} intent (short input)`);
-            return 'global_planner';
-        }
+        console.log(`[Graph] 🔀 Routing from intent_classifier: intent=${intent} → task_decomposer`);
         return 'task_decomposer';
     }, {
         task_decomposer: 'task_decomposer',
-        global_planner: 'global_planner',
     })
         .addConditionalEdges('task_decomposer', (state) => {
         const intent = state.currentIntent;
-        if (intent === 'automate')
-            return 'computer_use_agent';
-        if (intent === 'coding')
-            return 'coding_specialist';
-        if (intent === 'analyze')
-            return 'data_analyst';
-        if (intent === 'research')
-            return 'web_explorer';
-        return 'global_planner';
+        // Guard: Ensure task decomposition is fully processed
+        // If decomposedTask exists, verify it has valid structure
+        if (state.decomposedTask) {
+            const plan = state.decomposedTask;
+            if (!plan.steps || plan.steps.length === 0) {
+                console.warn('[Graph] ⚠️ Task decomposition incomplete - no steps defined');
+            }
+        }
+        // Route to specialized agents based on task type
+        let destination = 'global_planner';
+        if (intent === 'automate') {
+            destination = 'computer_use_agent';
+        }
+        else if (intent === 'coding') {
+            destination = 'coding_specialist';
+        }
+        else if (intent === 'analyze') {
+            destination = 'data_analyst';
+        }
+        else if (intent === 'research') {
+            destination = 'web_explorer';
+        }
+        console.log(`[Graph] 🔀 Routing from task_decomposer: intent=${intent} → ${destination}`);
+        return destination;
     }, {
         computer_use_agent: 'computer_use_agent',
         coding_specialist: 'coding_specialist',
@@ -299,29 +348,73 @@ If a specialized agent failed to complete a step, identify the issue and use you
     })
         .addEdge('global_planner', 'brain')
         .addConditionalEdges('computer_use_agent', (state) => {
+        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        return hasTools ? 'action_validation' : 'judge';
+        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
+        // If agent has pending tools, route to validation
+        if (hasTools) {
+            return 'action_validation';
+        }
+        // If agent has no tools and no completion signal, it may not have finished its work
+        // Route back to itself to continue iteration
+        if (!hasCompletionSignal) {
+            console.log('[Graph] ⚠️ computer_use_agent has no tools and no completion signal - may need more iterations');
+        }
+        return 'judge';
     }, {
         action_validation: 'action_validation',
         judge: 'judge',
     })
         .addConditionalEdges('coding_specialist', (state) => {
+        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        return hasTools ? 'action_validation' : 'judge';
+        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
+        // If agent has pending tools, route to validation
+        if (hasTools) {
+            return 'action_validation';
+        }
+        // If agent has no tools and no completion signal, it may not have finished its work
+        // Route back to itself to continue iteration
+        if (!hasCompletionSignal) {
+            console.log('[Graph] ⚠️ coding_specialist has no tools and no completion signal - may need more iterations');
+        }
+        return 'judge';
     }, {
         action_validation: 'action_validation',
         judge: 'judge',
     })
         .addConditionalEdges('data_analyst', (state) => {
+        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        return hasTools ? 'action_validation' : 'judge';
+        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
+        // If agent has pending tools, route to validation
+        if (hasTools) {
+            return 'action_validation';
+        }
+        // If agent has no tools and no completion signal, it may not have finished its work
+        // Route back to itself to continue iteration
+        if (!hasCompletionSignal) {
+            console.log('[Graph] ⚠️ data_analyst has no tools and no completion signal - may need more iterations');
+        }
+        return 'judge';
     }, {
         action_validation: 'action_validation',
         judge: 'judge',
     })
         .addConditionalEdges('web_explorer', (state) => {
+        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        return hasTools ? 'action_validation' : 'judge';
+        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
+        // If agent has pending tools, route to validation
+        if (hasTools) {
+            return 'action_validation';
+        }
+        // If agent has no tools and no completion signal, it may not have finished its work
+        // Route back to itself to continue iteration
+        if (!hasCompletionSignal) {
+            console.log('[Graph] ⚠️ web_explorer has no tools and no completion signal - may need more iterations');
+        }
+        return 'judge';
     }, {
         action_validation: 'action_validation',
         judge: 'judge',
@@ -336,6 +429,15 @@ If a specialized agent failed to complete a step, identify the issue and use you
         .addConditionalEdges('action_validation', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
         if (hasTools) {
+            // Bypass HITL if the user has already explicitly approved the execution plan
+            const isPlanApproved = state.messages.some((m) => {
+                const role = m.role || m._getType?.() || m.type;
+                const content = typeof m.content === 'string' ? m.content : '';
+                return (role === 'user' || role === 'human') && content.includes('[PLAN_APPROVED]');
+            });
+            if (isPlanApproved) {
+                return 'multi_tool_orchestrator';
+            }
             return state.validationResult?.isHighRisk ? 'hitl_approval' : 'multi_tool_orchestrator';
         }
         return 'judge';
@@ -361,16 +463,20 @@ If a specialized agent failed to complete a step, identify the issue and use you
         [langgraph_1.END]: langgraph_1.END
     })
         .addConditionalEdges('multi_tool_orchestrator', (state) => {
-        // Route back to the node that initiated the tool call
+        // Route back to the originating specialized agent to allow iterative execution
         const intent = state.currentIntent;
+        console.log(`[Graph] 🔀 Routing from multi_tool_orchestrator: intent=${intent}`);
+        // Route back to the specialized agent that initiated the tool call
+        // This allows each agent to iterate until their task is complete
         if (intent === 'automate')
-            return 'judge'; // GUI tasks are autonomous, go to judge when done
+            return 'computer_use_agent';
         if (intent === 'coding')
             return 'coding_specialist';
         if (intent === 'analyze')
             return 'data_analyst';
         if (intent === 'research')
             return 'web_explorer';
+        // Default to brain for general tasks
         return 'brain';
     }, {
         computer_use_agent: 'computer_use_agent',

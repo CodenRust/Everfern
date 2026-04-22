@@ -14,7 +14,7 @@ export const memorySearchTool: AgentTool = {
     },
     required: ['query']
   },
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     try {
       const query = args.query as string;
       const limit = (args.limit as number) || 5;

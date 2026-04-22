@@ -87,7 +87,7 @@ export const createArtifactTool: AgentTool = {
     required: ['html']
   },
 
-  async execute(args: Record<string, unknown>, onUpdate?: (update: string) => void): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     try {
       const sessionId = 'default';
       const artifactsDir = ensureArtifactsDir(sessionId);
@@ -166,7 +166,7 @@ export const createSiteTool: AgentTool = {
     required: ['name', 'type']
   },
 
-  async execute(args: Record<string, unknown>, onUpdate?: (update: string) => void): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     try {
       const sessionId = 'default';
       const name = String(args.name || 'site');

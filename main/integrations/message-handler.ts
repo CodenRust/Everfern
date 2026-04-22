@@ -560,6 +560,7 @@ export class MessageHandler extends EventEmitter {
       'execute_command': '⚙️',
       'ask_user': '❓',
       'create_artifact': '🎨',
+      'visualize': '📊',
       'memory_search': '🧠',
       'memory_save': '💾',
     };

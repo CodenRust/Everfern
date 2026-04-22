@@ -26,10 +26,10 @@ function adaptTool(
     name,
     description: definition.description,
     parameters: definition.parameters as any, // Note: AgentTool expects JSON schema format.
-    execute: async (args: Record<string, unknown>): Promise<ToolResult> => {
+    execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
       try {
-        const fakeId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const result = await executor(fakeId, args);
+        const id = toolCallId ?? `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const result = await executor(id, args);
 
         let outputText = '';
         if (result.content && Array.isArray(result.content)) {

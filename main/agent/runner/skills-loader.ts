@@ -21,11 +21,42 @@ export async function loadSkillsAsync(): Promise<Skill[]> {
 
   try {
     // Check if directory exists using async access
+    let actualSkillsDir = skillsDir;
     try {
       await fs.promises.access(skillsDir);
+      // Check if directory is empty
+      const contents = await fs.promises.readdir(skillsDir);
+      const hasSkills = contents.some(c => c !== '.sync-version');
+      if (!hasSkills) {
+        throw new Error('Skills directory is empty');
+      }
     } catch {
-      console.warn(`[SkillsLoader] ⚠️ Skills directory does not exist: ${skillsDir}`);
-      return skills;
+      console.warn(`[SkillsLoader] ⚠️ Skills directory missing or empty: ${skillsDir}`);
+      // Fallback: try loading directly from source main/skills/ directory
+      const fallbackPaths = [
+        path.resolve(__dirname, '..', '..', '..', 'main', 'skills'),
+        path.resolve(__dirname, '..', '..', 'skills'),
+        path.resolve(__dirname, '..', 'skills'),
+        // Absolute dev fallback for EverFern project structure
+        path.join(process.cwd(), 'main', 'skills'),
+      ];
+      let found = false;
+      for (const fb of fallbackPaths) {
+        try {
+          await fs.promises.access(fb);
+          const fbContents = await fs.promises.readdir(fb);
+          if (fbContents.length > 0) {
+            console.log(`[SkillsLoader] 🔄 Fallback: Loading skills from source directory: ${fb}`);
+            actualSkillsDir = fb;
+            found = true;
+            break;
+          }
+        } catch { /* skip */ }
+      }
+      if (!found) {
+        console.warn(`[SkillsLoader] ⚠️ No skills directory found in any fallback location.`);
+        return skills;
+      }
     }
 
     const loadSkillFiles = async (currentPath: string, depth = 0): Promise<void> => {
@@ -99,7 +130,7 @@ export async function loadSkillsAsync(): Promise<Skill[]> {
       }
     };
 
-    await loadSkillFiles(skillsDir);
+    await loadSkillFiles(actualSkillsDir);
     console.log(`[SkillsLoader] ✅ Async skill loading complete: Found ${skills.length} skills`);
     for (const skill of skills) {
       console.log(`[SkillsLoader]    • ${skill.name}`);

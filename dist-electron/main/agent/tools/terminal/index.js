@@ -52,7 +52,7 @@ exports.terminalTool = {
         },
         required: ['command']
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const registry = registry_1.CommandRegistry.getInstance();
         const command = args.command;
         const cwd = args.cwd || os.homedir();
@@ -90,7 +90,7 @@ exports.terminalStatusTool = {
         },
         required: ['id']
     },
-    execute: async (args) => {
+    execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const registry = registry_1.CommandRegistry.getInstance();
         const id = args.id;
         const commands = registry.listCommands();

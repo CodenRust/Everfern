@@ -25,6 +25,8 @@ __exportStar(require("./char-estimator"), exports);
 __exportStar(require("./context-guard"), exports);
 __exportStar(require("./tool-registry"), exports);
 __exportStar(require("./extensions"), exports);
+__exportStar(require("./file-type-detector"), exports);
+__exportStar(require("./result-presenter"), exports);
 var thinking_1 = require("./thinking");
 Object.defineProperty(exports, "getModelThinkingCapabilities", { enumerable: true, get: function () { return thinking_1.getModelThinkingCapabilities; } });
 Object.defineProperty(exports, "buildThinkingParams", { enumerable: true, get: function () { return thinking_1.buildThinkingParams; } });

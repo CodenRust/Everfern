@@ -15,6 +15,7 @@ import { createWorkspaceRequestTool, allowFileDeleteTool } from '../tools/contro
 import { terminalTool, terminalStatusTool } from '../tools/terminal';
 import { searchMcpRegistryTool, connectMcpServerTool, listMcpToolsTool } from '../tools/mcp-registry-tool';
 import { createArtifactTool, createSiteTool } from '../tools/create-artifact';
+import { visualizeTool } from '../tools/visualize';
 import { mcpRegistry } from '../tools/mcp';
 import { AIClient } from '../../lib/ai-client';
 import * as os from 'os';
@@ -80,7 +81,8 @@ export const getBaseTools = (runner: any): AgentTool[] => {
     connectMcpServerTool,
     listMcpToolsTool,
     createArtifactTool,
-    createSiteTool
+    createSiteTool,
+    visualizeTool
   );
 
   // Add dynamically connected MCP tools

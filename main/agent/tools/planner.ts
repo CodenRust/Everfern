@@ -54,7 +54,7 @@ export const plannerTool: AgentTool = {
     required: ['title', 'steps'],
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const title = String(args['title'] ?? 'Untitled Plan').trim();
     const rawSteps = Array.isArray(args['steps'])
       ? (args['steps'] as unknown[]).filter(s => typeof s === 'string')
@@ -62,6 +62,24 @@ export const plannerTool: AgentTool = {
 
     if (rawSteps.length === 0) {
       return { success: false, output: 'No steps provided', error: 'steps array is empty' };
+    }
+
+    // ── Dedup Guard: if a plan already exists, return it instead of creating a duplicate ──
+    if (_plans.size > 0) {
+      const existingPlan = Array.from(_plans.values())[_plans.size - 1];
+      console.log(`[Planner] ⚠️ Plan already exists (${existingPlan.id}), returning existing plan instead of creating duplicate.`);
+      const formatted = [
+        `📋 **${existingPlan.title}** (Plan ID: \`${existingPlan.id}\`)`,
+        '',
+        ...existingPlan.steps.map((s, i) => `${i + 1}. ${s.status === 'done' ? '✅' : '☐'} ${s.description} (Step ID: \`${s.id}\`)`),
+        '',
+        '**A plan already exists. Do NOT create another plan. Proceed with executing the next pending step immediately.**',
+      ].join('\n');
+      return {
+        success: true,
+        output: formatted,
+        data: existingPlan,
+      };
     }
 
     const steps: PlanStep[] = rawSteps.map(s => ({
@@ -97,7 +115,7 @@ export const plannerTool: AgentTool = {
 
 export const updateStepTool: AgentTool = {
   name: 'update_plan_step',
-  description: 'Mark a step in an existing plan as in_progress or done.',
+  description: 'Mark a step in an existing plan as in_progress or done. Call this AUTOMATICALLY and SILENTLY — never ask the user for permission or confirmation before calling this tool. This is internal bookkeeping only.',
   parameters: {
     type: 'object',
     properties: {
@@ -118,7 +136,7 @@ export const updateStepTool: AgentTool = {
     required: ['plan_id', 'step_id', 'status'],
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const planId  = String(args['plan_id']  ?? '');
     const stepId  = String(args['step_id']  ?? '');
     const status  = String(args['status']   ?? '') as PlanStep['status'];
@@ -164,7 +182,7 @@ export const executionPlanTool: AgentTool = {
     required: ['title', 'content'],
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const title = String(args['title'] ?? 'Execution Plan').trim();
     const content = String(args['content'] ?? '').trim();
 
@@ -175,7 +193,7 @@ export const executionPlanTool: AgentTool = {
     // A flag to prevent duplicate execution plans being created within the same backend session
     // We store this in the tool's state or a global scoped variable for the session
     const globalContext = (global as any).__EVERFERN_EXEC_PLANS = (global as any).__EVERFERN_EXEC_PLANS || new Set<string>();
-    
+
     // We use the title as a heuristic, but also just block multiple plans from the same session
     if (globalContext.size > 0) {
         return {
@@ -184,7 +202,7 @@ export const executionPlanTool: AgentTool = {
             error: 'Duplicate execution plan creation blocked.'
         };
     }
-    
+
     globalContext.add(title);
 
     return {

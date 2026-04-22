@@ -13,6 +13,11 @@ async function runAgentStep(state, options) {
     runner.telemetry.transition(nodeName);
     const iterations = state.iterations || 0;
     runner.telemetry.metrics(iterations);
+    // Emit transition as thought for frontend visibility
+    const icon = nodeName === 'data_analyst' ? '📊' :
+        nodeName === 'coding_specialist' ? '💻' :
+            nodeName === 'web_explorer' ? '🌐' : '🧭';
+    eventQueue?.push({ type: 'thought', content: `\n${icon} ${nodeName.replace(/_/g, ' ').toUpperCase()}: Initializing step...` });
     let client = runner.client;
     let clientToRelease = null;
     let clientConfig = null;

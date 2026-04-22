@@ -1789,7 +1789,7 @@ export function createComputerUseTool(
       required: ["task"]
     },
 
-    async execute(args, onUpdate): Promise<AgentToolResult> {
+    async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<AgentToolResult> {
       const task = (args.task as string) || "Perform a visual audit of the current desktop.";
       onUpdate?.(`Initializing sub-agent for task: "${task}"...`);
 
@@ -1806,15 +1806,15 @@ export function createComputerUseTool(
       // Requirements: 5.1, 5.2, 5.3, 5.4
       const mainWindow = (global as any).mainWindow;
       const sender = mainWindow?.webContents || null;
-      const toolCallId = crypto.randomUUID();
-      const progressEmitter = new ProgressEventEmitter(toolCallId, sender);
+      const effectiveToolCallId = toolCallId || crypto.randomUUID();
+      const progressEmitter = new ProgressEventEmitter(effectiveToolCallId, sender);
 
       try {
         const { finalAnswer, lastScreenshot } = await agent.run(
           (update) => onUpdate?.(update),
           (event) => {
             // Set toolCallId for each event before emitting
-            event.toolCallId = toolCallId;
+            event.toolCallId = effectiveToolCallId;
             progressEmitter.emit(event);
           }
         );
@@ -1823,7 +1823,7 @@ export function createComputerUseTool(
         // Emit completion event
         progressEmitter.emit({
           type: 'complete',
-          toolCallId: toolCallId,
+          toolCallId: effectiveToolCallId,
           timestamp: new Date().toISOString(),
         });
 

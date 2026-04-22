@@ -78,10 +78,39 @@ async function shouldCompleteTask(state, client) {
     }
     // 3. Check if decomposed task exists and all steps are complete
     if (state.decomposedTask) {
-        // If we have a task decomposition, check if all steps are marked complete
-        // For now, we'll assume incomplete if we're here without tools
-        // This is a conservative approach - better to iterate than complete prematurely
-        return false;
+        // For complex tasks with decomposition, use more conservative completion criteria
+        const task = state.decomposedTask;
+        const toolCallHistory = state.toolCallHistory || state.toolCallRecords || [];
+        // Check if we have executed tools that correspond to the task steps
+        const criticalSteps = task.steps.filter(s => s.priority === 'critical');
+        const totalSteps = task.steps.length;
+        // If we have critical steps, ensure we've made progress on them
+        if (criticalSteps.length > 0) {
+            // Check if we've executed tools for critical steps
+            const criticalToolsNeeded = new Set(criticalSteps.map(s => s.tool).filter(t => t && t !== 'internal'));
+            const toolsExecuted = new Set(toolCallHistory.map((tc) => tc.name || tc.tool));
+            // Count how many critical tools have been executed
+            let criticalToolsExecuted = 0;
+            for (const tool of criticalToolsNeeded) {
+                if (toolsExecuted.has(tool)) {
+                    criticalToolsExecuted++;
+                }
+            }
+            // If we haven't executed any critical tools yet, don't complete
+            if (criticalToolsExecuted === 0 && criticalToolsNeeded.size > 0) {
+                return false;
+            }
+        }
+        // For complex tasks (many steps), require more evidence of completion
+        if (totalSteps >= 5) {
+            // Check if we've made sufficient tool calls relative to the number of steps
+            const minToolCallsExpected = Math.ceil(totalSteps * 0.5); // At least 50% of steps should have tool calls
+            if (toolCallHistory.length < minToolCallsExpected) {
+                return false;
+            }
+        }
+        // If we reach here with a decomposed task, use AI analysis to determine completion
+        // Fall through to AI analysis below
     }
     // 4. Use AI to analyze last assistant message for completion
     const messages = state.messages || [];

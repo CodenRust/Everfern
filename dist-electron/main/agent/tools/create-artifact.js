@@ -96,7 +96,7 @@ exports.createArtifactTool = {
         },
         required: ['html']
     },
-    async execute(args, onUpdate) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
             const sessionId = 'default';
             const artifactsDir = ensureArtifactsDir(sessionId);
@@ -166,7 +166,7 @@ exports.createSiteTool = {
         },
         required: ['name', 'type']
     },
-    async execute(args, onUpdate) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
             const sessionId = 'default';
             const name = String(args.name || 'site');

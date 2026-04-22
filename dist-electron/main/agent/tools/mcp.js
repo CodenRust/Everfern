@@ -179,7 +179,7 @@ class MCPToolRegistry {
             name: name,
             description: config.description,
             parameters: config.inputSchema,
-            async execute(args, onUpdate) {
+            async execute(args, onUpdate, emitEvent, toolCallId) {
                 try {
                     onUpdate?.(`Calling MCP tool: ${name}`);
                     const result = await connection.callTool(config.name, args);

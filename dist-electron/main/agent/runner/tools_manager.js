@@ -49,6 +49,7 @@ const control_plane_1 = require("../tools/control-plane");
 const terminal_1 = require("../tools/terminal");
 const mcp_registry_tool_1 = require("../tools/mcp-registry-tool");
 const create_artifact_1 = require("../tools/create-artifact");
+const visualize_1 = require("../tools/visualize");
 const mcp_1 = require("../tools/mcp");
 const os = __importStar(require("os"));
 const getBaseTools = (runner) => {
@@ -86,7 +87,7 @@ const getBaseTools = (runner) => {
         console.error('[ToolsManager] Failed to create computer_use tool:', error instanceof Error ? error.message : String(error));
     }
     // Add remaining static tools
-    tools.push(system_files_1.systemFilesTool, memory_save_1.memorySaveTool, memory_search_1.memorySearchTool, web_search_1.webSearchTool, todo_write_1.todoWriteTool, ask_user_1.askUserTool, skill_tool_1.skillTool, present_files_1.presentFilesTool, web_fetch_1.webFetchTool, (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission), control_plane_1.allowFileDeleteTool, mcp_registry_tool_1.searchMcpRegistryTool, mcp_registry_tool_1.connectMcpServerTool, mcp_registry_tool_1.listMcpToolsTool, create_artifact_1.createArtifactTool, create_artifact_1.createSiteTool);
+    tools.push(system_files_1.systemFilesTool, memory_save_1.memorySaveTool, memory_search_1.memorySearchTool, web_search_1.webSearchTool, todo_write_1.todoWriteTool, ask_user_1.askUserTool, skill_tool_1.skillTool, present_files_1.presentFilesTool, web_fetch_1.webFetchTool, (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission), control_plane_1.allowFileDeleteTool, mcp_registry_tool_1.searchMcpRegistryTool, mcp_registry_tool_1.connectMcpServerTool, mcp_registry_tool_1.listMcpToolsTool, create_artifact_1.createArtifactTool, create_artifact_1.createSiteTool, visualize_1.visualizeTool);
     // Add dynamically connected MCP tools
     const mcpTools = mcp_1.mcpRegistry.listAllTools().map(name => mcp_1.mcpRegistry.getTool(name)).filter(Boolean);
     tools.push(...mcpTools);

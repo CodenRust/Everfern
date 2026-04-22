@@ -982,7 +982,6 @@ function loadConfigSync() {
           }
         }
       }
-      console.log(`[Config] ✅ Loaded config: provider=${config.provider}, model=${config.model}`);
       return config;
     }
     return null;

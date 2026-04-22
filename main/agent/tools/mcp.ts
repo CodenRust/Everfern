@@ -229,7 +229,7 @@ class MCPToolRegistry {
             description: config.description,
             parameters: config.inputSchema as any,
 
-            async execute(args, onUpdate): Promise<any> {
+            async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
                 try {
                     onUpdate?.(`Calling MCP tool: ${name}`);
                     const result = await connection.callTool(config.name, args as Record<string, unknown>);

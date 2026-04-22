@@ -15,7 +15,7 @@ exports.memorySearchTool = {
         },
         required: ['query']
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
             const query = args.query;
             const limit = args.limit || 5;

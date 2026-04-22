@@ -109,7 +109,7 @@ export const systemFilesTool: AgentTool = {
     required: ['action', 'root'],
   },
 
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     try {
       const action = args.action as SystemFilesAction;
       const root = String(args.root ?? '').trim();

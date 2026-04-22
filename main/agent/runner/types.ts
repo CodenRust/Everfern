@@ -32,8 +32,13 @@ export interface AgentTool {
     properties: Record<string, ToolParameter>;
     required: string[];
   };
-  /** Execute the tool and return a result. Tools can optionally stream internal progress via onUpdate. */
-  execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void): Promise<ToolResult>;
+  /** Execute the tool and return a result. Tools can optionally stream internal progress via onUpdate or emit structured events. */
+  execute(
+    args: Record<string, unknown>, 
+    onUpdate?: (msg: string) => void,
+    emitEvent?: (event: any) => void,
+    toolCallId?: string
+  ): Promise<ToolResult>;
 }
 
 export interface ToolResult {

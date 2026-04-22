@@ -13,7 +13,7 @@ export const memorySaveTool: AgentTool = {
     },
     required: ['content']
   },
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     try {
       const content = args.content as string;
       const metadata = args.metadata as string | undefined;

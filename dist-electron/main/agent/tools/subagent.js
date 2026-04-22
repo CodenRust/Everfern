@@ -29,7 +29,7 @@ function createSubagentTool(runner) {
             },
             required: ['task']
         },
-        async execute(args, onUpdate) {
+        async execute(args, onUpdate, emitEvent, toolCallId) {
             const task = args.task;
             const agentId = args.agent_id;
             const maxDepth = args.max_depth || 3;

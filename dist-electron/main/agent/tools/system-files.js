@@ -138,7 +138,7 @@ exports.systemFilesTool = {
         },
         required: ['action', 'root'],
     },
-    async execute(args) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
             const action = args.action;
             const root = String(args.root ?? '').trim();

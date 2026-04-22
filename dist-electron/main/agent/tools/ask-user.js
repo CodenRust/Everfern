@@ -43,7 +43,7 @@ exports.askUserTool = {
         },
         required: ['questions']
     },
-    async execute(args, onUpdate) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         // Handle both formats: { questions: [...] } or { question: "...", options: [...] }
         let questions;
         if (args.questions && Array.isArray(args.questions)) {

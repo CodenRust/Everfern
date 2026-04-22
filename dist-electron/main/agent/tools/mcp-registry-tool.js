@@ -19,7 +19,7 @@ exports.searchMcpRegistryTool = {
         },
         required: ['keyword']
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const keyword = args.keyword.toLowerCase();
         onUpdate?.(`Searching MCP Registry for: ${keyword}...`);
         // In a real implementation, this would query a remote or local database of available MCP servers.
@@ -101,7 +101,7 @@ exports.connectMcpServerTool = {
         },
         required: ['name']
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const { name, command, docker, args: cmdArgs, env } = args;
         onUpdate?.(`Connecting to MCP server: ${name}...`);
         try {
@@ -145,7 +145,7 @@ exports.listMcpToolsTool = {
         properties: {},
         required: []
     },
-    execute: async (args, onUpdate) => {
+    execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const tools = mcp_1.mcpRegistry.listAllTools();
         const servers = mcp_1.mcpRegistry.getServers();
         if (servers.length === 0) {

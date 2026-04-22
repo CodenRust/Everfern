@@ -161,11 +161,25 @@ class AgentRunner {
                 },
                 required: ['task']
             },
-            execute: async (args, onUpdate) => {
+            execute: async (args, onUpdate, emitEvent, toolCallId) => {
                 const task = args.task;
                 const agentId = args.agent_id || crypto.randomUUID();
                 const maxDepth = Math.min(args.max_depth || 2, 3);
                 onUpdate?.(`AGI: Spawning sub-agent for: ${task.substring(0, 50)}...`);
+                // Start sub-agent timeline on frontend
+                if (emitEvent && toolCallId) {
+                    emitEvent({
+                        type: 'subagent-progress',
+                        toolCallId,
+                        timestamp: new Date().toISOString(),
+                        data: {
+                            type: 'step',
+                            toolCallId,
+                            timestamp: new Date().toISOString(),
+                            content: `Specialized Agent spawned: ${task.substring(0, 60)}...`
+                        }
+                    });
+                }
                 try {
                     const { getSubagentSpawner } = await Promise.resolve().then(() => __importStar(require('./subagent-spawn')));
                     const spawner = getSubagentSpawner();
@@ -177,16 +191,56 @@ class AgentRunner {
                             let lastResponse = '';
                             let toolCalls = [];
                             const stream = subRunner.runStream(t, clonedHistory, m, `sub:${agentId}`);
-                            let thoughts = '';
                             for await (const event of stream) {
                                 if (event.type === 'done')
                                     break;
                                 if (event.type === 'chunk')
                                     lastResponse += event.content;
+                                if (event.type === 'thought' && emitEvent && toolCallId) {
+                                    emitEvent({
+                                        type: 'subagent-progress',
+                                        toolCallId,
+                                        timestamp: new Date().toISOString(),
+                                        data: {
+                                            type: 'reasoning',
+                                            toolCallId,
+                                            timestamp: new Date().toISOString(),
+                                            content: event.content
+                                        }
+                                    });
+                                }
+                                if (event.type === 'tool_start' && emitEvent && toolCallId) {
+                                    emitEvent({
+                                        type: 'subagent-progress',
+                                        toolCallId,
+                                        timestamp: new Date().toISOString(),
+                                        data: {
+                                            type: 'action',
+                                            toolCallId,
+                                            timestamp: new Date().toISOString(),
+                                            content: `Running tool: ${event.toolName}`,
+                                            toolName: event.toolName
+                                        }
+                                    });
+                                }
+                                if (event.type === 'tool_call' && emitEvent && toolCallId) {
+                                    emitEvent({
+                                        type: 'subagent-progress',
+                                        toolCallId,
+                                        timestamp: new Date().toISOString(),
+                                        data: {
+                                            type: 'action',
+                                            toolCallId,
+                                            timestamp: new Date().toISOString(),
+                                            content: `Finished ${event.toolCall.toolName}`,
+                                            toolName: event.toolCall.toolName,
+                                            status: event.toolCall.result.success ? 'success' : 'failure'
+                                        }
+                                    });
+                                }
                                 if (event.type === 'thought') {
-                                    thoughts += event.content;
                                     if (event.content.includes('\n'))
-                                        onUpdate?.(`[Sub-Agent] 🤔 ${thoughts.trim().split('\n').pop()}`);
+                                        onUpdate?.(`[Sub-Agent] 🤔 ${event.content.trim().split('\n').pop()}`);
                                 }
                                 if (event.type === 'tool_start')
                                     onUpdate?.(`[Sub-Agent] 🛠️ Starting tool: ${event.toolName}`);
@@ -196,6 +250,18 @@ class AgentRunner {
                                     toolCalls.push(event.toolCall);
                                     onUpdate?.(`[Sub-Agent] ✅ Finished tool: ${event.toolCall.toolName}`);
                                 }
+                            }
+                            if (emitEvent && toolCallId) {
+                                emitEvent({
+                                    type: 'subagent-progress',
+                                    toolCallId,
+                                    timestamp: new Date().toISOString(),
+                                    data: {
+                                        type: 'complete',
+                                        toolCallId,
+                                        timestamp: new Date().toISOString()
+                                    }
+                                });
                             }
                             return {
                                 response: lastResponse,
@@ -488,9 +554,10 @@ class AgentRunner {
                 }
                 // Specialized handling for rate limits
                 else if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit')) {
+                    const providerName = this.client.provider ? this.client.provider.charAt(0).toUpperCase() + this.client.provider.slice(1) : 'The AI provider';
                     eventQueue.push({
                         type: 'chunk',
-                        content: `\n\n⚠️ **Rate Limit Reached**: The AI provider (Gemini) is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.`
+                        content: `\n\n⚠️ **Rate Limit Reached**: ${providerName} is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.`
                     });
                     missionTracker.fail(errorMsg);
                 }
@@ -513,11 +580,31 @@ class AgentRunner {
         // Keep draining while: graph is still running OR there are events in queue
         // Don't check missionTracker.isComplete here - it prevents HITL events from being yielded
         while (!graphDone || eventQueue.length > 0) {
+            // If graph just completed, add a small delay to ensure all events are queued
+            if (graphDone && eventQueue.length === 0) {
+                await new Promise(r => setTimeout(r, 10));
+                // Check again after delay - if still no events, we're done
+                if (eventQueue.length === 0)
+                    break;
+            }
             if (eventQueue.length > 0) {
-                const event = eventQueue.shift();
+                // HITL Event Priority: Process HITL events before other events
+                // This prevents race conditions between HITL and mission completion
+                const hitlEventIndex = eventQueue.findIndex(e => e.type === 'hitl_request');
+                let event;
+                if (hitlEventIndex !== -1) {
+                    // Remove HITL event from queue (higher priority)
+                    event = eventQueue.splice(hitlEventIndex, 1)[0];
+                    console.log('[Runner] 🔔 Processing HITL event with priority (found at index', hitlEventIndex, ')');
+                }
+                else {
+                    // Process regular events in FIFO order
+                    event = eventQueue.shift();
+                }
                 // Debug logging for HITL events
                 if (event.type === 'hitl_request') {
                     console.log('[Runner] Processing hitl_request event:', event);
+                    console.log('[Runner] Remaining events in queue:', eventQueue.length);
                 }
                 // Track when first thought event occurs
                 if (event.type === 'thought') {

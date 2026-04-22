@@ -37,7 +37,7 @@ export const todoWriteTool: AgentTool = {
     required: ['tasks']
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
     const tasks = args.tasks as Array<{ description: string; status: string }>;
     let planPath = args.planPath as string;
 

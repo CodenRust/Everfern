@@ -16,7 +16,8 @@ import {
   Cog6ToothIcon,
   Square3Stack3DIcon,
   BookOpenIcon,
-  PencilSquareIcon
+  PencilSquareIcon,
+  PresentationChartBarIcon
 } from '@heroicons/react/24/outline';
 
 /**
@@ -162,6 +163,15 @@ export function resolveToolDisplay(toolName: string, args?: Record<string, unkno
         icon: React.createElement(Square3Stack3DIcon, { width: 16, height: 16 }), 
         label: name ? `Creating site: ${truncate(name, 60)}` : 'Creating site', 
         color: '#06b6d4' 
+      };
+    }
+
+    case 'visualize': {
+      const title = typeof args?.title === 'string' ? args.title.trim() : '';
+      return { 
+        icon: React.createElement(PresentationChartBarIcon, { width: 16, height: 16 }), 
+        label: title ? `Visualizing: ${truncate(title, 60)}` : 'Generating visual', 
+        color: '#8b5cf6' 
       };
     }
 

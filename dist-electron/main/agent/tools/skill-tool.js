@@ -17,7 +17,7 @@ exports.skillTool = {
         },
         required: ['name']
     },
-    async execute(args, onUpdate) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         const skillName = (args.name || '').toLowerCase();
         onUpdate?.(`🔍 Resolving skill "${skillName}"...`);
         const skills = (0, skills_loader_1.loadSkills)();

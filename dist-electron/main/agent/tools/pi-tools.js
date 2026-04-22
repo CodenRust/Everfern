@@ -21,10 +21,10 @@ function adaptTool(definition, executor, customName) {
         name,
         description: definition.description,
         parameters: definition.parameters, // Note: AgentTool expects JSON schema format.
-        execute: async (args) => {
+        execute: async (args, onUpdate, emitEvent, toolCallId) => {
             try {
-                const fakeId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-                const result = await executor(fakeId, args);
+                const id = toolCallId ?? `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                const result = await executor(id, args);
                 let outputText = '';
                 if (result.content && Array.isArray(result.content)) {
                     outputText = result.content

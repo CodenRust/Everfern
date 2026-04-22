@@ -178,17 +178,8 @@ JSON:
                 catch (err) {
                     const errorMessage = err instanceof Error ? err.message : String(err);
                     console.warn('[Judge] Fallback AI evaluation failed:', errorMessage);
-                    // If the AI evaluation fails, use a more conservative heuristic
-                    // Check if there's any meaningful content or user interaction
-                    const hasUserInteraction = responseContent.includes('?') ||
-                        responseContent.toLowerCase().includes('select') ||
-                        responseContent.toLowerCase().includes('choose') ||
-                        responseContent.toLowerCase().includes('option');
-                    if (hasUserInteraction) {
-                        runner.telemetry.info('Heuristic: User interaction detected — completing');
-                        integrator.completeNode('judge', 'Heuristic: user interaction');
-                        return { taskPhase: 'executing', shouldContinueIteration: false };
-                    }
+                    // AI evaluation failed/timed out — fall through to final heuristic below
+                    // Do NOT end the mission here; let the heuristic decide
                 }
             }
             // Final heuristic: any response > 30 chars is complete
@@ -198,9 +189,11 @@ JSON:
         }
         catch (error) {
             const duration = Date.now() - startTime;
-            runner.telemetry.warn(`Judge failed after ${duration}ms: ${error instanceof Error ? error.message : String(error)}`);
-            integrator.failNode('judge', error instanceof Error ? error.message : String(error));
-            return { taskPhase: 'executing', shouldContinueIteration: false };
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            runner.telemetry.warn(`Judge node error after ${duration}ms: ${errorMsg}`);
+            integrator.failNode('judge', errorMsg);
+            // On unexpected error, continue iterating rather than silently ending the mission
+            return { taskPhase: 'executing', shouldContinueIteration: true };
         }
     };
 };

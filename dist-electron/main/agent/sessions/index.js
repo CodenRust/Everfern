@@ -20,3 +20,4 @@ Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./session-store"), exports);
 __exportStar(require("./session-lifecycle-events"), exports);
 __exportStar(require("./compaction"), exports);
+__exportStar(require("./analysis-session"), exports);

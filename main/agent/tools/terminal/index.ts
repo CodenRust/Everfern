@@ -18,7 +18,7 @@ export const terminalTool: AgentTool = {
     },
     required: ['command']
   },
-  execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void): Promise<ToolResult> => {
+  execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
     const registry = CommandRegistry.getInstance();
     const command = args.command as string;
     const cwd = (args.cwd as string) || os.homedir();
@@ -59,7 +59,7 @@ export const terminalStatusTool: AgentTool = {
     },
     required: ['id']
   },
-  execute: async (args: Record<string, unknown>): Promise<ToolResult> => {
+  execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
     const registry = CommandRegistry.getInstance();
     const id = args.id as string;
     const commands = registry.listCommands();

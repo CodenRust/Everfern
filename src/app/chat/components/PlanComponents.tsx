@@ -41,16 +41,31 @@ const PlanReviewCard = ({ plan, onApprove, onEdit }: { plan: { content: string; 
     );
 };
 
-const AgentWorkspaceCards = ({ plan, contextItems, setTooltip }: { plan: any | null; contextItems: any[]; setTooltip: (ts: any) => void }) => {
+const AgentWorkspaceCards = ({ plan, contextItems, setTooltip, currentNode, isLoading }: { plan: any | null; contextItems: any[]; setTooltip: (ts: any) => void; currentNode?: string; isLoading?: boolean }) => {
     const [progressExpanded, setProgressExpanded] = useState(true);
     const [contextExpanded, setContextExpanded] = useState(true);
 
     if (!plan && contextItems.length === 0) return null;
     
     const hasComputerUse = contextItems.some((i: any) => i.type === 'app');
+    const isDataAnalyst = currentNode === 'data_analyst' && isLoading;
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {/* Data Analyst Active Card */}
+            {isDataAnalyst && (
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ width: '100%', backgroundColor: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#f3e8ff', border: '1px solid #e9d5ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9333ea" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#6b21a8', marginBottom: 2 }}>Data Analyst</div>
+                        <div style={{ fontSize: 12, color: '#7c3aed' }}>Processing data and generating insights...</div>
+                    </div>
+                    <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#9333ea', animation: 'pulse 1.5s ease-in-out infinite', flexShrink: 0 }} />
+                </motion.div>
+            )}
+
             {plan && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ width: "100%", backgroundColor: "transparent" }}>
                     <div onClick={() => setProgressExpanded(!progressExpanded)} style={{ padding: "8px 0px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>

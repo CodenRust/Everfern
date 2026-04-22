@@ -55,6 +55,7 @@ import IntegrationSettings from '../../components/IntegrationSettings';
 import ArtifactsPanel from './ArtifactsPanel';
 import ArtifactsList from './ArtifactsList';
 import PlanViewerPanel from './PlanViewerPanel';
+import TasksPanel from './TasksPanel';
 import SitePreview from './SitePreview';
 import SettingsPage from './SettingsPage';
 import FileArtifact from './FileArtifact';
@@ -79,6 +80,7 @@ import { MarkdownRenderer, StreamingMarkdown } from './components/MarkdownCompon
 import { ContextTokenRing, VoiceButton, RateLimitContinueButton } from './components/UIHelpers';
 import { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard } from './components/ToolCallComponents';
 import { ReportContainer } from './components/ReportComponents';
+import { InlineVisualization } from './components/InlineVisualization';
 import { PlanReviewCard, AgentWorkspaceCards } from './components/PlanComponents';
 import { HitlApprovalForm, UserQuestionForm } from './components/FormComponents';
 import { PlanApprovalBanner } from './components/PlanApprovalBanner';
@@ -124,6 +126,9 @@ export default function ChatPage() {
     const [selectedArtifactName, setSelectedArtifactName] = useState<string | null>(null);
     const [showPlanViewer, setShowPlanViewer] = useState(false);
     const [planViewerContent, setPlanViewerContent] = useState("");
+    const [showTasksPanel, setShowTasksPanel] = useState(false);
+    const [panelTasks, setPanelTasks] = useState<{ description: string; status: 'pending' | 'in_progress' | 'completed' }[]>([]);
+    const [tasksFilePath, setTasksFilePath] = useState<string | undefined>(undefined);
     const [fileViewerPane, setFileViewerPane] = useState<{ toolId: string; filename: string; content: string; tab: 'code' | 'preview' } | null>(null);
     const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
     const [selectedModel, setSelectedModel] = useState("everfern-1");
@@ -202,6 +207,43 @@ export default function ChatPage() {
     // Sub-agent progress state - stores progress events grouped by toolCallId
     const [subAgentProgress, setSubAgentProgress] = useState<Map<string, SubAgentProgressEvent[]>>(new Map());
 
+    // ── Persistence ─────────────────────────────────────────────────────────────
+    useEffect(() => {
+        // Restore from session storage on mount
+        const savedThought = sessionStorage.getItem('everfern_streaming_thought');
+        const savedTools = sessionStorage.getItem('everfern_live_tool_calls');
+        const savedLoading = sessionStorage.getItem('everfern_is_loading');
+
+        if (savedThought) {
+            setStreamingThought(savedThought);
+            streamingThoughtRef.current = savedThought;
+        }
+        if (savedTools) {
+            try {
+                const tools = JSON.parse(savedTools);
+                setLiveToolCalls(tools);
+                liveToolCallsRef.current = tools;
+            } catch (e) { console.error('Failed to restore live tool calls:', e); }
+        }
+        if (savedLoading === 'true') {
+            // If it was loading when refreshed, we might need to reconnect
+            // but for now we just show the restored state
+            setIsLoading(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (isLoading) {
+            sessionStorage.setItem('everfern_streaming_thought', streamingThought);
+            sessionStorage.setItem('everfern_live_tool_calls', JSON.stringify(liveToolCalls));
+            sessionStorage.setItem('everfern_is_loading', 'true');
+        } else {
+            sessionStorage.removeItem('everfern_streaming_thought');
+            sessionStorage.removeItem('everfern_live_tool_calls');
+            sessionStorage.removeItem('everfern_is_loading');
+        }
+    }, [streamingThought, liveToolCalls, isLoading]);
+
     // User question form state
     const [activeUserQuestions, setActiveUserQuestions] = useState<Array<{
         question: string;
@@ -228,6 +270,7 @@ export default function ChatPage() {
     // Current node tracking for better status display
     const [currentNode, setCurrentNode] = useState<string>("");
     const [currentPhase, setCurrentPhase] = useState<"triage" | "planning" | "execution" | "validation" | "completion" | undefined>(undefined);
+    const [activeContextTab, setActiveContextTab] = useState<'Overview' | 'Resources' | 'Permissions' | 'History'>('Overview');
 
     // Sub-agent progress pane state
     const [zoomedScreenshot, setZoomedScreenshot] = useState<string | null>(null);
@@ -913,6 +956,19 @@ export default function ChatPage() {
             // Simplified mission complete handler without timeline
             acpApi.onMissionComplete(({ thinkingDuration }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
                 const receiveTime = Date.now();
+
+                // CRITICAL: Check __activeHitl flag BEFORE processing mission_complete
+                // This prevents race condition where mission completion clears state during active HITL
+                const hasActiveHitl = (window as any).__activeHitl || showHitlApproval;
+                const hasActiveUserQuestion = activeUserQuestionRef.current || activeUserQuestions.length > 0;
+
+                if (hasActiveHitl || hasActiveUserQuestion) {
+                    console.log(`[Frontend] ⏸️ Mission complete received but ${hasActiveHitl ? 'HITL' : 'user question'} is active - deferring completion`);
+                    // Don't set missionComplete yet - wait for HITL/question to be resolved
+                    // The form submission handler will trigger completion after response is sent
+                    return;
+                }
+
                 setMissionComplete(true);
 
                 // Delay listener removal to allow pending events (like HITL requests and user questions) to be processed first
@@ -935,6 +991,7 @@ export default function ChatPage() {
                 // This prevents in-flight chunks from being dropped by the guard.
                 // Use 150ms to ensure onToolCall (which sets activeUserQuestions) fires first.
                 setTimeout(() => {
+                    if (isMessageCommittedRef.current) return;
                     isMessageCommittedRef.current = true;
 
                     const finalContent = streamingContentRef.current || "";
@@ -946,14 +1003,15 @@ export default function ChatPage() {
                 // Extract duration in milliseconds from thinkingDuration
                 const durationMs = thinkingDuration?.duration;
 
-                // Check if there's an active user question - commit accumulated content
+                // Check if there's an active user question or HITL request - commit accumulated content
                 // so it doesn't disappear when the next send resets streaming state.
                 // Use the window flag as the primary check since it's set synchronously
                 // in onToolCall before React state updates propagate.
                 const hasActiveUserQuestion = activeUserQuestionRef.current || activeUserQuestions.length > 0;
+                const hasActiveHitl = (window as any).__activeHitl || showHitlApproval;
 
-                if (hasActiveUserQuestion) {
-                    console.log('[Frontend] ⏸️ Active user question detected - committing accumulated content before pausing');
+                if (hasActiveUserQuestion || hasActiveHitl) {
+                    console.log(`[Frontend] ⏸️ ${hasActiveHitl ? 'HITL' : 'User question'} detected - committing accumulated content before pausing`);
                     setIsLoading(false);
                     if (finalContent || finalThought || finalToolCalls.length > 0) {
                         const assistantMsg: Message = {
@@ -965,11 +1023,16 @@ export default function ChatPage() {
                             timestamp: new Date(),
                             toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
                         };
-                        setStreamingContent("");
-                        setStreamingThought("");
+                        // Commit to messages list but keep streamingContent visible
+                        // so the AI message doesn't disappear while the form is shown.
+                        // streamingContent will be cleared by handleSend when the user submits.
                         setLiveToolCalls([]);
                         setMessages(prev => {
-                            if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                            const prevMsg = prev[prev.length - 1];
+                            const isContentSame = prevMsg.content === assistantMsg.content;
+                            const isThoughtSame = prevMsg.thought === assistantMsg.thought;
+                            const isToolCallsSame = JSON.stringify(prevMsg.toolCalls) === JSON.stringify(assistantMsg.toolCalls);
+                            if (prev.length > 0 && prevMsg.role === 'assistant' && isContentSame && isThoughtSame && isToolCallsSame) {
                                 return prev;
                             }
                             const final = [...prev, assistantMsg];
@@ -998,7 +1061,11 @@ export default function ChatPage() {
                     setIsLoading(false);
                     setMessages(prev => {
                         // Prevent duplicate message if the last message is identical
-                        if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                        const prevMsg = prev[prev.length - 1];
+                        const isContentSame = prevMsg.content === assistantMsg.content;
+                        const isThoughtSame = prevMsg.thought === assistantMsg.thought;
+                        const isToolCallsSame = JSON.stringify(prevMsg.toolCalls) === JSON.stringify(assistantMsg.toolCalls);
+                        if (prev.length > 0 && prevMsg.role === 'assistant' && isContentSame && isThoughtSame && isToolCallsSame) {
                             console.warn('[Chat] Duplicate plan message prevented');
                             return prev;
                         }
@@ -1049,7 +1116,11 @@ export default function ChatPage() {
                     setIsLoading(false);
                     setMessages(prev => {
                         // Prevent duplicate message if the last message is identical
-                        if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg.content) {
+                        const prevMsg = prev[prev.length - 1];
+                        const isContentSame = prevMsg.content === assistantMsg.content;
+                        const isThoughtSame = prevMsg.thought === assistantMsg.thought;
+                        const isToolCallsSame = JSON.stringify(prevMsg.toolCalls) === JSON.stringify(assistantMsg.toolCalls);
+                        if (prev.length > 0 && prevMsg.role === 'assistant' && isContentSame && isThoughtSame && isToolCallsSame) {
                             console.warn('[Chat] Duplicate fallback message prevented');
                             return prev;
                         }
@@ -1320,6 +1391,13 @@ export default function ChatPage() {
                         setCurrentComputerUseToolCallId(null);
                     }
                     if (record.toolName === 'create_plan' || record.toolName === 'update_plan_step') { if (record.result?.success && record.result?.data) setCurrentPlan(record.result.data); }
+                    if (record.toolName === 'todo_write') {
+                        if (record.result?.success && record.result?.data) {
+                            setPanelTasks(record.result.data.tasks);
+                            setTasksFilePath(record.result.data.path);
+                            setShowTasksPanel(true);
+                        }
+                    }
                     if (record.toolName === 'execution_plan') {
                         if (record.result?.success && record.result?.data) {
                             const planData = record.result.data;
@@ -1679,7 +1757,7 @@ export default function ChatPage() {
 
         console.log('[HITL] User decision:', approved ? 'approved' : 'rejected', 'sendMessage:', sendMessage);
 
-        // Clear the HITL approval UI
+        // Clear the HITL approval UI first
         setShowHitlApproval(false);
         setHitlRequest(null);
         setCurrentNode("");
@@ -1687,15 +1765,55 @@ export default function ChatPage() {
         // Clear the active HITL flag
         (window as any).__activeHitl = false;
 
-        // Send the approval response directly to the backend without creating a chat message
+        // Send the approval response
         const responseText = approved ? '[HITL_APPROVED]' : '[HITL_REJECTED]';
 
         if (sendMessage) {
-            // Optional: Send as a visible chat message (old behavior)
+            // Send as a visible chat message
+            // IMPORTANT: Don't call handleSend() as it clears streaming content and may delete agent messages
+            // Instead, manually add the message and trigger the stream
             const messageText = approved
                 ? `[HITL_APPROVED] I have reviewed and approved the requested operation. Please proceed.`
                 : `[HITL_REJECTED] I have reviewed and rejected the requested operation. Please do not proceed.`;
-            handleSend(messageText);
+
+            // Create user message for the approval
+            const userMessage: Message = {
+                id: crypto.randomUUID(),
+                role: "user",
+                content: messageText,
+                timestamp: new Date()
+            };
+
+            // Add to messages array - this preserves all existing messages including agent messages
+            const newMessages = [...messages, userMessage];
+            setMessages(newMessages);
+
+            // Now trigger the agent stream with the approval message
+            // This is similar to handleSend but without clearing existing messages
+            setIsLoading(true);
+            setLiveToolCalls([]);
+            setStreamingContent("");
+            setStreamingThought("");
+            setMissionComplete(false);
+            liveToolCallsRef.current = [];
+            streamingContentRef.current = "";
+            streamingThoughtRef.current = "";
+            isMessageCommittedRef.current = false;
+
+            const acpApi = (window as any).electronAPI?.acp;
+            if (acpApi?.stream) {
+                // Remove old listeners
+                acpApi.removeStreamListeners();
+
+                // Prepare messages for streaming
+                const messagesToSend = newMessages.map(m => ({
+                    role: m.role,
+                    content: m.content
+                }));
+
+                // Start the stream
+                acpApi.stream({ messages: messagesToSend });
+            }
         } else {
             // Send approval response directly to backend without creating a chat message
             const acpApi = (window as any).electronAPI?.acp;
@@ -1704,14 +1822,60 @@ export default function ChatPage() {
             } else {
                 // Fallback: send as a system message that won't appear in chat
                 console.log('[HITL] Sending response directly to backend:', responseText);
-                // We could emit a custom event or use IPC directly here
                 const event = new CustomEvent('hitl-response', {
                     detail: { response: responseText, approved }
                 });
                 window.dispatchEvent(event);
             }
+
+            // CRITICAL: After HITL is resolved without sending a message, complete the mission
+            // This ensures the UI updates properly and doesn't stay in loading state
+            setTimeout(() => {
+                if (!isMessageCommittedRef.current) {
+                    console.log('[HITL] Completing mission after HITL resolution without new message');
+                    setMissionComplete(true);
+                    setIsLoading(false);
+
+                    // Commit any accumulated content
+                    const finalContent = streamingContentRef.current || "";
+                    const finalThought = streamingThoughtRef.current;
+                    const finalToolCalls = liveToolCallsRef.current.map(t =>
+                        t.status === 'running' ? { ...t, status: 'done' as const } : t
+                    );
+
+                    if (finalContent || finalThought || finalToolCalls.length > 0) {
+                        const assistantMsg: Message = {
+                            id: crypto.randomUUID(),
+                            role: "assistant",
+                            content: finalContent,
+                            thought: finalThought,
+                            timestamp: new Date(),
+                            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                        };
+
+                        setStreamingContent("");
+                        setStreamingThought("");
+                        setLiveToolCalls([]);
+                        setMessages(prev => {
+                            const prevMsg = prev[prev.length - 1];
+                            if (prev.length > 0 && prevMsg.role === 'assistant' &&
+                                prevMsg.content === assistantMsg.content &&
+                                prevMsg.thought === assistantMsg.thought &&
+                                JSON.stringify(prevMsg.toolCalls) === JSON.stringify(assistantMsg.toolCalls)) {
+                                return prev;
+                            }
+                            const final = [...prev, assistantMsg];
+                            saveConversation(final);
+                            return final;
+                        });
+                    }
+
+                    isMessageCommittedRef.current = true;
+                    acpApi?.removeStreamListeners();
+                }
+            }, 200); // Small delay to ensure HITL response is sent first
         }
-    }, [hitlRequest, handleSend]);
+    }, [hitlRequest, messages, saveConversation]);
 
     const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -2233,6 +2397,7 @@ export default function ChatPage() {
                 <PermissionDialog />
                 <ArtifactsPanel isOpen={showArtifacts} onClose={() => { setShowArtifacts(false); setSelectedArtifactName(null); }} activeChatId={activeConversationId} selectedFileName={selectedArtifactName} />
                 <PlanViewerPanel isOpen={showPlanViewer} onClose={() => setShowPlanViewer(false)} content={planViewerContent} onApprove={handleApprovePlan} />
+                <TasksPanel isOpen={showTasksPanel} onClose={() => setShowTasksPanel(false)} tasks={panelTasks} path={tasksFilePath} />
                 <VoiceAssistantUI
                     isOpen={showVoiceAssistant}
                     onClose={() => setShowVoiceAssistant(false)}
@@ -2507,6 +2672,7 @@ export default function ChatPage() {
                                                                 isLive={false}
                                                                 currentPhase={currentPhase}
                                                                 currentNode={currentNode}
+                                                                subAgentProgress={subAgentProgress}
                                                             />
                                                             {msg.stopped && (
                                                                 <div style={{
@@ -2579,6 +2745,16 @@ export default function ChatPage() {
                                                             {msg.toolCalls?.filter(tc => tc.toolName === 'computer_use').map(tc => (
                                                                 <ComputerUseResultCard key={`cu-${tc.id}`} tc={tc} />
                                                             ))}
+                                                            {msg.toolCalls?.filter(tc => tc.toolName === 'visualize').map(tc => (
+                                                                <InlineVisualization
+                                                                    key={tc.id}
+                                                                    html={tc.args?.html as string || ''}
+                                                                    css={tc.args?.css as string}
+                                                                    js={tc.args?.js as string}
+                                                                    title={tc.args?.title as string}
+                                                                    height={tc.args?.height as number}
+                                                                />
+                                                            ))}
                                                             <RateLimitContinueButton content={msg.content} onContinue={() => handleSend("continue")} />
                                                         </>
                                                     )}
@@ -2587,8 +2763,13 @@ export default function ChatPage() {
                                         ))}
                                     </AnimatePresence>
 
-                                    {/* Live streaming state - hide if last message already has this content (prevent duplicates) */}
-                                    {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === "assistant" && streamingContent && messages[messages.length - 1].content?.trim() === streamingContent?.trim()) && (
+                                    {/* Live streaming state - hide if last message already has this content (prevent duplicates).
+                                        Exception: when HITL or user question is active, always show the streaming bubble
+                                        so the previous agent message doesn't disappear while the form is shown. */}
+                                    {(isLoading || (streamingContent && (activeUserQuestions.length > 0 || showHitlApproval))) && (
+                                        (activeUserQuestions.length > 0 || showHitlApproval) ||
+                                        !(messages.length > 0 && messages[messages.length - 1].role === "assistant" && streamingContent && messages[messages.length - 1].content?.trim() === streamingContent?.trim())
+                                    ) && (
                                         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 32, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
                                             <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8886", letterSpacing: "0.08em", marginBottom: 8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
                                                 <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.5, filter: 'invert(1)' }} />
@@ -2603,6 +2784,7 @@ export default function ChatPage() {
                                                     currentNode={currentNode}
                                                     planSteps={activePlanSteps}
                                                     planTitle={activePlanTitle}
+                                                    subAgentProgress={subAgentProgress}
                                                 />
                                                 {activeSurface && (
                                                     <SurfaceCanvas data={activeSurface} />
@@ -2632,6 +2814,16 @@ export default function ChatPage() {
                                                                         }}
                                                                     />
                                                                 </div>
+                                                            ))}
+                                                            {liveToolCalls.filter(tc => tc.toolName === 'visualize').map(tc => (
+                                                                <InlineVisualization
+                                                                    key={tc.id}
+                                                                    html={tc.args?.html as string || ''}
+                                                                    css={tc.args?.css as string}
+                                                                    js={tc.args?.js as string}
+                                                                    title={tc.args?.title as string}
+                                                                    height={tc.args?.height as number}
+                                                                />
                                                             ))}
                                                         </>
                                                     );
@@ -2989,17 +3181,39 @@ export default function ChatPage() {
                                                             <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></div>
                                                         </div>
                                                     </div>
-                                                    
+
                                                     {/* Tabs Component Row */}
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #e5e7eb', paddingBottom: 8 }}>
-                                                        <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', borderBottom: '2px solid #22c55e', paddingBottom: 6 }}>Overview</span>
-                                                        <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280', paddingBottom: 6, display: 'flex', gap: 6, alignItems: 'center' }}>Resources <span style={{ backgroundColor: '#e5e7eb', color: '#374151', fontSize: 11, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>2</span></span>
-                                                        <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280', paddingBottom: 6 }}>Permissions</span>
-                                                        <span style={{ fontSize: 13, fontWeight: 500, color: '#6b7280', paddingBottom: 6 }}>History</span>
+                                                        <span onClick={() => setActiveContextTab('Overview')} style={{ fontSize: 13, fontWeight: activeContextTab === 'Overview' ? 600 : 500, color: activeContextTab === 'Overview' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'Overview' ? '2px solid #22c55e' : 'none', paddingBottom: 6, cursor: 'pointer', transition: 'all 0.15s' }}>Overview</span>
+                                                        <span onClick={() => setActiveContextTab('Resources')} style={{ fontSize: 13, fontWeight: activeContextTab === 'Resources' ? 600 : 500, color: activeContextTab === 'Resources' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'Resources' ? '2px solid #22c55e' : 'none', paddingBottom: 6, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', transition: 'all 0.15s' }}>Resources <span style={{ backgroundColor: '#e5e7eb', color: '#374151', fontSize: 11, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>{contextItems.length > 0 ? contextItems.length : 1}</span></span>
+                                                        <span onClick={() => setActiveContextTab('Permissions')} style={{ fontSize: 13, fontWeight: activeContextTab === 'Permissions' ? 600 : 500, color: activeContextTab === 'Permissions' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'Permissions' ? '2px solid #22c55e' : 'none', paddingBottom: 6, cursor: 'pointer', transition: 'all 0.15s' }}>Permissions</span>
+                                                        <span onClick={() => setActiveContextTab('History')} style={{ fontSize: 13, fontWeight: activeContextTab === 'History' ? 600 : 500, color: activeContextTab === 'History' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'History' ? '2px solid #22c55e' : 'none', paddingBottom: 6, cursor: 'pointer', transition: 'all 0.15s' }}>History</span>
                                                     </div>
                                                 </div>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
-                                                    <AgentWorkspaceCards plan={currentPlan} contextItems={contextItems} setTooltip={setTooltipState} />
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24, flex: 1, minHeight: 0 }}>
+                                                    {activeContextTab === 'Overview' ? (
+                                                        <AgentWorkspaceCards plan={currentPlan} contextItems={contextItems} setTooltip={setTooltipState} currentNode={currentNode} isLoading={isLoading} />
+                                                    ) : activeContextTab === 'Resources' ? (
+                                                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
+                                                            {currentPlan ? (
+                                                                <div style={{ fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace', fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                                                    <div style={{ color: '#9ca3af', marginBottom: 12, fontSize: 12 }}>{`<!-- .system_generated/plans/plan.md -->`}</div>
+                                                                    {`# ${currentPlan.title}\n\n${currentPlan.steps?.map((s: any, i: number) => `${i + 1}. [${s.status === 'done' ? 'x' : ' '}] ${s.description}`).join('\n')}`}
+                                                                </div>
+                                                            ) : executionPlan ? (
+                                                                <div style={{ fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace', fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                                                    <div style={{ color: '#9ca3af', marginBottom: 12, fontSize: 12 }}>{`<!-- .system_generated/plans/plan.md -->`}</div>
+                                                                    {executionPlan.content}
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ color: '#9ca3af', fontSize: 13, fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>No plan.md resource available in the current context.</div>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <div style={{ color: '#9ca3af', fontSize: 13, padding: '20px 0', textAlign: 'center', fontStyle: 'italic' }}>
+                                                            Nothing to display for '{activeContextTab}' yet.
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </>
                                         )}

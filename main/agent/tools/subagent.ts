@@ -30,7 +30,7 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
             required: ['task']
         },
 
-        async execute(args, onUpdate): Promise<ToolResult> {
+        async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
             const task = args.task as string;
             const agentId = args.agent_id as string | undefined;
             const maxDepth = (args.max_depth as number) || 3;

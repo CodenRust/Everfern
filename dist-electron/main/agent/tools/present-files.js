@@ -38,7 +38,7 @@ exports.presentFilesTool = {
         },
         required: ['files']
     },
-    async execute(args, onUpdate) {
+    async execute(args, onUpdate, emitEvent, toolCallId) {
         // Handle different input formats
         let files = [];
         if (Array.isArray(args.files)) {
