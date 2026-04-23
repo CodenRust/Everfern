@@ -252,6 +252,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     load:   (id: string)     => ipcRenderer.invoke('history:load', id),
     save:   (conv: any)      => ipcRenderer.invoke('history:save', conv),
     delete: (id: string)     => ipcRenderer.invoke('history:delete', id),
+    // HITL persistence — check for pending approval requests on load
+    hitl: {
+      getPending: (conversationId: string) => ipcRenderer.invoke('hitl:get-pending', conversationId),
+      resolve:    (conversationId: string, requestId: string, approved: boolean) =>
+                    ipcRenderer.invoke('hitl:resolve', conversationId, requestId, approved),
+    },
   },
 
   // ── Memory ───────────────────────────────────────────────────────
@@ -423,6 +429,10 @@ export type ElectronAPI = {
     load:   (id: string) => Promise<any>;
     save:   (conv: any)  => Promise<{ success: boolean; error?: string }>;
     delete: (id: string) => Promise<{ success: boolean; error?: string }>;
+    hitl: {
+      getPending: (conversationId: string) => Promise<any | null>;
+      resolve:    (conversationId: string, requestId: string, approved: boolean) => Promise<{ success: boolean; error?: string }>;
+    };
   };
   memory: {
     saveDirect: (content: string, metadata?: string) => Promise<{ success: boolean; output: string }>;

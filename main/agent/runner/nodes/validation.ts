@@ -7,11 +7,34 @@ import type { AIClient } from '../../../lib/ai-client';
 const MAX_ITERATIONS = 50;
 
 /**
+ * Tools that are always safe and should never trigger HITL approval.
+ * These are internal bookkeeping operations with no destructive side effects.
+ */
+const SAFE_TOOL_WHITELIST = new Set([
+  'update_plan_step',
+  'create_plan',
+  'todo_write',
+  'memory_save',
+  'memory_search',
+  'read_file',
+  'view_file',
+  'list_directory',
+  'execution_plan',
+]);
+
+/**
  * AI-based tool risk assessment
  * Replaces keyword-based risk detection with semantic analysis
  */
 async function assessToolRisk(toolCalls: any[], client?: AIClient): Promise<boolean> {
   if (!toolCalls || toolCalls.length === 0) return false;
+
+  // Whitelist check: if ALL pending tool calls are safe internal tools, skip risk assessment
+  const allSafe = toolCalls.every(tc => SAFE_TOOL_WHITELIST.has(tc.name));
+  if (allSafe) {
+    return false;
+  }
+
   if (!client) {
     // Fallback: conservative approach - assume high risk if no AI available
     return toolCalls.length > 0;

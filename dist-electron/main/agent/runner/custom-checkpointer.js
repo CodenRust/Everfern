@@ -99,10 +99,25 @@ class LightweightCheckpointer extends langgraph_1.BaseCheckpointSaver {
             },
         };
     }
-    async putWrites(config, _writes, taskId) {
-        // This method is required by BaseCheckpointSaver but not used in our simple implementation
-        // In a full implementation, this would store intermediate writes during task execution
-        console.log(`[Checkpointer] putWrites called for thread ${config.configurable?.thread_id}, task ${taskId}`);
+    async putWrites(config, writes, taskId) {
+        // Store intermediate writes during task execution — required for interrupt() to work
+        const threadId = config.configurable?.thread_id;
+        const checkpointId = config.configurable?.checkpoint_id;
+        console.log(`[Checkpointer] putWrites called for thread ${threadId}, task ${taskId}`);
+        if (!threadId || !checkpointId)
+            return;
+        const threadData = this.storage.get(threadId);
+        if (!threadData)
+            return;
+        const existing = threadData.get(checkpointId);
+        if (!existing)
+            return;
+        // Merge writes into the checkpoint's pending_sends so interrupt() state is preserved
+        const pendingSends = existing.checkpoint.pending_sends || [];
+        for (const write of writes) {
+            pendingSends.push(write);
+        }
+        existing.checkpoint.pending_sends = pendingSends;
     }
     async deleteThread(threadId) {
         this.storage.delete(threadId);

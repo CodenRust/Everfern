@@ -139,7 +139,12 @@ export const createJudgeNode = (
       const hasToolOutput = responseContent.includes('```') ||
                            responseContent.includes('File:') ||
                            responseContent.includes('Output:') ||
-                           responseContent.includes('Result:');
+                           responseContent.includes('Result:') ||
+                           responseContent.includes('dashboard.html') ||
+                           responseContent.includes('.html') ||
+                           responseContent.includes('saved') ||
+                           responseContent.includes('created') ||
+                           responseContent.includes('generated');
 
       const hasCodeContent = responseContent.includes('def ') ||
                             responseContent.includes('function ') ||
@@ -149,10 +154,18 @@ export const createJudgeNode = (
                             responseContent.includes('let ') ||
                             responseContent.includes('var ');
 
+      const hasDataAnalysisContent = responseContent.toLowerCase().includes('analysis') ||
+                                   responseContent.toLowerCase().includes('chart') ||
+                                   responseContent.toLowerCase().includes('visualization') ||
+                                   responseContent.toLowerCase().includes('data') ||
+                                   responseContent.toLowerCase().includes('report') ||
+                                   responseContent.toLowerCase().includes('dashboard') ||
+                                   responseContent.toLowerCase().includes('insights');
+
       const isLongResponse = responseContent.trim().length > 100;
 
-      // Early completion for obvious cases
-      if (hasUserInteraction || hasToolOutput || hasCodeContent || isLongResponse) {
+      // Early completion for obvious cases - be more aggressive about completion
+      if (hasUserInteraction || hasToolOutput || hasCodeContent || hasDataAnalysisContent || isLongResponse) {
         runner.telemetry.info('Early completion detected — skipping AI evaluation');
         integrator.completeNode('judge', 'Early completion');
         return { taskPhase: 'executing' as const, shouldContinueIteration: false };
@@ -175,7 +188,9 @@ export const createJudgeNode = (
 REQUEST: "${originalRequest.slice(0, 200)}"
 RESPONSE: "${responseContent.slice(0, 300)}"
 
-Quick decision: "complete" if response has ANY value (asks user input, shows options, does work). "incomplete" ONLY if pure empty filler.
+Quick decision: "complete" if response has ANY substantive content, work done, files created, analysis provided, or meaningful output. "incomplete" ONLY if response is pure empty filler or error.
+
+Bias toward COMPLETION - if there's any doubt, choose "complete".
 
 JSON:
 {
@@ -209,7 +224,7 @@ JSON:
             throw new Error('Failed to parse judgment JSON');
           }
 
-          const isComplete = judgment.verdict === 'complete' && judgment.confidence > 0.5;
+          const isComplete = judgment.verdict === 'complete' && judgment.confidence > 0.3;
           runner.telemetry.info(`Judge fallback verdict: ${judgment.verdict} (${Math.round(judgment.confidence * 100)}%) — ${judgment.reasoning}`);
           eventQueue?.push({ type: 'thought', content: `⚖️ Judge: ${judgment.verdict} — ${judgment.reasoning}` });
 
@@ -225,8 +240,9 @@ JSON:
         }
       }
 
-      // Final heuristic: any response > 30 chars is complete
-      const isSubstantive = responseContent.trim().length > 30;
+      // Final heuristic: any response > 20 chars is complete (lowered threshold)
+      // Be more aggressive about completion to avoid unnecessary loops
+      const isSubstantive = responseContent.trim().length > 20;
       integrator.completeNode('judge', isSubstantive ? 'Heuristic: complete' : 'Heuristic: incomplete');
       return { taskPhase: 'executing' as const, shouldContinueIteration: !isSubstantive };
 

@@ -963,7 +963,43 @@ export default function ChatPage() {
                 const hasActiveUserQuestion = activeUserQuestionRef.current || activeUserQuestions.length > 0;
 
                 if (hasActiveHitl || hasActiveUserQuestion) {
-                    console.log(`[Frontend] ⏸️ Mission complete received but ${hasActiveHitl ? 'HITL' : 'user question'} is active - deferring completion`);
+                    console.log(`[Frontend] ⏸️ Mission complete received but ${hasActiveHitl ? 'HITL' : 'user question'} is active - committing message and deferring completion`);
+                    // Commit the accumulated message NOW so it doesn't disappear
+                    // when the HITL/question form is shown.
+                    if (!isMessageCommittedRef.current) {
+                        isMessageCommittedRef.current = true;
+                        const finalContent = streamingContentRef.current || "";
+                        const finalThought = streamingThoughtRef.current;
+                        const finalToolCalls = liveToolCallsRef.current.map(t =>
+                            t.status === 'running' ? { ...t, status: 'done' as const } : t
+                        );
+                        const durationMs = thinkingDuration?.duration;
+                        if (finalContent || finalThought || finalToolCalls.length > 0) {
+                            const assistantMsg: Message = {
+                                id: crypto.randomUUID(),
+                                role: "assistant",
+                                content: finalContent,
+                                thought: finalThought,
+                                thinkingDuration: durationMs,
+                                timestamp: new Date(),
+                                toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                            };
+                            setLiveToolCalls([]);
+                            setMessages(prev => {
+                                const prevMsg = prev[prev.length - 1];
+                                if (prev.length > 0 && prevMsg.role === 'assistant' &&
+                                    prevMsg.content === assistantMsg.content &&
+                                    prevMsg.thought === assistantMsg.thought &&
+                                    JSON.stringify(prevMsg.toolCalls) === JSON.stringify(assistantMsg.toolCalls)) {
+                                    return prev;
+                                }
+                                const final = [...prev, assistantMsg];
+                                saveConversation(final);
+                                return final;
+                            });
+                        }
+                    }
+                    setIsLoading(false);
                     // Don't set missionComplete yet - wait for HITL/question to be resolved
                     // The form submission handler will trigger completion after response is sent
                     return;
@@ -1013,7 +1049,9 @@ export default function ChatPage() {
                 if (hasActiveUserQuestion || hasActiveHitl) {
                     console.log(`[Frontend] ⏸️ ${hasActiveHitl ? 'HITL' : 'User question'} detected - committing accumulated content before pausing`);
                     setIsLoading(false);
-                    if (finalContent || finalThought || finalToolCalls.length > 0) {
+                    // Commit even if content is empty — the tool calls themselves are the message
+                    const hasAnything = finalContent || finalThought || finalToolCalls.length > 0;
+                    if (hasAnything) {
                         const assistantMsg: Message = {
                             id: crypto.randomUUID(),
                             role: "assistant",
@@ -1757,6 +1795,15 @@ export default function ChatPage() {
 
         console.log('[HITL] User decision:', approved ? 'approved' : 'rejected', 'sendMessage:', sendMessage);
 
+        // Persist the resolution to disk so it won't re-appear on next app launch
+        if (hitlRequest?.id && activeConversationId) {
+            (window as any).electronAPI?.history?.hitl?.resolve?.(
+                activeConversationId,
+                hitlRequest.id,
+                approved
+            ).catch((e: any) => console.warn('[HITL] Failed to persist resolution:', e));
+        }
+
         // Clear the HITL approval UI first
         setShowHitlApproval(false);
         setHitlRequest(null);
@@ -1903,6 +1950,20 @@ export default function ChatPage() {
                         } catch (e) { }
                     }
                     checkForPlan(id);
+
+                    // ── Restore pending HITL form if one was active when app closed ──
+                    try {
+                        const pendingHitl = await (window as any).electronAPI?.history?.hitl?.getPending?.(id);
+                        if (pendingHitl?.request) {
+                            console.log('[HITL Restore] Found pending HITL request on load:', pendingHitl.request.id);
+                            (window as any).__activeHitl = true;
+                            setHitlRequest(pendingHitl.request);
+                            setShowHitlApproval(true);
+                            setCurrentNode('hitl_approval');
+                        }
+                    } catch (hitlErr) {
+                        console.warn('[HITL Restore] Failed to check for pending HITL:', hitlErr);
+                    }
                 }
             }
         } catch (err) { console.error("Failed to load conversation:", err); }

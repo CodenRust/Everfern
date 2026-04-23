@@ -64,7 +64,7 @@ const buildGraph = (runner, toolDefs, tools) => {
     // This prevents reusing a cached graph when tool availability changes
     const toolNames = toolDefs.map(t => t.name).sort().join(',');
     const toolNamesHash = require('crypto').createHash('md5').update(toolNames).digest('hex').substring(0, 8);
-    const cacheKey = `graph_v4_specialized_${toolDefs.length}_${toolNamesHash}`;
+    const cacheKey = `graph_v7_specialized_${toolDefs.length}_${toolNamesHash}`;
     if (graphCache.has(cacheKey)) {
         console.log(`[Graph] 📦 Using CACHED execution graph (key: ${cacheKey})`);
         console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
@@ -148,8 +148,26 @@ const buildGraph = (runner, toolDefs, tools) => {
             runner.telemetry.info('HITL approval required — ending turn, user must respond');
             if (missionTracker)
                 missionTracker.completeStep('step:hitl');
-            // Pause execution and wait for user response via Command({ resume: ... })
-            const answer = (0, langgraph_1.interrupt)(approvalRequest);
+            // Use interrupt() to pause the graph and wait for user response.
+            // When the user approves/rejects, the runner resumes with Command({ resume: answer }).
+            let answer;
+            try {
+                answer = (0, langgraph_1.interrupt)(approvalRequest);
+            }
+            catch (interruptErr) {
+                // If interrupt throws (e.g. checkpointer doesn't support it), route to END
+                // to prevent infinite recursion. The user's next message will restart the flow.
+                runner.telemetry.info('HITL interrupt() threw — ending graph turn to prevent recursion');
+                return {
+                    taskPhase: 'planning',
+                    hitlApprovalResult: {
+                        approved: null, // null → routes to END
+                        response: 'Waiting for user approval',
+                        reasoning: 'HITL paused — awaiting user response',
+                    },
+                    completionSignal: null,
+                };
+            }
             const isApproved = String(answer).includes('[HITL_APPROVED]');
             runner.telemetry.info(`HITL response received: ${isApproved ? 'APPROVED' : 'REJECTED'}`);
             return {
@@ -165,11 +183,12 @@ const buildGraph = (runner, toolDefs, tools) => {
         catch (error) {
             if (missionTracker)
                 missionTracker.failStep('step:hitl', error instanceof Error ? error.message : String(error));
+            // Route to END to prevent infinite recursion when interrupt fails
             return {
                 taskPhase: 'planning',
                 hitlApprovalResult: {
-                    approved: false,
-                    response: 'Error occurred during approval process',
+                    approved: null, // null → routes to END in hitl_approval conditional edges
+                    response: 'HITL interrupted or failed',
                     reasoning: `HITL approval failed: ${error instanceof Error ? error.message : String(error)}`,
                 },
             };
@@ -436,6 +455,16 @@ If a specialized agent failed to complete a step, identify the issue and use you
                 return (role === 'user' || role === 'human') && content.includes('[PLAN_APPROVED]');
             });
             if (isPlanApproved) {
+                return 'multi_tool_orchestrator';
+            }
+            // Bypass HITL for safe internal bookkeeping tools — these never need user approval
+            const SAFE_TOOLS = new Set([
+                'update_plan_step', 'create_plan', 'todo_write',
+                'memory_save', 'memory_search', 'read_file', 'view_file',
+                'list_directory', 'execution_plan',
+            ]);
+            const allSafe = (state.pendingToolCalls || []).every((tc) => SAFE_TOOLS.has(tc.name));
+            if (allSafe) {
                 return 'multi_tool_orchestrator';
             }
             return state.validationResult?.isHighRisk ? 'hitl_approval' : 'multi_tool_orchestrator';

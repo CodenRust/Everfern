@@ -215,6 +215,11 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         load: (id) => electron_1.ipcRenderer.invoke('history:load', id),
         save: (conv) => electron_1.ipcRenderer.invoke('history:save', conv),
         delete: (id) => electron_1.ipcRenderer.invoke('history:delete', id),
+        // HITL persistence — check for pending approval requests on load
+        hitl: {
+            getPending: (conversationId) => electron_1.ipcRenderer.invoke('hitl:get-pending', conversationId),
+            resolve: (conversationId, requestId, approved) => electron_1.ipcRenderer.invoke('hitl:resolve', conversationId, requestId, approved),
+        },
     },
     // ── Memory ───────────────────────────────────────────────────────
     memory: {

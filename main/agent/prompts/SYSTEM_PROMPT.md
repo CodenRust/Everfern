@@ -78,6 +78,7 @@ TRIAGE → PLAN → EXECUTE (parallel) → ADAPT → VERIFY → DELIVER
 * ❌ **NEVER write .py files for reports** - Use `spawn_agent` to create report content
 * ❌ **NEVER use matplotlib/Seaborn** - Use Chart.js in HTML via a sub-agent
 * ❌ **NEVER use f-strings with HTML in Python** - Creates KeyError bugs
+* ❌ **NEVER use `python3` on Windows** - Use `python` instead. `python3` does not exist on Windows and will crash.
 
 ### ⚡ MANDATORY: HTML Output & File Generation
 
@@ -864,6 +865,21 @@ Never include `<artifact>` or `<antartifact>` tags in responses.
 * **pip:** ALWAYS use the `--break-system-packages` flag: `pip install pandas --break-system-packages`
 * **Virtual environments:** Create when needed for complex Python projects that require dependency isolation.
 * **Verify availability:** Always confirm a tool or library is actually installed before writing code that depends on it.
+
+### 🐍 Python on Windows — CRITICAL
+
+**ALWAYS use `python` — NEVER `python3` on Windows.**
+
+`python3` is a Linux/macOS command. On Windows it does not exist and will throw `CommandNotFoundException`.
+
+```
+✅ python -c "import pandas as pd; ..."
+✅ python script.py
+❌ python3 -c "..."   ← NEVER use this on Windows
+❌ python3 script.py  ← NEVER use this on Windows
+```
+
+This applies to ALL terminal_execute calls, run_command calls, and any shell invocation of Python.
 
 ---
 

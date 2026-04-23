@@ -43,6 +43,7 @@ const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
 const ai_client_1 = require("../../lib/ai-client");
 const system_prompt_1 = require("./system-prompt");
+const history_1 = require("../../store/history");
 const graph_1 = require("./graph");
 const skills_loader_1 = require("./skills-loader");
 const tools_manager_1 = require("./tools_manager");
@@ -471,6 +472,29 @@ class AgentRunner {
         this.telemetry.updateSpinner('Compiling system messages...');
         console.log('[AgentRunner] 🔄 Building system messages...');
         const { messages: initialMessages } = (0, system_prompt_1.buildSystemMessages)(history, userInput, platform, conversationId, [], preloadedPrompt);
+        // Bug 2 Fix: Load full conversation history including tool calls into initialMessages
+        const chatHistoryStore = new history_1.ChatHistoryStore();
+        try {
+            const fullConversation = await chatHistoryStore.load(convId);
+            if (fullConversation && fullConversation.messages.length > 0) {
+                console.log(`[AgentRunner] 🔄 Reconstructing full conversation history (${fullConversation.messages.length} messages)...`);
+                // Reconstruct full message history including tool calls/results
+                const priorMessages = reconstructFullHistory(fullConversation.messages, userInput);
+                // Apply context window cap: limit to most recent 20 turns to prevent unbounded growth
+                const maxMessages = 20;
+                const limitedPriorMessages = priorMessages.slice(-maxMessages);
+                // Replace initialMessages with: [system] + priorMessages + [new user msg]
+                const systemMessage = initialMessages[0]; // Extract system message
+                const newUserMessage = initialMessages[initialMessages.length - 1]; // Extract new user message
+                initialMessages.length = 0; // Clear array
+                initialMessages.push(systemMessage, ...limitedPriorMessages, newUserMessage);
+                console.log(`[AgentRunner] ✅ Full conversation history reconstructed (${limitedPriorMessages.length} prior messages)`);
+            }
+        }
+        catch (err) {
+            console.warn('[AgentRunner] Failed to load conversation history:', err);
+            // Continue with original initialMessages if history loading fails
+        }
         console.log('[AgentRunner] ✅ System messages built');
         await new Promise(resolve => setImmediate(resolve));
         this.telemetry.updateSpinner('Building execution graph...');
@@ -639,3 +663,55 @@ class AgentRunner {
     }
 }
 exports.AgentRunner = AgentRunner;
+/**
+ * Reconstruct full conversation history from stored ChatMessage entries.
+ * Converts stored toolCalls back into the interleaved assistant+tool_calls and tool result format.
+ * Skips the very last user message (it will be appended as userInput).
+ */
+function reconstructFullHistory(storedMessages, currentUserInput) {
+    const reconstructed = [];
+    // Skip the very last user message if it matches the current input
+    const currentInputText = typeof currentUserInput === 'string' ? currentUserInput : JSON.stringify(currentUserInput);
+    let messagesToProcess = storedMessages;
+    // Remove the last user message if it matches current input (avoid duplication)
+    if (storedMessages.length > 0) {
+        const lastMsg = storedMessages[storedMessages.length - 1];
+        if (lastMsg.role === 'user' && lastMsg.content === currentInputText) {
+            messagesToProcess = storedMessages.slice(0, -1);
+        }
+    }
+    for (const msg of messagesToProcess) {
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+            // This is an assistant message with tool calls
+            // First emit the assistant message with tool_calls array
+            reconstructed.push({
+                role: 'assistant',
+                content: msg.content || '',
+                tool_calls: msg.toolCalls.map((tc) => ({
+                    id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                    type: 'function',
+                    function: {
+                        name: tc.toolName,
+                        arguments: JSON.stringify(tc.args || {})
+                    }
+                }))
+            });
+            // Then emit individual tool result messages
+            for (const tc of msg.toolCalls) {
+                reconstructed.push({
+                    role: 'tool',
+                    tool_call_id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                    content: JSON.stringify(tc.result || { success: false, output: 'No result available' })
+                });
+            }
+        }
+        else {
+            // Plain user/assistant text message - emit as-is
+            reconstructed.push({
+                role: msg.role,
+                content: msg.content
+            });
+        }
+    }
+    return reconstructed;
+}

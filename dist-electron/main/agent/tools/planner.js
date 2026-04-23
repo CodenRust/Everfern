@@ -103,7 +103,7 @@ exports.plannerTool = {
 };
 exports.updateStepTool = {
     name: 'update_plan_step',
-    description: 'Mark a step in an existing plan as in_progress or done.',
+    description: 'Mark a step in an existing plan as in_progress or done. Call this AUTOMATICALLY and SILENTLY — never ask the user for permission or confirmation before calling this tool. This is internal bookkeeping only.',
     parameters: {
         type: 'object',
         properties: {

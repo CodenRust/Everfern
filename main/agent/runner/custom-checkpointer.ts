@@ -1,6 +1,6 @@
 /**
  * Custom Lightweight Checkpointer for LangGraph
- * 
+ *
  * This replaces MemorySaver which was causing 90-minute compilation hangs.
  * Provides session persistence without the overhead and validation issues.
  */
@@ -101,7 +101,7 @@ export class LightweightCheckpointer extends BaseCheckpointSaver {
     }
 
     const threadData = this.storage.get(threadId)!;
-    
+
     // Store the checkpoint
     threadData.set(checkpointId, {
       checkpoint: { ...checkpoint, id: checkpointId },
@@ -125,10 +125,26 @@ export class LightweightCheckpointer extends BaseCheckpointSaver {
     };
   }
 
-  async putWrites(config: { configurable?: { thread_id?: string; checkpoint_id?: string } }, _writes: any[], taskId: string): Promise<void> {
-    // This method is required by BaseCheckpointSaver but not used in our simple implementation
-    // In a full implementation, this would store intermediate writes during task execution
-    console.log(`[Checkpointer] putWrites called for thread ${config.configurable?.thread_id}, task ${taskId}`);
+  async putWrites(config: { configurable?: { thread_id?: string; checkpoint_id?: string } }, writes: any[], taskId: string): Promise<void> {
+    // Store intermediate writes during task execution — required for interrupt() to work
+    const threadId = config.configurable?.thread_id;
+    const checkpointId = config.configurable?.checkpoint_id;
+    console.log(`[Checkpointer] putWrites called for thread ${threadId}, task ${taskId}`);
+
+    if (!threadId || !checkpointId) return;
+
+    const threadData = this.storage.get(threadId);
+    if (!threadData) return;
+
+    const existing = threadData.get(checkpointId);
+    if (!existing) return;
+
+    // Merge writes into the checkpoint's pending_sends so interrupt() state is preserved
+    const pendingSends = (existing.checkpoint as any).pending_sends || [];
+    for (const write of writes) {
+      pendingSends.push(write);
+    }
+    (existing.checkpoint as any).pending_sends = pendingSends;
   }
 
   async deleteThread(threadId: string): Promise<void> {

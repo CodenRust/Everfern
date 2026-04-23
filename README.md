@@ -89,6 +89,16 @@ EverFern uses a dual-process architecture optimized for AI workloads:
     └──────┘    └──────┘    └──────┘
 ```
 
+**📖 [Complete Architecture Documentation](docs/architecture/README.md)**
+
+Comprehensive technical documentation covering:
+- **System Overview** - High-level architecture and design principles
+- **Agent System** - Graph-based execution engine with specialized agents
+- **Tool System** - 30+ built-in tools and MCP integration
+- **Integration System** - Multi-platform bot support (Discord, Telegram)
+- **IPC Communication** - Type-safe inter-process communication
+- **Security Model** - Privacy-first architecture and permission system
+
 ### Agent Execution Flow
 
 The agent processes requests through a sophisticated state machine:

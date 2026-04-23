@@ -103,3 +103,4 @@ plt.show()
 - **Privacy**: If handling sensitive files, ensure absolute paths are handled carefully and not leaked in thought blocks if not necessary.
 - **Visuals**: When creating plots, use high-DPI (300) settings for professional results.
 - **Windows Paths**: Always use absolute paths with `r'...'` (raw strings) to avoid escape character issues.
+- **Windows Python**: ALWAYS use `python` — NEVER `python3`. The command `python3` does not exist on Windows.
