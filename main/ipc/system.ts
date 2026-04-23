@@ -194,4 +194,28 @@ export function registerSystemHandlers() {
   ipcMain.handle('memory:save-direct', async (_event, content: string, metadata?: string) => {
     return memorySaveTool.execute({ content, metadata });
   });
+
+  ipcMain.handle('system:wipe-account', async () => {
+    const everfernDir = path.join(os.homedir(), '.everfern');
+    try {
+      // Wipe .everfern directory
+      if (fs.existsSync(everfernDir)) {
+        fs.rmSync(everfernDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(everfernDir, { recursive: true });
+
+      // Also wipe the SQLite database (chat history lives here, not in .everfern)
+      const userDataPath = app.getPath('userData');
+      const dbDir = path.join(userDataPath, 'memory');
+      if (fs.existsSync(dbDir)) {
+        fs.rmSync(dbDir, { recursive: true, force: true });
+      }
+
+      console.log('[IPC] system:wipe-account: .everfern and SQLite DB wiped');
+      return { success: true };
+    } catch (err: any) {
+      console.error('[IPC] system:wipe-account error:', err);
+      return { success: false, error: err.message };
+    }
+  });
 }

@@ -53,6 +53,9 @@ export type StreamEvent =
   | { type: 'parallel_group_end'; groupIndex: number; durationMs: number }
   | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number }
   | { type: 'done' }
+  | { type: 'tool_call_start'; index: number; toolName: string }
+  | { type: 'tool_call_chunk'; index: number; argumentsDelta: string }
+  | { type: 'tool_call_complete'; index: number; toolName: string; arguments: Record<string, unknown> }
   | BaseStreamEvent; // Fallback for other event types
 
 // Type guard for mission_complete events
@@ -117,6 +120,11 @@ export const GraphState = Annotation.Root({
   // to explain why it believes the mission should end
   completionSignal: Annotation<{
     reason: 'task_complete' | 'waiting_for_user_input' | 'needs_hitl' | 'cannot_proceed';
+    explanation: string;
+  } | null>(),
+  // Routing decision — brain sets this to route to specialized agents
+  routingDecision: Annotation<{
+    decision: 'continue_brain' | 'route_coding' | 'route_data_analyst' | 'route_computer_use' | 'route_web_explorer' | 'complete_task';
     explanation: string;
   } | null>(),
   // HITL Approval State

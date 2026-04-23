@@ -186,6 +186,15 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         removeSubAgentProgressListener: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:sub-agent-progress');
         },
+        onToolCallStart: (cb) => {
+            electron_1.ipcRenderer.on('acp:tool-call-start', (_e, data) => cb(data));
+        },
+        onToolCallChunk: (cb) => {
+            electron_1.ipcRenderer.on('acp:tool-call-chunk', (_e, data) => cb(data));
+        },
+        onToolCallComplete: (cb) => {
+            electron_1.ipcRenderer.on('acp:tool-call-complete', (_e, data) => cb(data));
+        },
         removeStreamListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:stream-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:thought');
@@ -207,6 +216,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:hitl-request');
             electron_1.ipcRenderer.removeAllListeners('acp:hitl-response-processed');
             electron_1.ipcRenderer.removeAllListeners('acp:sub-agent-progress');
+            electron_1.ipcRenderer.removeAllListeners('acp:tool-call-start');
+            electron_1.ipcRenderer.removeAllListeners('acp:tool-call-chunk');
+            electron_1.ipcRenderer.removeAllListeners('acp:tool-call-complete');
         },
     },
     // ── Chat History ───────────────────────────────────────────────

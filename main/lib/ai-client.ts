@@ -34,7 +34,7 @@ class AIClientPool {
   get(config: AIClientConfig): AIClient {
     const key = this.getPoolKey(config);
     const entries = this.pool.get(key) || [];
-    
+
     // Find available client
     const available = entries.find(entry => !entry.inUse);
     if (available) {
@@ -42,7 +42,7 @@ class AIClientPool {
       available.lastUsed = Date.now();
       return available.client;
     }
-    
+
     // Create new client if pool not full
     if (entries.length < this.maxPoolSize) {
       const client = new AIClient(config);
@@ -55,7 +55,7 @@ class AIClientPool {
       this.pool.set(key, entries);
       return client;
     }
-    
+
     // Pool full, create temporary client
     return new AIClient(config);
   }
@@ -73,7 +73,7 @@ class AIClientPool {
   cleanup(): void {
     const now = Date.now();
     for (const [key, entries] of this.pool.entries()) {
-      const active = entries.filter(entry => 
+      const active = entries.filter(entry =>
         entry.inUse || (now - entry.lastUsed) < this.maxIdleTime
       );
       if (active.length === 0) {
@@ -134,6 +134,7 @@ export interface ChatRequest {
   /** Nvidia guided_json: pass a JSON schema object to force structured output. */
   guidedJson?: Record<string, unknown>;
   onStreamChunk?: (chunk: string) => void;
+  onToolCallChunk?: (index: number, toolName: string, argumentsDelta: string) => void;
   /** Gemini native: user response to a safety_decision or confirmation prompt */
   userConfirmation?: 'ACT' | 'STAY_ON_NOMINAL';
 }
@@ -265,7 +266,7 @@ export class AIClient {
     if (this.config.provider === 'nvidia') {
       return this._openAISDKChat(request);
     }
-    
+
     switch (this.config.provider) {
       case 'anthropic': return this._anthropicChat(request);
       case 'ollama': return this._ollamaChat(request);
@@ -283,7 +284,7 @@ export class AIClient {
       yield* this._openAISDKStream(request);
       return;
     }
-    
+
     switch (this.config.provider) {
       case 'anthropic': yield* this._anthropicStream(request); break;
       case 'ollama': yield* this._ollamaStream(request); break;
@@ -300,7 +301,7 @@ export class AIClient {
     }
 
     const isStreaming = !!req.onStreamChunk;
-    
+
     // Map messages to OpenAI format
     const messages: any[] = req.messages.flatMap(m => {
       let content: string | any[] = m.content;
@@ -649,11 +650,11 @@ export class AIClient {
         if (url.includes('nvidia') || i > 0) {
           console.log(`[AIClient] Fetching: ${url} (Attempt ${i + 1}/${maxRetries + 1})`);
         }
-        
+
         // Create a new AbortController for each attempt with timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout per request
-        
+
         const enhancedOptions: RequestInit = {
           ...options,
           signal: controller.signal,
@@ -667,11 +668,11 @@ export class AIClient {
           // Add keepalive flag for Node.js fetch
           keepalive: true
         };
-        
+
         try {
           const res = await fetch(url, enhancedOptions);
           clearTimeout(timeoutId);
-          
+
           if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
             if (i < maxRetries) {
               const jitter = Math.random() * 500;
@@ -689,14 +690,14 @@ export class AIClient {
         }
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        
+
         // Check if it's an abort error (timeout)
         if (lastError.name === 'AbortError') {
           console.warn(`[AIClient] Request timeout after 30s. Retrying...`);
         } else {
           console.warn(`[AIClient] Network error: ${lastError.message}. Retrying in ${delay}ms...`);
         }
-        
+
         if (i < maxRetries) {
           await new Promise(r => setTimeout(r, delay));
           delay = Math.min(delay * 2, 16000); // Cap at 16s max delay
@@ -959,6 +960,9 @@ export class AIClient {
                 if (tc.id) entry.id = tc.id;
                 if (tc.function?.name) entry.name += tc.function.name;
                 if (tc.function?.arguments) entry.arguments += tc.function.arguments;
+                if (req.onToolCallChunk && tc.function?.arguments) {
+                  req.onToolCallChunk(tc.index, toolCallsMap[tc.index].name, tc.function.arguments);
+                }
               }
             }
           }
@@ -1423,6 +1427,11 @@ export class AIClient {
           }
           if (d.type === 'content_block_delta' && d.delta?.type === 'input_json_delta') {
             if (toolCallsMap[d.index]) toolCallsMap[d.index].arguments += d.delta.partial_json;
+            if (req.onToolCallChunk && d.delta.partial_json) {
+              const toolIndex = d.index;
+              const currentToolName = toolCallsMap[toolIndex]?.name ?? '';
+              req.onToolCallChunk(toolIndex, currentToolName, d.delta.partial_json);
+            }
           }
           if (d.type === 'message_delta' && d.delta?.stop_reason) {
             finishReason = d.delta.stop_reason;
@@ -1539,7 +1548,7 @@ export class AIClient {
       options: { temperature: req.temperature ?? this.config.temperature },
     };
     if (req.responseFormat === 'json') body['format'] = 'json';
-    
+
     // Pass tools to Ollama if provided
     if (req.tools && req.tools.length > 0) {
       body['tools'] = req.tools.map(t => ({
@@ -1605,7 +1614,7 @@ export class AIClient {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       lineBuffer += dec.decode(value, { stream: true });
       const lines = lineBuffer.split('\n');
       // Keep the last partial line in the buffer
@@ -1619,12 +1628,12 @@ export class AIClient {
             fullContent += d.message.content;
             req.onStreamChunk!(d.message.content);
           }
-          
+
           if (d.message?.tool_calls) {
             for (let i = 0; i < d.message.tool_calls.length; i++) {
               const tc = d.message.tool_calls[i];
               if (!toolCallsMap[i]) {
-                toolCallsMap[i] = { 
+                toolCallsMap[i] = {
                   id: `ollama-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
                   name: tc.function?.name || tc.name || '',
                   arguments: ''
@@ -1632,8 +1641,8 @@ export class AIClient {
               }
               const entry = toolCallsMap[i];
               if (tc.function?.arguments) {
-                entry.arguments += typeof tc.function.arguments === 'string' 
-                  ? tc.function.arguments 
+                entry.arguments += typeof tc.function.arguments === 'string'
+                  ? tc.function.arguments
                   : JSON.stringify(tc.function.arguments);
               }
             }
@@ -1651,7 +1660,7 @@ export class AIClient {
       let args = {};
       try {
         args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
-      } catch (e) { 
+      } catch (e) {
         args = tc.arguments;
       }
       return { id: tc.id, name: tc.name, arguments: args as Record<string, any> };
@@ -1707,12 +1716,23 @@ export class AIClient {
       for (const line of lines) {
         try {
           const d = JSON.parse(line);
-          yield { 
-            id, 
-            delta: d.message?.content ?? '', 
+          if (d.message?.tool_calls) {
+            for (let i = 0; i < d.message.tool_calls.length; i++) {
+              const tc = d.message.tool_calls[i];
+              const argsDelta = tc.function?.arguments
+                ? (typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments))
+                : '';
+              if (req.onToolCallChunk && argsDelta) {
+                req.onToolCallChunk(i, tc.function?.name || tc.name || '', argsDelta);
+              }
+            }
+          }
+          yield {
+            id,
+            delta: d.message?.content ?? '',
             toolCalls: d.message?.tool_calls,
-            done: d.done ?? false, 
-            model: d.model 
+            done: d.done ?? false,
+            model: d.model
           };
           if (d.done) return;
         } catch { /* skip */ }

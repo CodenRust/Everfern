@@ -119,26 +119,26 @@ Then use `fsWrite` to create HTML directly:
 When creating dashboards or comprehensive reports:
 
 ### HTML Structure Requirements
-1. **Generate standalone HTML** file using `fsWrite` tool
-2. **MANDATORY CDN links** in the `<head>` section:
-   - **Tailwind CSS**: `<script src="https://cdn.tailwindcss.com"></script>`
-   - **Google Fonts Figtree**: `<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&display=swap" rel="stylesheet">`
-   - **Chart.js**: `<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>`
+1. **Generate body content ONLY** — pass to `create_artifact` tool (NO `<!DOCTYPE>`, `<html>`, `<head>`, or `<body>` tags)
+2. **MANDATORY CDN links are auto-injected** by `create_artifact` — DO NOT include them yourself:
+   - Tailwind CSS ✅ already injected
+   - Google Fonts Figtree ✅ already injected
+   - Chart.js ✅ already injected (available as `Chart` global)
 
 ### Styling Requirements
-3. **Use Tailwind CSS classes** for ALL styling (no custom CSS)
-4. **MANDATORY font-family**: `<body class="font-['Figtree']">` or `style="font-family: 'Figtree', sans-serif;"`
-5. **Responsive grid layout**: Use Tailwind classes `grid-cols-1 md:grid-cols-2 lg:grid-cols-3`
-6. **Navigation sidebar**: Use Tailwind classes with smooth scrolling
+3. **Use Tailwind CSS classes for ALL styling** — no inline `style=""`, no `<style>` blocks
+4. **MANDATORY font**: Figtree is already applied to `<body>` — no extra font setup needed
+5. **Responsive grid layout**: Use Tailwind classes `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6`
+6. **Dark theme**: Use `bg-gray-900` / `bg-gray-800` / `text-white` / `text-gray-300` for a professional look
 
 ### Dashboard Structure
-7. **Template structure**:
-   - `<!DOCTYPE html>` with viewport meta tag
-   - MANDATORY CDN links: Tailwind CSS, Google Fonts Figtree, and Chart.js
-   - Tailwind responsive classes (mobile-first design)
-   - Navigation sidebar with Tailwind classes and smooth scrolling
-   - Chart containers with unique IDs and Tailwind styling
-   - JavaScript to initialize all Chart.js charts
+7. **Template structure** (body content only — passed to `create_artifact`):
+   - Outer wrapper: `<div class="min-h-screen bg-gray-900 text-white p-8">`
+   - Header with title and summary stats
+   - Responsive chart grid: `<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">`
+   - Chart containers: `<div class="bg-gray-800 rounded-xl p-6"><canvas id="myChart"></canvas></div>`
+   - Data tables with Tailwind table classes
+   - All Chart.js initialization in the `js` arg of `create_artifact`
 
 8. **Content organization**:
    - Header with executive summary

@@ -4,8 +4,7 @@ import { ToolDefinition } from '../../../lib/ai-client';
 import { runAgentStep } from '../services/agent-runtime';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { loadPrompt } from '../../../lib/prompt-sync';
 
 export const createCodingSpecialistNode = (
   runner: AgentRunner,
@@ -25,12 +24,10 @@ export const createCodingSpecialistNode = (
     // Emit coding specialist active event for frontend
     eventQueue?.push({ type: 'thought', content: '\n💻 Coding Specialist: Analyzing source code and preparing implementation...' });
 
-    // Load system prompt from file
-    let systemPrompt = '';
-    try {
-      systemPrompt = await readFile(join(process.cwd(), 'main/agent/prompts/coding-specialist.md'), 'utf-8');
-    } catch (error) {
-      console.warn('Failed to load coding specialist prompt, using fallback');
+    // Load system prompt from synchronized location
+    let systemPrompt = loadPrompt('coding-specialist.md');
+    if (!systemPrompt) {
+      console.warn('[CodingSpecialist] Failed to load prompt, using fallback');
       systemPrompt = `You are the EverFern Coding Specialist.
 Your goal is to write, debug, and optimize code with extreme precision.
 Use your tools (write, edit, run_command) to implement the requested features.

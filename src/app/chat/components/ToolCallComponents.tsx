@@ -13,7 +13,7 @@ import {
     Cog6ToothIcon,
     Cog8ToothIcon,
 } from "@heroicons/react/24/outline";
-import type { ToolCallDisplay } from '../types/index';
+import type { ToolCallDisplay, LiveToolCall } from '../types/index';
 import { MarkdownRenderer } from './MarkdownComponents';
 import { DiffViewer } from '@/components/diff-viewer';
 import { SyntaxHighlighter } from '../ArtifactsPanel';
@@ -166,11 +166,11 @@ const ToolCallTag = ({ tc, isLast }: { tc: ToolCallDisplay; isLast?: boolean }) 
                                     </div>
                                 )}
                                 {(tc.toolName === 'read' || tc.toolName === 'read_file' || tc.toolName === 'consult_skill' || tc.toolName === 'view_skill' || tc.toolName === 'skill_detected') || tc.output.includes('---') || tc.output.startsWith('#') ? (
-                                    <div style={{ padding: '10px 14px', backgroundColor: '#ffffff' }}>
+                                    <div className="px-[14px] py-[10px] bg-white">
                                         <MarkdownRenderer content={tc.output} />
                                     </div>
                                 ) : (
-                                    <pre style={{ margin: 0, padding: '10px 14px', fontSize: 11.5, fontFamily: "'JetBrains Mono', 'Fira Code', monospace", lineHeight: 1.7, color: '#6b7280', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                                    <pre className="m-0 px-[14px] py-[10px] text-[11.5px] font-mono leading-[1.7] text-[#6b7280] overflow-x-auto whitespace-pre-wrap">
                                         {tc.output}
                                     </pre>
                                 )}
@@ -190,18 +190,6 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
     const isError = tc.status === 'error';
     const isTerminal = tc.toolName === 'run_command' || tc.toolName === 'bash' || tc.toolName === 'run_terminal';
     const cmdStr = (tc.args?.command || tc.args?.CommandLine || tc.args?.commandLine) as string | undefined;
-
-    // Enhanced debugging for terminal tools
-    if (isTerminal) {
-        console.log(`[ToolCallRow] Terminal tool ${tc.toolName}:`, {
-            args: tc.args,
-            cmdStr,
-            output: tc.output,
-            status: tc.status,
-            hasArgs: !!tc.args,
-            hasOutput: !!tc.output
-        });
-    }
 
     const isLs = isTerminal && typeof cmdStr === 'string' && cmdStr.trim().startsWith('ls');
     const isRead = tc.toolName === 'read_file' || tc.toolName === 'read' || tc.toolName === 'view_file' || tc.toolName === 'cat';
@@ -228,18 +216,16 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
         displayOutput = displayOutput
             .replace(/in terminal \[.*?\] Session: .*?\n+/ig, '')
             .replace(/\(Terminal session remains active\. You can run more commands in this session\.\)/ig, '')
-            .replace(/^>>.*?\n+/gm, '') // Remove the prompt echo lines if they start with >>
+            .replace(/^>>.*?\n+/gm, '')
             .trim();
     }
     const hasOutput = !!displayOutput && !isRunning;
 
-    // Parse potential search arguments to display as pills
     const queries: string[] = Array.isArray(tc.args?.queries) ? tc.args.queries : (typeof tc.args?.query === 'string' ? [tc.args.query] : []);
     const docs: string[] = Array.isArray(tc.args?.docs) ? tc.args.docs : [];
     const isSearchTool = tc.toolName === 'web_search' || tc.toolName === 'search_docs' || tc.label?.toLowerCase().includes('search');
     const hasSearchPills = isSearchTool && (queries.length > 0 || docs.length > 0);
 
-    // Ensure expanded by default for this specific search demo if it's not running
     useEffect(() => {
         if (hasSearchPills && hasOutput) setExpanded(true);
     }, [hasSearchPills, hasOutput]);
@@ -247,13 +233,13 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
     const statusIcon = isRunning ? (
         <Loader size={14} strokeWidth={2} className="text-emerald-500" />
     ) : isError ? (
-        <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+        <div className="w-4 h-4 rounded-full bg-[#ef4444] flex items-center justify-center z-1">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3">
                 <path d="M18 6L6 18M6 6l12 12" />
             </svg>
         </div>
     ) : (
-        <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+        <div className="w-4 h-4 rounded-full bg-[#10b981] flex items-center justify-center z-1">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 6L9 17l-5-5" />
             </svg>
@@ -266,50 +252,32 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            style={{ display: 'flex', flexDirection: 'column', position: 'relative', paddingBottom: isLast ? 0 : 24 }}
+            className={`flex flex-col relative ${isLast ? '' : 'pb-6'}`}
         >
-            {/* Vertical branch line for this segment */}
+            {/* Vertical branch line */}
             {!isLast && (
-                <div style={{ position: 'absolute', left: 7, top: 20, bottom: -4, width: 2, backgroundColor: '#e5e7eb', zIndex: 0 }} />
+                <div className="absolute left-[7px] top-5 bottom-[-4px] w-0.5 bg-[#e5e7eb] z-0" />
             )}
 
             <div
                 onClick={() => hasOutput && setExpanded(!expanded)}
-                style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    cursor: hasOutput ? 'pointer' : 'default',
-                    position: 'relative', zIndex: 1
-                }}
+                className={`flex items-center gap-3 relative z-1 ${hasOutput ? 'cursor-pointer' : 'cursor-default'}`}
             >
                 {/* Status Icon */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, backgroundColor: '#ffffff' }}>
+                <div className="flex items-center justify-center w-4 h-4 bg-white">
                     {statusIcon}
                 </div>
 
                 {/* Title */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, overflow: 'hidden' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', color: '#6b7280' }}>{iconToDisplay}</span>
-                    <div style={{ flex: 1, overflow: 'hidden' }}>
-                        <span style={{
-                            fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            fontFamily: "'Matter', sans-serif", fontWeight: 500,
-                            color: isError ? '#ef4444' : '#111111',
-                            letterSpacing: '-0.01em',
-                            display: 'block'
-                        }}>
+                <div className="flex items-center gap-2 flex-1 overflow-hidden">
+                    <span className="flex items-center text-[#6b7280]">{iconToDisplay}</span>
+                    <div className="flex-1 overflow-hidden">
+                        <span className={`text-[15px] overflow-hidden text-ellipsis whitespace-nowrap font-medium tracking-[-0.01em] block ${isError ? 'text-[#ef4444]' : 'text-[#111111]'}`}
+                            style={{ fontFamily: "'Matter', sans-serif" }}>
                             {tc.displayName || tc.label || tc.toolName}
                         </span>
-                        {/* Show command preview for terminal tools */}
                         {isTerminal && cmdStr && (
-                            <div style={{
-                                fontSize: 12,
-                                color: '#6b7280',
-                                fontFamily: "'JetBrains Mono', monospace",
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                marginTop: 2
-                            }}>
+                            <div className="text-xs text-[#6b7280] font-mono overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
                                 $ {cmdStr.length > 60 ? cmdStr.substring(0, 57) + '...' : cmdStr}
                             </div>
                         )}
@@ -320,7 +288,7 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                 {hasOutput && (
                     <motion.span
                         animate={{ rotate: expanded ? 0 : 90 }}
-                        style={{ display: 'flex', flexShrink: 0, color: '#9ca3af' }}
+                        className="flex shrink-0 text-[#9ca3af]"
                     >
                         <ChevronUpIcon width={14} height={14} strokeWidth={2.5} />
                     </motion.span>
@@ -328,17 +296,11 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
 
                 {/* Output indicator for terminal tools */}
                 {isTerminal && hasOutput && !expanded && (
-                    <div style={{
-                        fontSize: 11,
-                        color: '#10b981',
-                        backgroundColor: '#dcfce7',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        fontWeight: 500
-                    }}>
+                    <div className="text-[11px] text-[#10b981] bg-[#dcfce7] px-1.5 py-0.5 rounded font-medium">
                         output
                     </div>
                 )}
+
             </div>
 
             <AnimatePresence>
@@ -348,27 +310,17 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.2, ease: "easeOut" }}
-                        style={{ overflow: 'hidden', paddingLeft: 28, marginTop: 12 }}
+                        className="overflow-hidden pl-7 mt-3"
                     >
                         {hasSearchPills ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 4 }}>
-                                {/* Querying Section */}
+                            <div className="flex flex-col gap-4 pb-1">
                                 {queries.length > 0 && (
                                     <div>
-                                        <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 500, marginBottom: 8, fontFamily: "'Matter', sans-serif" }}>Querying</div>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                        <div className="text-[13px] text-[#6b7280] font-medium mb-2" style={{ fontFamily: "'Matter', sans-serif" }}>Querying</div>
+                                        <div className="flex flex-wrap gap-2">
                                             {queries.map((q, i) => (
-                                                <div key={i} style={{
-                                                    display: 'flex', alignItems: 'center', gap: 6,
-                                                    padding: '6px 12px', borderRadius: 20,
-                                                    backgroundColor: '#f3f4f6', border: '1px solid transparent',
-                                                    fontSize: 13, color: '#374151', fontWeight: 500,
-                                                    fontFamily: "'Matter', sans-serif", transition: 'all 0.15s',
-                                                    cursor: 'default'
-                                                }}
-                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
-                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
-                                                >
+                                                <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[20px] bg-[#f3f4f6] border border-transparent text-[13px] text-[#374151] font-medium cursor-default transition-all duration-150 hover:bg-[#e5e7eb]"
+                                                    style={{ fontFamily: "'Matter', sans-serif" }}>
                                                     <MagnifyingGlassIcon width={14} height={14} color="#6b7280" strokeWidth={2.5} />
                                                     {q}
                                                 </div>
@@ -376,30 +328,19 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                         </div>
                                     </div>
                                 )}
-
-                                {/* Reading Section */}
                                 {docs.length > 0 && (
                                     <div>
-                                        <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 500, marginBottom: 8, fontFamily: "'Matter', sans-serif" }}>Reading</div>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                                        <div className="text-[13px] text-[#6b7280] font-medium mb-2" style={{ fontFamily: "'Matter', sans-serif" }}>Reading</div>
+                                        <div className="flex flex-wrap gap-2 items-center">
                                             {docs.slice(0, 2).map((d, i) => (
-                                                <div key={i} style={{
-                                                    display: 'flex', alignItems: 'center', gap: 6,
-                                                    padding: '6px 12px', borderRadius: 20,
-                                                    backgroundColor: '#f3f4f6', border: '1px solid transparent',
-                                                    fontSize: 13, color: '#374151', fontWeight: 500,
-                                                    fontFamily: "'Matter', sans-serif", transition: 'all 0.15s',
-                                                    cursor: 'pointer'
-                                                }}
-                                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e5e7eb'}
-                                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
-                                                >
+                                                <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[20px] bg-[#f3f4f6] border border-transparent text-[13px] text-[#374151] font-medium cursor-pointer transition-all duration-150 hover:bg-[#e5e7eb]"
+                                                    style={{ fontFamily: "'Matter', sans-serif" }}>
                                                     <DocumentTextIcon width={14} height={14} color="#3b82f6" strokeWidth={2} />
                                                     {d}
                                                 </div>
                                             ))}
                                             {docs.length > 2 && (
-                                                <div style={{ fontSize: 13, color: '#2563eb', fontWeight: 600, fontFamily: "'Matter', sans-serif", marginLeft: 4, cursor: 'pointer' }}>
+                                                <div className="text-[13px] text-[#2563eb] font-semibold ml-1 cursor-pointer" style={{ fontFamily: "'Matter', sans-serif" }}>
                                                     + {docs.length - 2} more
                                                 </div>
                                             )}
@@ -408,36 +349,21 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                 )}
                             </div>
                         ) : (
-                            /* Standard Output rendering */
-                            <div style={{
-                                padding: '12px 16px',
-                                backgroundColor: isTerminal ? '#0d0d14' : '#f9fafb',
-                                borderRadius: 12,
-                                fontSize: 13,
-                                lineHeight: 1.6,
-                                fontFamily: isTerminal ? "'JetBrains Mono', monospace" : "inherit",
-                                color: isTerminal ? '#e2e8f0' : '#4b5563',
-                                maxHeight: 400, overflowY: 'auto',
-                                border: `1px solid ${isTerminal ? '#1e1e2e' : '#f3f4f6'}`,
-                            }}>
+                            <div className={`px-4 py-3 rounded-xl text-[13px] leading-relaxed max-h-[400px] overflow-y-auto border ${
+                                isTerminal
+                                    ? 'bg-[#0d0d14] font-mono text-[#e2e8f0] border-[#1e1e2e]'
+                                    : 'bg-[#f9fafb] text-[#4b5563] border-[#f3f4f6]'
+                            }`}>
                                 {isTerminal ? (
-                                    <div style={{ whiteSpace: 'pre-wrap' }}>
-                                        {/* Show the command that was executed */}
+                                    <div className="whitespace-pre-wrap">
                                         {cmdStr && (
-                                            <div style={{
-                                                marginBottom: 12,
-                                                paddingBottom: 8,
-                                                borderBottom: '1px solid #2d2d3a',
-                                                color: '#94a3b8',
-                                                fontSize: 12
-                                            }}>
-                                                <span style={{ color: '#64748b' }}>$ </span>
-                                                <span style={{ color: '#e2e8f0' }}>{cmdStr}</span>
+                                            <div className="mb-3 pb-2 border-b border-[#2d2d3a] text-[#94a3b8] text-xs">
+                                                <span className="text-[#64748b]">$ </span>
+                                                <span className="text-[#e2e8f0]">{cmdStr}</span>
                                             </div>
                                         )}
-                                        {/* Show the output */}
                                         {displayOutput.slice(0, 2000)}
-                                        {displayOutput.length > 2000 && <span style={{ color: '#9ca3af' }}>{'\n'}... ({displayOutput.length - 2000} more chars)</span>}
+                                        {displayOutput.length > 2000 && <span className="text-[#9ca3af]">{'\n'}... ({displayOutput.length - 2000} more chars)</span>}
                                     </div>
                                 ) : (
                                     <MarkdownRenderer content={displayOutput} />
@@ -450,6 +376,7 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
         </motion.div>
     );
 };
+
 // ── WriteDiffCard: Shows a diff viewer for write/edit tool calls ────────────
 const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
     const [expanded, setExpanded] = useState(false);
@@ -460,42 +387,28 @@ const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
     const hasDiff = !!oldContent && oldContent !== content;
 
     return (
-        <div style={{
-            borderRadius: 12, border: '1px solid #e8e6d9',
-            backgroundColor: '#ffffff', overflow: 'hidden', marginBottom: 8,
-        }}>
+        <div className="rounded-xl border border-[#e8e6d9] bg-white overflow-hidden mb-2">
             <div
                 onClick={() => setExpanded(!expanded)}
-                style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '10px 14px', cursor: 'pointer',
-                    transition: 'background 0.1s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fafaf8'}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                className="flex items-center gap-3 px-[14px] py-[10px] cursor-pointer transition-colors duration-100 hover:bg-[#fafaf8]"
             >
-                <div style={{
-                    width: 34, height: 34, borderRadius: 8, border: '1px solid #e8e6d9',
-                    backgroundColor: '#f8f7f4', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 9, fontWeight: 700, color: '#9ca3af', flexShrink: 0,
-                    fontFamily: 'monospace'
-                }}>
+                <div className="w-[34px] h-[34px] rounded-lg border border-[#e8e6d9] bg-[#f8f7f4] flex items-center justify-center text-[9px] font-bold text-[#9ca3af] shrink-0 font-mono">
                     {ext}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-[#111111] overflow-hidden text-ellipsis whitespace-nowrap">
                         {filename}
                     </div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
+                    <div className="text-[11px] text-[#9ca3af] mt-0.5">
                         {hasDiff ? 'edited' : 'created'} · {(content.length / 1024).toFixed(1)} KB
                     </div>
                 </div>
                 {tc.status === 'done' && (
-                    <svg width="14" height="14" viewBox="0 0 8 8" fill="none" style={{ flexShrink: 0 }}>
+                    <svg width="14" height="14" viewBox="0 0 8 8" fill="none" className="shrink-0">
                         <path d="M1.5 4L3 5.5L6.5 2" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                 )}
-                <motion.span animate={{ rotate: expanded ? 180 : 0 }} style={{ display: 'flex', flexShrink: 0 }}>
+                <motion.span animate={{ rotate: expanded ? 180 : 0 }} className="flex shrink-0">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2">
                         <polyline points="6 9 12 15 18 9" />
                     </svg>
@@ -508,7 +421,7 @@ const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.18 }}
-                        style={{ overflow: 'hidden', borderTop: '1px solid #e8e6d9' }}
+                        className="overflow-hidden border-t border-[#e8e6d9]"
                     >
                         <DiffViewer
                             oldFile={hasDiff ? { content: oldContent, name: filename } : { content: '', name: filename }}
@@ -525,77 +438,43 @@ const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
     );
 };
 
+// ── ComputerUseResultCard ────────────────────────────────────────────────────
 const ComputerUseResultCard = ({ tc }: { tc: ToolCallDisplay }) => {
     if (tc.status !== 'done') return null;
-    
-    // Parse output if it's valid JSON from the backend tool
+
     let tcData: any = tc.data || {};
     if (tc.output) {
         try {
             const parsed = JSON.parse(tc.output);
-            if (typeof parsed === 'object' && parsed !== null) {
-                tcData = { ...tcData, ...parsed };
-            }
+            if (typeof parsed === 'object' && parsed !== null) tcData = { ...tcData, ...parsed };
         } catch(e) {}
     }
 
-    // We try to extract a final success text from output
     const outputMatch = tcData.detail || (tc.output && tc.output.includes('Success: ') ? tc.output.split('Success: ')[1] : tc.output || 'Computer action completed successfully.');
-    
-    // Generic display names depending on the agent logic
     const appName = typeof tcData?.appName === 'string' && tcData.appName.trim() ? tcData.appName : "Application";
-    const appLogo = typeof tcData?.appLogo === 'string' && tcData.appLogo.trim() ? tcData.appLogo : "";
 
     return (
         <AnimatePresence>
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 12,
-                    marginTop: 12,
-                    marginBottom: 12,
-                    maxWidth: 600,
-                }}
+                className="flex flex-col gap-3 mt-3 mb-3 max-w-[600px]"
             >
-                {/* Result Message Bubble */}
-                <div style={{
-                    backgroundColor: 'rgba(34,197,94,0.06)',
-                    border: '1px solid rgba(34,197,94,0.2)',
-                    borderRadius: 12,
-                    padding: '14px 16px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10
-                }}>
-                    <div style={{
-                        marginTop: 2,
-                        backgroundColor: '#22c55e',
-                        borderRadius: 4,
-                        width: 16,
-                        height: 16,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0
-                    }}>
+                <div className="bg-[rgba(34,197,94,0.06)] border border-[rgba(34,197,94,0.2)] rounded-xl px-4 py-[14px] flex items-start gap-2.5">
+                    <div className="mt-0.5 bg-[#22c55e] rounded w-4 h-4 flex items-center justify-center shrink-0">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="20 6 9 17 4 12" />
                         </svg>
                     </div>
-                    <div style={{ fontSize: 13.5, color: '#064e3b', fontWeight: 500, lineHeight: 1.5, wordBreak: 'break-word' }}>
+                    <div className="text-[13.5px] text-[#064e3b] font-medium leading-relaxed wrap-break-word">
                         {outputMatch}
                     </div>
                 </div>
 
-                {/* Metadata Row */}
-                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, fontSize: 12 }}>
-                    {/* Tool Used Pill */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: 20 }}>
-                        <span style={{ fontWeight: 500 }}>Tool used</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: '#22c55e', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 }}>
+                <div className="flex items-center flex-wrap gap-3 text-xs">
+                    <div className="flex items-center gap-1.5 text-[#4b5563] bg-[#f9fafb] border border-[#e5e7eb] px-3 py-1.5 rounded-[20px]">
+                        <span className="font-medium">Tool used</span>
+                        <div className="flex items-center gap-1 bg-[#22c55e] text-white px-2 py-0.5 rounded-xl text-[11px] font-semibold">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <line x1="3" y1="9" x2="21" y2="9"></line>
@@ -604,21 +483,62 @@ const ComputerUseResultCard = ({ tc }: { tc: ToolCallDisplay }) => {
                             {appName}
                         </div>
                     </div>
-
-                    {/* Duration */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: 20 }}>
+                    <div className="flex items-center gap-1.5 text-[#4b5563] bg-[#f9fafb] border border-[#e5e7eb] px-3 py-1.5 rounded-[20px]">
                         <span>Duration</span>
-                        <span style={{ fontWeight: 600, color: '#111827' }}>{(tc.durationMs ? tc.durationMs / 1000 : 2.3).toFixed(1)}s</span>
+                        <span className="font-semibold text-[#111827]">{(tc.durationMs ? tc.durationMs / 1000 : 2.3).toFixed(1)}s</span>
                     </div>
-
-                    {/* Status Placeholder */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: 20 }}>
+                    <div className="flex items-center gap-1.5 text-[#4b5563] bg-[#f9fafb] border border-[#e5e7eb] px-3 py-1.5 rounded-[20px]">
                         <span>Status</span>
-                        <span style={{ fontWeight: 600, color: '#22c55e' }}>Success</span>
+                        <span className="font-semibold text-[#22c55e]">Success</span>
                     </div>
                 </div>
             </motion.div>
         </AnimatePresence>
+    );
+};
+
+// ── LiveToolCallCard: Shows a tool call being constructed in real-time ──────
+export const LiveToolCallCard = ({ toolName, partialArguments, isStreaming }: LiveToolCall) => {
+    const displayName = toolName
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+
+    return (
+        <motion.div
+            layout
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.2 }}
+            className={`rounded-xl border overflow-hidden mb-2 ${
+                isStreaming
+                    ? 'border-indigo-300 shadow-[0_0_0_2px_rgba(99,102,241,0.15)]'
+                    : 'border-emerald-300 shadow-[0_0_0_2px_rgba(34,197,94,0.1)]'
+            }`}
+        >
+            <div className={`flex items-center gap-2 px-3 py-2 ${isStreaming ? 'bg-indigo-50' : 'bg-emerald-50'}`}>
+                {isStreaming ? (
+                    <Loader size={12} strokeWidth={2} className="text-indigo-500 shrink-0" />
+                ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                        <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                )}
+                <span className={`text-xs font-semibold tracking-wide ${isStreaming ? 'text-indigo-700' : 'text-emerald-700'}`}>
+                    {displayName}
+                </span>
+                {isStreaming && (
+                    <span className="ml-auto text-[10px] text-indigo-400 font-medium animate-pulse">
+                        building…
+                    </span>
+                )}
+            </div>
+            {partialArguments && (
+                <pre className="m-0 px-3 py-2 text-[11px] font-mono leading-relaxed text-slate-600 bg-white overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
+                    {partialArguments}
+                </pre>
+            )}
+        </motion.div>
     );
 };
 

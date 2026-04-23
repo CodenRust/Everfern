@@ -4,8 +4,7 @@ import { ToolDefinition } from '../../../lib/ai-client';
 import { runAgentStep } from '../services/agent-runtime';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { loadPrompt } from '../../../lib/prompt-sync';
 
 export const createWebExplorerNode = (
   runner: AgentRunner,
@@ -25,11 +24,9 @@ export const createWebExplorerNode = (
     // Emit web explorer active event for frontend
     eventQueue?.push({ type: 'thought', content: '\n🌐 Web Explorer: Navigating the web and gathering information...' });
 
-    // Load system prompt from file
-    let systemPrompt = '';
-    try {
-      systemPrompt = await readFile(join(process.cwd(), 'main/agent/prompts/web-explorer.md'), 'utf-8');
-    } catch (error) {
+    // Load system prompt from synchronized prompts directory
+    let systemPrompt = loadPrompt('web-explorer.md');
+    if (!systemPrompt) {
       console.warn('Failed to load web explorer prompt, using fallback');
       systemPrompt = `You are the EverFern Web Explorer.
 Your goal is to find information on the web and navigate websites.

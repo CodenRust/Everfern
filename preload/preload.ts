@@ -221,6 +221,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeSubAgentProgressListener: () => {
       ipcRenderer.removeAllListeners('acp:sub-agent-progress');
     },
+    onToolCallStart: (cb: (data: { index: number; toolName: string }) => void) => {
+      ipcRenderer.on('acp:tool-call-start', (_e, data) => cb(data));
+    },
+    onToolCallChunk: (cb: (data: { index: number; argumentsDelta: string }) => void) => {
+      ipcRenderer.on('acp:tool-call-chunk', (_e, data) => cb(data));
+    },
+    onToolCallComplete: (cb: (data: { index: number; toolName: string; arguments: Record<string, unknown> }) => void) => {
+      ipcRenderer.on('acp:tool-call-complete', (_e, data) => cb(data));
+    },
 
     removeStreamListeners: () => {
       ipcRenderer.removeAllListeners('acp:stream-chunk');
@@ -243,6 +252,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:hitl-request');
       ipcRenderer.removeAllListeners('acp:hitl-response-processed');
       ipcRenderer.removeAllListeners('acp:sub-agent-progress');
+      ipcRenderer.removeAllListeners('acp:tool-call-start');
+      ipcRenderer.removeAllListeners('acp:tool-call-chunk');
+      ipcRenderer.removeAllListeners('acp:tool-call-complete');
     },
   },
 
@@ -422,6 +434,9 @@ export type ElectronAPI = {
      * Call this to clean up the listener when component unmounts.
      */
     removeSubAgentProgressListener: () => void;
+    onToolCallStart:       (cb: (data: { index: number; toolName: string }) => void) => void;
+    onToolCallChunk:       (cb: (data: { index: number; argumentsDelta: string }) => void) => void;
+    onToolCallComplete:    (cb: (data: { index: number; toolName: string; arguments: Record<string, unknown> }) => void) => void;
     removeStreamListeners: () => void;
   };
   history: {

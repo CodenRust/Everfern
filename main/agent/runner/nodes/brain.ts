@@ -1,11 +1,13 @@
-    import { GraphStateType, StreamEvent } from '../state';
+import { GraphStateType, StreamEvent } from '../state';
 import { AgentRunner } from '../runner';
 import { ToolDefinition } from '../../../lib/ai-client';
 import { runAgentStep } from '../services/agent-runtime';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
+import { loadPrompt } from '../../../lib/prompt-sync';
 
 type CompletionReason = 'task_complete' | 'waiting_for_user_input' | 'needs_hitl' | 'cannot_proceed';
+type RoutingDecision = 'continue_brain' | 'route_coding' | 'route_data_analyst' | 'route_computer_use' | 'route_web_explorer' | 'complete_task';
 
 /**
  * After the brain produces a response with no tool calls, ask it to self-assess
@@ -90,11 +92,121 @@ Respond with JSON only:
 }
 
 /**
- * Central Brain Node - The Main Orchestrator
+ * Determine if the brain should route to a specialized agent
+ */
+async function determineRouting(
+  runner: AgentRunner,
+  state: GraphStateType,
+  responseContent: string,
+  eventQueue?: StreamEvent[]
+): Promise<{ decision: RoutingDecision; explanation: string } | null> {
+  if (!runner.client) {
+    console.warn('[Brain] No client available for routing decision');
+    return null;
+  }
+
+  try {
+    // Extract user request from the last user message
+    const lastUserMsg = state.messages?.filter((m: any) => {
+      const role = m.role || m._getType?.();
+      return role === 'user' || role === 'human';
+    }).pop();
+    const userRequest = lastUserMsg
+      ? (typeof (lastUserMsg as any).content === 'string'
+          ? (lastUserMsg as any).content
+          : JSON.stringify((lastUserMsg as any).content))
+      : '';
+    const conversationHistory = state.messages?.slice(-3) || []; // Last 3 messages for context
+
+    // Emit analysis phase
+    eventQueue?.push({
+      type: 'thought',
+      content: '\n🔍 Brain: Analyzing task requirements and available agents...'
+    });
+
+    const prompt = `You are the EverFern Brain - the central orchestrator. Analyze the user request and current state to determine the best routing decision.
+
+USER REQUEST: "${userRequest.slice(0, 400)}"
+YOUR CURRENT RESPONSE: "${responseContent.slice(0, 300)}"
+CONVERSATION CONTEXT: ${JSON.stringify(conversationHistory).slice(0, 200)}
+
+Available routing options:
+- "continue_brain"     — Continue handling this yourself with general capabilities
+- "route_coding"       — Route to Coding Specialist for software development tasks
+- "route_data_analyst" — Route to Data Analyst for data processing and visualization
+- "route_computer_use" — Route to Computer Use agent for GUI automation
+- "route_web_explorer" — Route to Web Explorer for research and information gathering
+- "complete_task"      — Task is complete, no further routing needed
+
+Consider:
+- Does this require specialized expertise?
+- Are there specific tools that a specialized agent would handle better?
+- Is the task already complete?
+- Would routing improve the outcome?
+
+Respond with JSON only:
+{
+  "decision": "continue_brain" | "route_coding" | "route_data_analyst" | "route_computer_use" | "route_web_explorer" | "complete_task",
+  "explanation": "one sentence explaining the routing decision"
+}`;
+
+    console.log('[Brain] Determining routing decision...');
+    const startTime = Date.now();
+
+    const response = await runner.client.chat({
+      messages: [{ role: 'user', content: prompt }],
+      responseFormat: 'json',
+      temperature: 0.2,
+      maxTokens: 150,
+    }) as any;
+
+    const duration = Date.now() - startTime;
+    console.log(`[Brain] Routing decision response received in ${duration}ms`);
+
+    // Emit decision analysis
+    eventQueue?.push({
+      type: 'thought',
+      content: `\n⏱️ Brain: Routing analysis completed in ${duration}ms`
+    });
+
+    let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    let routing;
+    try {
+      routing = JSON.parse(content);
+    } catch (parseError) {
+      console.warn('[Brain] Failed to parse routing decision JSON:', content);
+      return null;
+    }
+
+    const validDecisions: RoutingDecision[] = [
+      'continue_brain', 'route_coding', 'route_data_analyst',
+      'route_computer_use', 'route_web_explorer', 'complete_task'
+    ];
+
+    if (!validDecisions.includes(routing.decision)) {
+      console.warn('[Brain] Invalid routing decision:', routing.decision);
+      return null;
+    }
+
+    console.log(`[Brain] Routing decision made in ${duration}ms: ${routing.decision}`);
+    return { decision: routing.decision as RoutingDecision, explanation: String(routing.explanation || '') };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn('[Brain] Routing decision failed:', errorMessage);
+    return null;
+  }
+}
+
+/**
+ * Central Brain Node - The Main Orchestrator and Router
  *
- * After producing a response with no tool calls, the brain self-assesses
- * and sets a completionSignal so the judge can make an informed verdict
- * without relying on regex pattern matching.
+ * The Brain node now serves as the central decision maker that:
+ * 1. Uses the main SYSTEM_PROMPT.md for comprehensive capabilities
+ * 2. Makes intelligent routing decisions to specialized agents
+ * 3. Handles general tasks that don't require specialization
+ * 4. Provides completion signals for the judge
  */
 export const createBrainNode = (
   runner: AgentRunner,
@@ -119,6 +231,24 @@ export const createBrainNode = (
       missionTracker.setPhase('execution');
     }
 
+    // Emit initial brain activation message
+    eventQueue?.push({
+      type: 'thought',
+      content: '\n🧠 Brain Node: Analyzing task and determining optimal routing...'
+    });
+
+    // Load the main system prompt from synchronized location
+    let systemPrompt = systemPromptOverride;
+    if (!systemPrompt) {
+      const mainSystemPrompt = loadPrompt('SYSTEM_PROMPT.md');
+      if (mainSystemPrompt) {
+        systemPrompt = mainSystemPrompt;
+        console.log('[Brain] 📖 Using main SYSTEM_PROMPT.md from ~/.everfern/prompts/');
+      } else {
+        console.warn('[Brain] ⚠️  Could not load SYSTEM_PROMPT.md, using default');
+      }
+    }
+
     const result = await integrator.wrapNode(
       'brain',
       () => runAgentStep(state, {
@@ -126,24 +256,26 @@ export const createBrainNode = (
         toolDefs: tools,
         eventQueue,
         nodeName: 'brain',
-        systemPromptOverride: systemPromptOverride
+        systemPromptOverride: systemPrompt
       }),
-      'Processing request'
+      'Processing request with Brain orchestrator'
     );
 
-    // Only build a completion signal when there are no tool calls
-    // (i.e. the brain is done for this turn and will route to judge)
-    const hasPendingTools = result.pendingToolCalls && result.pendingToolCalls.length > 0;
-    if (hasPendingTools) {
-      return { ...result, completionSignal: null };
-    }
-
-    // Extract the brain's response text
+    // Extract the brain's response text for analysis
     const messages = result.messages as any[] | undefined;
     const lastMsg = messages && messages.length > 0 ? messages[messages.length - 1] : null;
     const responseContent = lastMsg
       ? (typeof lastMsg.content === 'string' ? lastMsg.content : (lastMsg.content?.text || ''))
       : '';
+
+    // Emit analysis of pending tools
+    if (result.pendingToolCalls && result.pendingToolCalls.length > 0) {
+      const toolNames = result.pendingToolCalls.map((tc: any) => tc.name).join(', ');
+      eventQueue?.push({
+        type: 'thought',
+        content: `\n🔧 Brain: Executing tools — ${toolNames}`
+      });
+    }
 
     // Get original user request for context
     const allMessages = state.messages || [];
@@ -157,6 +289,39 @@ export const createBrainNode = (
           : JSON.stringify((firstUserMsg as any).content))
       : '';
 
+    // If there are pending tool calls, continue with brain execution
+    const hasPendingTools = result.pendingToolCalls && result.pendingToolCalls.length > 0;
+    if (hasPendingTools) {
+      return {
+        ...result,
+        completionSignal: null,
+        routingDecision: null
+      };
+    }
+
+    // Determine routing decision
+    const routingDecision = await determineRouting(runner, state, responseContent, eventQueue);
+
+    if (routingDecision) {
+      runner.telemetry.info(`Brain routing decision: ${routingDecision.decision} — ${routingDecision.explanation}`);
+      eventQueue?.push({
+        type: 'thought',
+        content: `🧠 Brain Router: ${routingDecision.decision} — ${routingDecision.explanation}`
+      });
+    }
+
+    // If routing to a specialized agent, set the routing decision
+    if (routingDecision && routingDecision.decision.startsWith('route_')) {
+      return {
+        ...result,
+        routingDecision: routingDecision,
+        completionSignal: null,
+        // Set task phase to route to specialized agents
+        taskPhase: 'specialized_agent' as const
+      };
+    }
+
+    // If continuing with brain or completing task, build completion signal
     const signal = await buildCompletionSignal(runner, responseContent, originalRequest);
 
     if (signal) {
@@ -167,6 +332,10 @@ export const createBrainNode = (
       eventQueue?.push({ type: 'thought', content: '🧠 Brain: completion signal failed, judge will evaluate' });
     }
 
-    return { ...result, completionSignal: signal };
+    return {
+      ...result,
+      completionSignal: signal,
+      routingDecision: routingDecision
+    };
   };
 };

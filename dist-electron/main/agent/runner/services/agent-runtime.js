@@ -111,14 +111,35 @@ async function runAgentStep(state, options) {
             }
             return m;
         });
-        // Limit message history for performance (keep last 20 messages)
-        const maxMessages = 20;
-        const limitedMessages = prunedMessages.length > maxMessages
-            ? [prunedMessages[0], ...prunedMessages.slice(-maxMessages + 1)]
-            : prunedMessages;
+        // Limit message history for performance — only compact when total estimated tokens exceed 150k
+        const COMPACT_THRESHOLD = 150000;
+        const estimateTokens = (msgs) => msgs.reduce((sum, m) => sum + Math.ceil((typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).length / 4), 0);
+        let limitedMessages;
+        if (estimateTokens(prunedMessages) > COMPACT_THRESHOLD) {
+            // Keep system message + last 20 messages
+            const systemMsg = prunedMessages[0]?.role === 'system' ? [prunedMessages[0]] : [];
+            const rest = prunedMessages.filter(m => m.role !== 'system');
+            limitedMessages = [...systemMsg, ...rest.slice(-20)];
+        }
+        else {
+            limitedMessages = prunedMessages;
+        }
+        const startedToolCallIndices = new Set();
         const request = {
             messages: limitedMessages,
             tools: toolDefs,
+            onToolCallChunk: (index, toolName, argumentsDelta) => {
+                try {
+                    if (!startedToolCallIndices.has(index)) {
+                        startedToolCallIndices.add(index);
+                        eventQueue?.push({ type: 'tool_call_start', index, toolName });
+                    }
+                    eventQueue?.push({ type: 'tool_call_chunk', index, argumentsDelta });
+                }
+                catch (err) {
+                    console.warn('[AgentRuntime] onToolCallChunk error:', err);
+                }
+            },
             onStreamChunk: (chunk) => {
                 console.log(`[Stream] Received chunk: "${chunk}" (buffer: ${thoughtBuffer.length} chars)`);
                 thoughtBuffer += chunk;

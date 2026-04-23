@@ -78,7 +78,7 @@ import {
 import { WaveformIcon, FernStarburst } from './components/UIIcons';
 import { MarkdownRenderer, StreamingMarkdown } from './components/MarkdownComponents';
 import { ContextTokenRing, VoiceButton, RateLimitContinueButton } from './components/UIHelpers';
-import { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard } from './components/ToolCallComponents';
+import { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard, LiveToolCallCard } from './components/ToolCallComponents';
 import { ReportContainer } from './components/ReportComponents';
 import { InlineVisualization } from './components/InlineVisualization';
 import { PlanReviewCard, AgentWorkspaceCards } from './components/PlanComponents';
@@ -90,7 +90,7 @@ import { ReasoningBranch, ReasoningPane, ProgressStepsIcon, ContextGridIcon, Pan
 import { resolveToolDisplay } from "./tool-labels";
 import { formatDuration } from '../../lib/formatDuration';
 import { useAutoCollapse } from '../../hooks/use-auto-collapse';
-import type { ToolCallDisplay, Message, FileAttachment, FolderContext, ModelOption, SubAgentProgressEvent } from './types/index';
+import type { ToolCallDisplay, Message, FileAttachment, FolderContext, ModelOption, SubAgentProgressEvent, LiveToolCall } from './types/index';
 import type { SurfaceData } from './SurfaceCanvas';
 import { stripAnsi, extractFileArtifacts } from './utils/helpers';
 
@@ -199,6 +199,7 @@ export default function ChatPage() {
     const [computerUseStep, setComputerUseStep] = useState("");
     const [currentComputerUseToolCallId, setCurrentComputerUseToolCallId] = useState<string | null>(null);
     const [liveToolCalls, setLiveToolCalls] = useState<ToolCallDisplay[]>([]);
+    const [streamingToolCalls, setStreamingToolCalls] = useState<LiveToolCall[]>([]);
     const [streamingContent, setStreamingContent] = useState("");
     const [streamingThought, setStreamingThought] = useState("");
     const [activePlanSteps, setActivePlanSteps] = useState<Array<{ id: string; description: string; tool?: string }> | null>(null);
@@ -359,7 +360,9 @@ export default function ChatPage() {
 
 
     const liveToolCallsRef = useRef<ToolCallDisplay[]>([]);
+    const streamingToolCallsRef = useRef<LiveToolCall[]>([]);
     const streamingContentRef = useRef("");
+    const pendingNarrativeRef = useRef<string>("");
     const streamingThoughtRef = useRef("");
     const toolCallMap = useRef<Map<string, string>>(new Map());
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -748,6 +751,8 @@ export default function ChatPage() {
         setMessages(newMessages);
         setIsLoading(true);
         setLiveToolCalls([]);
+        setStreamingToolCalls([]);
+        streamingToolCallsRef.current = [];
         setStreamingContent("");
         setStreamingThought("");
         setMissionTimeline(null);
@@ -766,6 +771,7 @@ export default function ChatPage() {
         isMessageCommittedRef.current = false;
         isHandlingPlanRef.current = false;
         streamingContentRef.current = "";
+        pendingNarrativeRef.current = "";
         streamingThoughtRef.current = "";
 
         const currentM = availableModels.find(m => m.id === selectedModel) || availableModels[0];
@@ -792,8 +798,13 @@ export default function ChatPage() {
                 if (toolName === 'ask_user_question') {
                     console.log('[Frontend] Received ask_user_question tool_start:', JSON.stringify({ toolName, toolArgs }, null, 2));
                 }
+                const narrativeText = streamingContentRef.current.trim();
+                if (narrativeText) {
+                    streamingContentRef.current = "";
+                    setStreamingContent("");
+                }
                 const display = resolveToolDisplay(toolName, toolArgs);
-                const newTc: ToolCallDisplay = { id: crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
+                const newTc: ToolCallDisplay = { id: crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs, description: narrativeText || undefined };
                 liveToolCallsRef.current = [...liveToolCallsRef.current, newTc];
                 setLiveToolCalls([...liveToolCallsRef.current]);
 
@@ -985,6 +996,8 @@ export default function ChatPage() {
                                 toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
                             };
                             setLiveToolCalls([]);
+                            setStreamingToolCalls([]);
+                            streamingToolCallsRef.current = [];
                             setMessages(prev => {
                                 const prevMsg = prev[prev.length - 1];
                                 if (prev.length > 0 && prevMsg.role === 'assistant' &&
@@ -1065,6 +1078,8 @@ export default function ChatPage() {
                         // so the AI message doesn't disappear while the form is shown.
                         // streamingContent will be cleared by handleSend when the user submits.
                         setLiveToolCalls([]);
+                        setStreamingToolCalls([]);
+                        streamingToolCallsRef.current = [];
                         setMessages(prev => {
                             const prevMsg = prev[prev.length - 1];
                             const isContentSame = prevMsg.content === assistantMsg.content;
@@ -1096,6 +1111,8 @@ export default function ChatPage() {
                     setStreamingContent("");
                     setStreamingThought("");
                     setLiveToolCalls([]);
+                    setStreamingToolCalls([]);
+                    streamingToolCallsRef.current = [];
                     setIsLoading(false);
                     setMessages(prev => {
                         // Prevent duplicate message if the last message is identical
@@ -1116,6 +1133,8 @@ export default function ChatPage() {
                     setStreamingContent("");
                     setStreamingThought("");
                     setLiveToolCalls([]);
+                    setStreamingToolCalls([]);
+                    streamingToolCallsRef.current = [];
                     setIsLoading(false);
                 }
                 }, 150); // flush pending IPC chunk events + allow onToolCall to fire first
@@ -1151,6 +1170,8 @@ export default function ChatPage() {
                     setStreamingContent("");
                     setStreamingThought("");
                     setLiveToolCalls([]);
+                    setStreamingToolCalls([]);
+                    streamingToolCallsRef.current = [];
                     setIsLoading(false);
                     setMessages(prev => {
                         // Prevent duplicate message if the last message is identical
@@ -1171,6 +1192,8 @@ export default function ChatPage() {
                         setStreamingContent("");
                         setStreamingThought("");
                         setLiveToolCalls([]);
+                        setStreamingToolCalls([]);
+                        streamingToolCallsRef.current = [];
                         setIsLoading(false);
                     }
                 }
@@ -1244,6 +1267,8 @@ export default function ChatPage() {
         setFolderContexts([]);
         setIsLoading(true);
         setLiveToolCalls([]);
+        setStreamingToolCalls([]);
+        streamingToolCallsRef.current = [];
         setStreamingContent("");
         setStreamingThought("");
         setMissionTimeline(null);
@@ -1298,10 +1323,15 @@ export default function ChatPage() {
                         if (toolCallId) setCurrentComputerUseToolCallId(toolCallId);
                     }
 
+                    const narrativeText = streamingContentRef.current.trim();
+                    if (narrativeText) {
+                        streamingContentRef.current = "";
+                        setStreamingContent("");
+                    }
                     const display = resolveToolDisplay(toolName, toolArgs);
                     console.log('[Frontend] Resolved display for', toolName, ':', display);
 
-                    const newTc: ToolCallDisplay = { id: toolCallId || crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs };
+                    const newTc: ToolCallDisplay = { id: toolCallId || crypto.randomUUID(), toolName, ...display, status: 'running', args: toolArgs, description: narrativeText || undefined };
                     const mapKey = toolCallId || (toolName + '_running');
 
                     console.log('[Frontend] Created new ToolCallDisplay:', { id: newTc.id, toolName: newTc.toolName, label: newTc.label, status: newTc.status });
@@ -1541,6 +1571,8 @@ export default function ChatPage() {
                     setStreamingThought("");
                     liveToolCallsRef.current = [];
                     setLiveToolCalls([]);
+                    setStreamingToolCalls([]);
+                    streamingToolCallsRef.current = [];
 
                     // Stop loading - wait for user to approve plan
                     setIsLoading(false);
@@ -1572,6 +1604,31 @@ export default function ChatPage() {
                 });
 
                 console.log('[Frontend handleSend] Registering NEW onStreamChunk handler');
+                api.onToolCallStart(({ index, toolName }: { index: number; toolName: string }) => {
+                    const newEntry: LiveToolCall = { index, toolName, partialArguments: '', isStreaming: true };
+                    streamingToolCallsRef.current = [...streamingToolCallsRef.current.filter(t => t.index !== index), newEntry];
+                    setStreamingToolCalls([...streamingToolCallsRef.current]);
+                });
+
+                api.onToolCallChunk(({ index, argumentsDelta }: { index: number; argumentsDelta: string }) => {
+                    const existing = streamingToolCallsRef.current.find(t => t.index === index);
+                    if (existing) {
+                        const updated = streamingToolCallsRef.current.map(t =>
+                            t.index === index ? { ...t, partialArguments: t.partialArguments + argumentsDelta } : t
+                        );
+                        streamingToolCallsRef.current = updated;
+                        setStreamingToolCalls([...updated]);
+                    }
+                });
+
+                api.onToolCallComplete(({ index, toolName, arguments: args }: { index: number; toolName: string; arguments: Record<string, unknown> }) => {
+                    const updated = streamingToolCallsRef.current.map(t =>
+                        t.index === index ? { ...t, isStreaming: false } : t
+                    );
+                    streamingToolCallsRef.current = updated;
+                    setStreamingToolCalls([...updated]);
+                });
+
                 api.onStreamChunk(({ delta, done }: { delta: string; done: boolean }) => {
                     console.log(`[Frontend onStreamChunk] delta="${delta}", done=${done}, isMessageCommittedRef=${isMessageCommittedRef.current}`);
                     if (isMessageCommittedRef.current) {
@@ -1660,6 +1717,8 @@ export default function ChatPage() {
                             setStreamingContent("");
                             setStreamingThought("");
                             setLiveToolCalls([]);
+                            setStreamingToolCalls([]);
+                            streamingToolCallsRef.current = [];
                             setIsLoading(false);
                             setIsComputerUseActive(false);
                             setMessages(prev => {
@@ -1680,6 +1739,8 @@ export default function ChatPage() {
                             setStreamingContent("");
                             setStreamingThought("");
                             setLiveToolCalls([]);
+                            setStreamingToolCalls([]);
+                            streamingToolCallsRef.current = [];
                             setIsLoading(false);
                             setIsComputerUseActive(false);
                         }
@@ -1695,7 +1756,7 @@ export default function ChatPage() {
                         if (m.attachments && m.attachments.length > 0 && m.role === 'user') {
                             const blocks: any[] = [];
                             if (m.content) blocks.push({ type: 'text', text: m.content });
-                            m.attachments.forEach(a => { if (a.mimeType.startsWith('image/') && a.base64) blocks.push({ type: 'image_url', image_url: { url: a.base64 } }); else blocks.push({ type: 'text', text: `[Attached File: ${a.name}]\n[Location: ${a.path || 'unknown'}]\n${a.content ? a.content : 'Content not loaded. Use your skills to read the file directly at the provided Location path.'}` }); });
+                            m.attachments.forEach(a => { if (a.mimeType.startsWith('image/') && a.base64) blocks.push({ type: 'image_url', image_url: { url: a.base64 } }); else blocks.push({ type: 'text', text: `[Attached File: ${a.name}]\n[Location: ${a.path || 'unknown'}]\n\nThe file has been saved to the location above. Use your tools (e.g. Python) to read and process it directly from that path.` }); });
                             return { role: m.role, content: blocks };
                         }
                         return { role: m.role, content: m.content };
@@ -1722,6 +1783,8 @@ export default function ChatPage() {
                     return final;
                 });
                 setLiveToolCalls([]);
+                setStreamingToolCalls([]);
+                streamingToolCallsRef.current = [];
                 setStreamingContent("");
                 setStreamingThought("");
                 setIsLoading(false);
@@ -1742,6 +1805,8 @@ export default function ChatPage() {
         setStreamingContent("");
         setStreamingThought("");
         setLiveToolCalls([]);
+        setStreamingToolCalls([]);
+        streamingToolCallsRef.current = [];
         streamingContentRef.current = "";
         streamingThoughtRef.current = "";
         liveToolCallsRef.current = [];
@@ -1839,6 +1904,8 @@ export default function ChatPage() {
             // This is similar to handleSend but without clearing existing messages
             setIsLoading(true);
             setLiveToolCalls([]);
+            setStreamingToolCalls([]);
+            streamingToolCallsRef.current = [];
             setStreamingContent("");
             setStreamingThought("");
             setMissionComplete(false);
@@ -1903,6 +1970,8 @@ export default function ChatPage() {
                         setStreamingContent("");
                         setStreamingThought("");
                         setLiveToolCalls([]);
+                        setStreamingToolCalls([]);
+                        streamingToolCallsRef.current = [];
                         setMessages(prev => {
                             const prevMsg = prev[prev.length - 1];
                             if (prev.length > 0 && prevMsg.role === 'assistant' &&
@@ -2181,6 +2250,8 @@ export default function ChatPage() {
                     setStreamingContent("");
                     setStreamingThought("");
                     setLiveToolCalls([]);
+                    setStreamingToolCalls([]);
+                    streamingToolCallsRef.current = [];
 
                     console.log('[Frontend] Agent stopped and message saved to history');
                 }}
@@ -2847,6 +2918,14 @@ export default function ChatPage() {
                                                     planTitle={activePlanTitle}
                                                     subAgentProgress={subAgentProgress}
                                                 />
+                                                {/* Live streaming tool call cards — show tool calls being built in real-time */}
+                                                {streamingToolCalls.length > 0 && (
+                                                    <div className="mt-2 space-y-1">
+                                                        {streamingToolCalls.map(tc => (
+                                                            <LiveToolCallCard key={tc.index} {...tc} />
+                                                        ))}
+                                                    </div>
+                                                )}
                                                 {activeSurface && (
                                                     <SurfaceCanvas data={activeSurface} />
                                                 )}
@@ -2862,7 +2941,7 @@ export default function ChatPage() {
 
                                                     return (
                                                         <>
-                                                            {cleanContent && <StreamingMarkdown content={cleanContent} isLive={true} />}
+                                                            {cleanContent && liveToolCalls.length === 0 && <StreamingMarkdown content={cleanContent} isLive={true} />}
                                                             {artifacts.map((art, i) => (
                                                                 <div key={i} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
                                                                     <FileArtifact
@@ -3279,65 +3358,86 @@ export default function ChatPage() {
                                             </>
                                         )}
 
-                                        {executionPlan && isExecutionPlanPaneOpen && (
-                                            <>
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid #e5e7eb' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                        <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                            {isLoading ? (
-                                                                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <circle cx="12" cy="12" r="10" stroke="#c7d2fe" strokeWidth="4"></circle>
-                                                                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="#6366f1" stroke="none"></path>
-                                                                </svg>
-                                                            ) : (
-                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                                                    <polyline points="14 2 14 8 20 8"></polyline>
-                                                                    <line x1="12" y1="18" x2="12" y2="12"></line>
-                                                                    <line x1="9" y1="15" x2="15" y2="15"></line>
-                                                                </svg>
-                                                            )}
+                                        {executionPlan && isExecutionPlanPaneOpen && (() => {
+                                            // Check if plan was already approved by looking for [PLAN_APPROVED] in messages
+                                            const isPlanAlreadyApproved = messages.some(m => {
+                                                const content = typeof m.content === 'string' ? m.content : '';
+                                                return content.includes('[PLAN_APPROVED]');
+                                            });
+                                            const shouldShowApproveButton = !isLoading && !isPlanAlreadyApproved;
+
+                                            return (
+                                                <>
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid #e5e7eb' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                {isLoading ? (
+                                                                    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                        <circle cx="12" cy="12" r="10" stroke="#c7d2fe" strokeWidth="4"></circle>
+                                                                        <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="#6366f1" stroke="none"></path>
+                                                                    </svg>
+                                                                ) : (
+                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                                                        <line x1="12" y1="18" x2="12" y2="12"></line>
+                                                                        <line x1="9" y1="15" x2="15" y2="15"></line>
+                                                                    </svg>
+                                                                )}
+                                                            </div>
+                                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Execution Plan</span>
                                                         </div>
-                                                        <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Execution Plan</span>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                            {shouldShowApproveButton && (
+                                                                <button type="button" onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    setIsExecutionPlanPaneOpen(false);
+                                                                    if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true");
+                                                                    const approvalMsg = `[PLAN_APPROVED]\nI have reviewed and approved your execution plan. Please proceed with the execution as planned.`;
+                                                                    setInputValue(approvalMsg);
+                                                                    setTimeout(() => {
+                                                                        const sendBtn = document.querySelector('button[title="Send"]') as HTMLButtonElement;
+                                                                        if (sendBtn) sendBtn.click();
+                                                                    }, 100);
+                                                                }} style={{ fontSize: 11, fontWeight: 600, color: "#ffffff", backgroundColor: "#22c55e", padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", transition: "all 0.2s", boxShadow: '0 2px 6px rgba(34,197,94,0.25)' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 10px rgba(34,197,94,0.3)'; }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(34,197,94,0.25)'; }}>
+                                                                    Approve
+                                                                </button>
+                                                            )}
+                                                            <button type="button" onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                setIsExecutionPlanPaneOpen(false);
+                                                                if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true");
+                                                            }} style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.1)'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.05)'; }} title="Close pane">
+                                                                <XMarkIcon width={16} height={16} color="#6b7280" />
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                    <button type="button" onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        setIsExecutionPlanPaneOpen(false);
-                                                        if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true");
-                                                        const approvalMsg = `[PLAN_APPROVED]\nI have reviewed and approved your execution plan. Please proceed with the execution as planned.`;
-                                                        setInputValue(approvalMsg);
-                                                        setTimeout(() => {
-                                                            const sendBtn = document.querySelector('button[title="Send"]') as HTMLButtonElement;
-                                                            if (sendBtn) sendBtn.click();
-                                                        }, 100);
-                                                    }} style={{ fontSize: 11, fontWeight: 600, color: "#ffffff", backgroundColor: "#22c55e", padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", transition: "all 0.2s", boxShadow: '0 2px 6px rgba(34,197,94,0.25)' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 10px rgba(34,197,94,0.3)'; }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(34,197,94,0.25)'; }}>
-                                                        Approve
-                                                    </button>
-                                                </div>
-                                                <div style={{
-                                                    backgroundColor: "#ffffff",
-                                                    border: "1px solid #e5e7eb",
-                                                    borderRadius: 16,
-                                                    padding: "20px 22px",
-                                                    boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                                                    overflowWrap: "anywhere",
-                                                    wordBreak: "break-word",
-                                                    maxHeight: '60vh',
-                                                    overflowY: 'auto',
-                                                }}>
-                                                    <MarkdownRenderer content={executionPlan.content} />
-                                                </div>
-                                                <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: 10, border: '1px solid rgba(245,158,11,0.15)' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                        <circle cx="12" cy="12" r="10"></circle>
-                                                        <line x1="12" y1="16" x2="12" y2="12"></line>
-                                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                                                    </svg>
-                                                    <span style={{ fontSize: 11, color: '#92400e', fontWeight: 500 }}>Review and approve to proceed with execution</span>
-                                                </div>
-                                            </>
-                                        )}
+                                                    <div style={{
+                                                        backgroundColor: "#ffffff",
+                                                        border: "1px solid #e5e7eb",
+                                                        borderRadius: 16,
+                                                        padding: "20px 22px",
+                                                        boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
+                                                        overflowWrap: "anywhere",
+                                                        wordBreak: "break-word",
+                                                        maxHeight: '60vh',
+                                                        overflowY: 'auto',
+                                                    }}>
+                                                        <MarkdownRenderer content={executionPlan.content} />
+                                                    </div>
+                                                    <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: 10, border: '1px solid rgba(245,158,11,0.15)' }}>
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                            <circle cx="12" cy="12" r="10"></circle>
+                                                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                                                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                                        </svg>
+                                                        <span style={{ fontSize: 11, color: '#92400e', fontWeight: 500 }}>Review and approve to proceed with execution</span>
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 </motion.div>
                             )}

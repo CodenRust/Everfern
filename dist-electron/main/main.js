@@ -88,6 +88,7 @@ const context_engine_1 = require("./context-engine");
 const vector_1 = require("./context-engine/vector");
 const skills_sync_1 = require("./lib/skills-sync");
 const registry_1 = require("./agent/tools/terminal/registry");
+const prompt_sync_1 = require("./lib/prompt-sync");
 // ── GPU / Cache Startup Fixes (must run before app.whenReady) ───────────────
 // Disable GPU shader disk cache — prevents "Access is denied (0x5)" on Windows
 // when a previous Electron process left the GPUCache directory locked.
@@ -457,8 +458,20 @@ const voice_overlay_1 = require("./voice-overlay");
 let voiceOverlayManager;
 electron_1.app.whenReady().then(async () => {
     console.log('[App] App ready, starting initialization...');
+    // ── Initialize Prompt Synchronization System ──────────────────────
+    console.log('[Startup] 🔄 Initializing prompt synchronization...');
+    (0, prompt_sync_1.initializePromptSync)();
+    // Watch for prompt changes in development mode
+    if (process.env.NODE_ENV === 'development') {
+        (0, prompt_sync_1.watchPrompts)();
+    }
+    // ── Initialize Skill Synchronization System ──────────────────────
+    console.log('[Startup] 🔄 Initializing skill synchronization...');
+    (0, skills_sync_1.syncBuiltInSkills)();
+    (0, skills_sync_1.mergeCustomSkills)();
     /**
      * Ensures that ~/.everfern/SYSTEM_PROMPT.md exists, creating it with defaults if not.
+     * NOTE: This is now handled by the prompt sync system, but kept for backward compatibility.
      */
     function ensureSystemPromptExists() {
         const everfernDir = path.join(os.homedir(), '.everfern');
@@ -493,7 +506,7 @@ Your goal is to be the ultimate workplace companion.
             console.error('[Startup] ❌ Failed to ensure SYSTEM_PROMPT.md existence:', err);
         }
     }
-    // Ensure system prompt exists
+    // Ensure system prompt exists (fallback for prompt sync)
     ensureSystemPromptExists();
     voiceOverlayManager = new voice_overlay_1.VoiceOverlayManager();
     // ── Protocol Handlers ──────────────────────────────────────────────

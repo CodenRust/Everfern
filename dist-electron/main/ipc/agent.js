@@ -258,6 +258,7 @@ function registerAgentHandlers() {
         // IPC Batching State
         let chunkBuffer = '';
         let thoughtBuffer = '';
+        let toolCallChunkBuffer = [];
         let lastFlushTime = Date.now();
         const FLUSH_INTERVAL_MS = 16;
         const flushBuffers = () => {
@@ -274,6 +275,15 @@ function registerAgentHandlers() {
                 }
                 catch (e) { }
                 thoughtBuffer = '';
+            }
+            if (toolCallChunkBuffer.length > 0) {
+                for (const item of toolCallChunkBuffer) {
+                    try {
+                        streamSender.send('acp:tool-call-chunk', item);
+                    }
+                    catch (e) { }
+                }
+                toolCallChunkBuffer = [];
             }
             lastFlushTime = Date.now();
         };
@@ -317,6 +327,18 @@ function registerAgentHandlers() {
                 }
                 else if (streamEvent.type === 'tool_call') {
                     safeSend('acp:tool-call', streamEvent.toolCall);
+                }
+                else if (streamEvent.type === 'tool_call_start') {
+                    safeSend('acp:tool-call-start', { index: streamEvent.index, toolName: streamEvent.toolName });
+                }
+                else if (streamEvent.type === 'tool_call_chunk') {
+                    // Buffer tool call chunks and debounce like text chunks
+                    toolCallChunkBuffer.push({ index: streamEvent.index, argumentsDelta: streamEvent.argumentsDelta });
+                    if (Date.now() - lastFlushTime >= FLUSH_INTERVAL_MS)
+                        flushBuffers();
+                }
+                else if (streamEvent.type === 'tool_call_complete') {
+                    safeSend('acp:tool-call-complete', { index: streamEvent.index, toolName: streamEvent.toolName, arguments: streamEvent.arguments });
                 }
                 else if (streamEvent.type === 'done') {
                     flushBuffers();

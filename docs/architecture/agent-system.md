@@ -8,40 +8,50 @@ EverFern's agent system is built on a sophisticated **graph-based state machine*
 
 ## Core Architecture
 
-### Execution Graph Structure
+### Execution Graph Structure (Brain-Centric Routing)
 
 ```mermaid
 graph TB
     Start([User Input]) --> Triage[Triage Node<br/>Intent Classification]
-    Triage --> Planner[Planner Node<br/>Strategy Generation]
-    Planner --> Decomposer[Task Decomposer<br/>Step Breakdown]
+    Triage --> Decomposer[Task Decomposer<br/>Step Breakdown]
+    Decomposer --> Planner[Planner Node<br/>Strategy Generation]
 
-    Decomposer --> Router{Routing Decision}
+    Planner --> Brain[🧠 Brain Node<br/>Central Orchestrator]
 
-    Router -->|Coding Tasks| CodingAgent[Coding Specialist Agent]
-    Router -->|Data Analysis| DataAgent[Data Analyst Agent]
-    Router -->|GUI Automation| ComputerAgent[Computer Use Agent]
-    Router -->|Web Research| WebAgent[Web Explorer Agent]
-    Router -->|General Tasks| Brain[Brain Node<br/>General Processing]
+    Brain --> BrainDecision{Brain Routing<br/>Decision}
 
-    CodingAgent --> ExecuteTools[Execute Tools Node]
-    DataAgent --> ExecuteTools
-    ComputerAgent --> ExecuteTools
-    WebAgent --> ExecuteTools
-    Brain --> ExecuteTools
+    BrainDecision -->|Has Tools| Validation[Validation Node<br/>Risk Assessment]
+    BrainDecision -->|Route to Specialist| SpecialistRouter{Which Specialist?}
+    BrainDecision -->|Task Complete| Judge[Judge Node<br/>Completion Check]
 
-    ExecuteTools --> Validation[Validation Node<br/>Output Verification]
+    SpecialistRouter -->|Coding| CodingAgent[💻 Coding Specialist]
+    SpecialistRouter -->|Data Analysis| DataAgent[📊 Data Analyst]
+    SpecialistRouter -->|GUI Automation| ComputerAgent[🖥️ Computer Use]
+    SpecialistRouter -->|Web Research| WebAgent[🌐 Web Explorer]
+
+    CodingAgent --> SpecialistTools{Has Tools?}
+    DataAgent --> SpecialistTools
+    ComputerAgent --> SpecialistTools
+    WebAgent --> SpecialistTools
+
+    SpecialistTools -->|Yes| Validation
+    SpecialistTools -->|No| Brain
+
     Validation --> HITLCheck{High Risk?}
 
     HITLCheck -->|Yes| HITL[HITL Approval Node<br/>Human Review]
-    HITLCheck -->|No| Judge[Judge Node<br/>Completion Assessment]
+    HITLCheck -->|No| ExecuteTools[Execute Tools Node]
 
-    HITL --> Judge
+    HITL --> ExecuteTools
+    ExecuteTools --> Brain
+
     Judge --> Complete{Task Complete?}
 
-    Complete -->|No| Planner
+    Complete -->|No| Brain
     Complete -->|Yes| End([Response to User])
 ```
+
+**Key Innovation**: The Brain Node is now the **central orchestrator** that makes all routing decisions after analyzing the task and response. All specialized agents route back to the Brain for coordination, creating a unified control flow.
 
 ## Node Implementations
 
@@ -120,7 +130,41 @@ interface DecomposedTask {
 }
 ```
 
-### 4. Specialized Agent Nodes
+### 4. Brain Node (`nodes/brain.ts`) - Central Orchestrator
+
+**Purpose**: The central decision-making hub that orchestrates all agent activities and makes intelligent routing decisions.
+
+**Key Responsibilities**:
+- Analyzes user requests and task context
+- Makes dynamic routing decisions to specialized agents
+- Handles general-purpose tasks with full tool access
+- Coordinates multi-step workflows
+- Manages fallback and error recovery
+
+**Routing Decisions**:
+- `continue_brain` — Continue handling with general capabilities
+- `route_coding` — Route to Coding Specialist for software development
+- `route_data_analyst` — Route to Data Analyst for data processing
+- `route_computer_use` — Route to Computer Use agent for GUI automation
+- `route_web_explorer` — Route to Web Explorer for research
+- `complete_task` — Task is complete, proceed to judge
+
+**System Prompt**: Loads from `main/agent/prompts/SYSTEM_PROMPT.md` (main system prompt with comprehensive capabilities)
+
+**Routing Algorithm**:
+1. Analyzes the user request and current response
+2. Evaluates task complexity and required expertise
+3. Considers available specialized agents
+4. Makes optimal routing decision using LLM analysis
+5. All specialized agents route back to Brain for coordination
+
+**Key Features**:
+- Dynamic routing based on task analysis (not static intent classification)
+- Fallback handling when specialized agents complete
+- Completion signal generation for judge node
+- Mission tracking integration for progress reporting
+
+### 5. Specialized Agent Nodes
 
 #### Coding Specialist Agent (`agents/coding-specialist.ts`)
 
@@ -361,6 +405,85 @@ For complex tasks requiring multiple agents:
 - **Context Window Optimization**: Intelligent message pruning
 - **Semantic Caching**: Reduce redundant API calls
 - **State Compression**: Minimize memory footprint
+
+## Prompt Synchronization System
+
+### Overview
+
+The Prompt Synchronization System ensures that all agent prompts are kept up-to-date and synchronized from the source directory to the user's home directory, enabling runtime updates without redeployment.
+
+### Architecture
+
+**Source Directory**: `main/agent/prompts/`
+- `SYSTEM_PROMPT.md` - Main system prompt for Brain node
+- `coding-specialist.md` - Coding Specialist agent prompt
+- `data-analyst.md` - Data Analyst agent prompt
+- `computer-use.md` - Computer Use agent prompt
+- `web-explorer.md` - Web Explorer agent prompt
+
+**Target Directory**: `~/.everfern/prompts/`
+- Synchronized copy of all prompts
+- Persisted across application restarts
+- Updated on startup and during development
+
+### Synchronization Process
+
+1. **Initialization** (`initializePromptSync()`)
+   - Called on application startup in `main/main.ts`
+   - Ensures target directory exists
+   - Calculates MD5 hashes for all source prompts
+   - Syncs only files that have changed
+
+2. **Change Detection** (`checkPromptSync()`)
+   - Compares MD5 hashes of source and target files
+   - Identifies files needing synchronization
+   - Tracks last sync timestamp
+
+3. **File Synchronization** (`syncPromptFile()`)
+   - Copies updated prompts to target directory
+   - Logs synchronization events
+   - Handles errors gracefully with fallbacks
+
+4. **Development Mode** (`watchPrompts()`)
+   - Enabled when `NODE_ENV === 'development'`
+   - Watches source directory for changes
+   - Auto-syncs modified prompts with 100ms debounce
+   - Enables real-time prompt iteration
+
+### Prompt Loading
+
+**Synchronous Loading** (`loadPrompt(filename)`)
+- Loads prompts from synchronized directory
+- Returns null if prompt not found
+- Attempts automatic sync if missing
+- Includes comprehensive logging
+
+**Usage in Agents**:
+```typescript
+// Brain Node
+const mainSystemPrompt = loadPrompt('SYSTEM_PROMPT.md');
+
+// Specialized Agents
+const codingPrompt = loadPrompt('coding-specialist.md');
+const dataPrompt = loadPrompt('data-analyst.md');
+const computerPrompt = loadPrompt('computer-use.md');
+const webPrompt = loadPrompt('web-explorer.md');
+```
+
+### Benefits
+
+1. **Runtime Updates**: Modify prompts without redeployment
+2. **Consistency**: All agents use synchronized prompts
+3. **Development Efficiency**: Watch mode for real-time iteration
+4. **Reliability**: Fallback prompts if sync fails
+5. **Auditability**: Track prompt changes via git
+
+### Error Handling
+
+- **Missing Source**: Logs warning, uses fallback prompt
+- **Sync Failure**: Logs error, attempts retry on next load
+- **File System Error**: Graceful degradation with fallback
+- **Hash Mismatch**: Automatic re-sync on next startup
 
 ## Error Handling and Recovery
 

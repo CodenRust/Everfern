@@ -829,6 +829,9 @@ class AIClient {
                                     entry.name += tc.function.name;
                                 if (tc.function?.arguments)
                                     entry.arguments += tc.function.arguments;
+                                if (req.onToolCallChunk && tc.function?.arguments) {
+                                    req.onToolCallChunk(tc.index, toolCallsMap[tc.index].name, tc.function.arguments);
+                                }
                             }
                         }
                     }
@@ -1285,6 +1288,11 @@ class AIClient {
                     if (d.type === 'content_block_delta' && d.delta?.type === 'input_json_delta') {
                         if (toolCallsMap[d.index])
                             toolCallsMap[d.index].arguments += d.delta.partial_json;
+                        if (req.onToolCallChunk && d.delta.partial_json) {
+                            const toolIndex = d.index;
+                            const currentToolName = toolCallsMap[toolIndex]?.name ?? '';
+                            req.onToolCallChunk(toolIndex, currentToolName, d.delta.partial_json);
+                        }
                     }
                     if (d.type === 'message_delta' && d.delta?.stop_reason) {
                         finishReason = d.delta.stop_reason;
@@ -1561,6 +1569,17 @@ class AIClient {
             for (const line of lines) {
                 try {
                     const d = JSON.parse(line);
+                    if (d.message?.tool_calls) {
+                        for (let i = 0; i < d.message.tool_calls.length; i++) {
+                            const tc = d.message.tool_calls[i];
+                            const argsDelta = tc.function?.arguments
+                                ? (typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments))
+                                : '';
+                            if (req.onToolCallChunk && argsDelta) {
+                                req.onToolCallChunk(i, tc.function?.name || tc.name || '', argsDelta);
+                            }
+                        }
+                    }
                     yield {
                         id,
                         delta: d.message?.content ?? '',

@@ -93,10 +93,18 @@ export interface SubAgentProgressBatch {
   timestamp: string;
 }
 
+export interface LiveToolCall {
+  index: number;
+  toolName: string;
+  partialArguments: string;
+  isStreaming: boolean;
+}
+
 export type {
     ToolCallDisplay as ToolCallDisplayType,
     Message as MessageType,
     FileAttachment as FileAttachmentType,
     FolderContext as FolderContextType,
-    ModelOption as ModelOptionType
+    ModelOption as ModelOptionType,
+    LiveToolCall as LiveToolCallType
 };

@@ -3,6 +3,7 @@ import { AgentRunner } from '../runner';
 import { ToolDefinition, ChatMessage, ToolCall } from '../../../lib/ai-client';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
+import { loadPrompt } from '../../../lib/prompt-sync';
 
 export const createComputerUseNode = (
   runner: AgentRunner,

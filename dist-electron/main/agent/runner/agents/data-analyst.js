@@ -5,8 +5,7 @@ const agent_runtime_1 = require("../services/agent-runtime");
 const mission_integrator_1 = require("../mission-integrator");
 const sessions_1 = require("../../sessions");
 const planner_1 = require("../../tools/planner");
-const promises_1 = require("fs/promises");
-const path_1 = require("path");
+const prompt_sync_1 = require("../../../lib/prompt-sync");
 function createProgressStreamer(eventQueue) {
     let totalSteps = 0;
     let completedSteps = 0;
@@ -119,12 +118,9 @@ ${nextPendingStep ? `Proceed directly to ${nextPendingStep.description}. Do not 
         const startTime = Date.now();
         progressStreamer.emitStart('Data Analyst');
         try {
-            // Load system prompt from file
-            let systemPrompt = '';
-            try {
-                systemPrompt = await (0, promises_1.readFile)((0, path_1.join)(process.cwd(), 'main/agent/prompts/data-analyst.md'), 'utf-8');
-            }
-            catch (error) {
+            // Load system prompt from synchronized prompts directory
+            let systemPrompt = (0, prompt_sync_1.loadPrompt)('data-analyst.md');
+            if (!systemPrompt) {
                 console.warn('Failed to load data analyst prompt, using fallback');
                 systemPrompt = `You are the EverFern Data Analyst.
 Your goal is to process data, generate insights, and create visualizations.

@@ -58,6 +58,8 @@ exports.GraphState = langgraph_1.Annotation.Root({
     // Completion signal — brain sets this before routing to judge
     // to explain why it believes the mission should end
     completionSignal: (0, langgraph_1.Annotation)(),
+    // Routing decision — brain sets this to route to specialized agents
+    routingDecision: (0, langgraph_1.Annotation)(),
     // HITL Approval State
     hitlApprovalResult: (0, langgraph_1.Annotation)(),
     // Mission Tracking (OpenClaw style)

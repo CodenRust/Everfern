@@ -31,8 +31,8 @@ export async function runAgentStep(
   runner.telemetry.metrics(iterations);
 
   // Emit transition as thought for frontend visibility
-  const icon = nodeName === 'data_analyst' ? '📊' : 
-               nodeName === 'coding_specialist' ? '💻' : 
+  const icon = nodeName === 'data_analyst' ? '📊' :
+               nodeName === 'coding_specialist' ? '💻' :
                nodeName === 'web_explorer' ? '🌐' : '🧭';
   eventQueue?.push({ type: 'thought', content: `\n${icon} ${nodeName.replace(/_/g, ' ').toUpperCase()}: Initializing step...` });
 
@@ -49,7 +49,7 @@ export async function runAgentStep(
     const lastMsgContent = state.messages[state.messages.length - 1]?.content || '';
     const vlm = (runner as any).config.vlm;
     let updatedMessages: ChatMessage[] | null = null;
-    
+
     // Only use separate VLM if main model isn't vision-native
     const mainProvider = runner.client.provider;
     const isVisionNative = ['openai', 'anthropic', 'gemini', 'nvidia', 'google'].includes(mainProvider);
@@ -77,12 +77,12 @@ export async function runAgentStep(
         if (screenshotData && screenshotData.b64) {
           const lastMsgIdx = normalizedMessages.length - 1;
           const lastMsg = normalizedMessages[lastMsgIdx];
-          
+
           if (lastMsg && lastMsg.role === 'user') {
-            const originalContent = typeof lastMsg.content === 'string' 
-              ? [{ type: 'text' as const, text: lastMsg.content }] 
+            const originalContent = typeof lastMsg.content === 'string'
+              ? [{ type: 'text' as const, text: lastMsg.content }]
               : lastMsg.content;
-              
+
             const newContent: ChatMessage['content'] = [
               ...originalContent,
               {
@@ -90,7 +90,7 @@ export async function runAgentStep(
                 image_url: { url: `data:image/jpeg;base64,${screenshotData.b64}` }
               }
             ];
-            
+
             // Create a copy of the normalized messages and update the last one
             updatedMessages = [...normalizedMessages];
             updatedMessages[lastMsgIdx] = { ...lastMsg, content: newContent };
@@ -140,15 +140,37 @@ export async function runAgentStep(
       return m;
     });
 
-    // Limit message history for performance (keep last 20 messages)
-    const maxMessages = 20;
-    const limitedMessages = prunedMessages.length > maxMessages
-      ? [prunedMessages[0], ...prunedMessages.slice(-maxMessages + 1)]
-      : prunedMessages;
+    // Limit message history for performance — only compact when total estimated tokens exceed 150k
+    const COMPACT_THRESHOLD = 150000;
+    const estimateTokens = (msgs: typeof prunedMessages) =>
+      msgs.reduce((sum, m) => sum + Math.ceil((typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).length / 4), 0);
+
+    let limitedMessages: typeof prunedMessages;
+    if (estimateTokens(prunedMessages) > COMPACT_THRESHOLD) {
+      // Keep system message + last 20 messages
+      const systemMsg = prunedMessages[0]?.role === 'system' ? [prunedMessages[0]] : [];
+      const rest = prunedMessages.filter(m => m.role !== 'system');
+      limitedMessages = [...systemMsg, ...rest.slice(-20)];
+    } else {
+      limitedMessages = prunedMessages;
+    }
+
+    const startedToolCallIndices = new Set<number>();
 
     const request: ChatRequest = {
       messages: limitedMessages,
       tools: toolDefs,
+      onToolCallChunk: (index: number, toolName: string, argumentsDelta: string) => {
+        try {
+          if (!startedToolCallIndices.has(index)) {
+            startedToolCallIndices.add(index);
+            eventQueue?.push({ type: 'tool_call_start', index, toolName });
+          }
+          eventQueue?.push({ type: 'tool_call_chunk', index, argumentsDelta });
+        } catch (err) {
+          console.warn('[AgentRuntime] onToolCallChunk error:', err);
+        }
+      },
       onStreamChunk: (chunk: string) => {
         console.log(`[Stream] Received chunk: "${chunk}" (buffer: ${thoughtBuffer.length} chars)`);
         thoughtBuffer += chunk;
@@ -214,12 +236,12 @@ export async function runAgentStep(
     if (isSpecializedAgent && (!response.toolCalls || response.toolCalls.length === 0) && verifyIntentRetries === 0) {
         verifyIntentRetries++;
         runner.telemetry.warn(`[AgentRuntime] ${nodeName} failed to call a tool. Nudging...`);
-        
+
         const nudgeMsg: ChatMessage = {
           role: 'system',
           content: `SYSTEM REMINDER: You are the ${nodeName}. You are specifically designed to use your specialized tools. YOU HAVE ALL NECESSARY PERMISSIONS. Do not explain why you cannot do something. Do not talk about the task. Use the 'computer_use' tool (or your other relevant tools) NOW to execute the next step of the plan. Output a tool call immediately.`
         };
-        
+
         const nudgeMessages = [...limitedMessages, nudgeMsg];
         response = await client.chat({ ...request, messages: nudgeMessages });
     }

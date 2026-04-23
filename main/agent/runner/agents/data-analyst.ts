@@ -6,8 +6,7 @@ import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 import { getAnalysisSessionManager } from '../../sessions';
 import { getActivePlans } from '../../tools/planner';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { loadPrompt } from '../../../lib/prompt-sync';
 
 /**
  * ProgressStreamer - Emits real-time progress updates during data analysis
@@ -164,11 +163,9 @@ ${nextPendingStep ? `Proceed directly to ${nextPendingStep.description}. Do not 
     progressStreamer.emitStart('Data Analyst');
 
     try {
-      // Load system prompt from file
-      let systemPrompt = '';
-      try {
-        systemPrompt = await readFile(join(process.cwd(), 'main/agent/prompts/data-analyst.md'), 'utf-8');
-      } catch (error) {
+      // Load system prompt from synchronized prompts directory
+      let systemPrompt = loadPrompt('data-analyst.md');
+      if (!systemPrompt) {
         console.warn('Failed to load data analyst prompt, using fallback');
         systemPrompt = `You are the EverFern Data Analyst.
 Your goal is to process data, generate insights, and create visualizations.

@@ -66,6 +66,7 @@ import { VectorContextEngine } from './context-engine/vector';
 import { shell } from 'electron';
 import { syncBuiltInSkills, mergeCustomSkills, getCustomSkillsPath, listCustomSkills, saveCustomSkill, deleteCustomSkill } from './lib/skills-sync';
 import { CommandRegistry } from './agent/tools/terminal/registry';
+import { initializePromptSync, watchPrompts } from './lib/prompt-sync';
 
 // ── GPU / Cache Startup Fixes (must run before app.whenReady) ───────────────
 // Disable GPU shader disk cache — prevents "Access is denied (0x5)" on Windows
@@ -477,8 +478,23 @@ let voiceOverlayManager: VoiceOverlayManager;
 app.whenReady().then(async () => {
   console.log('[App] App ready, starting initialization...');
 
+  // ── Initialize Prompt Synchronization System ──────────────────────
+  console.log('[Startup] 🔄 Initializing prompt synchronization...');
+  initializePromptSync();
+
+  // Watch for prompt changes in development mode
+  if (process.env.NODE_ENV === 'development') {
+    watchPrompts();
+  }
+
+  // ── Initialize Skill Synchronization System ──────────────────────
+  console.log('[Startup] 🔄 Initializing skill synchronization...');
+  syncBuiltInSkills();
+  mergeCustomSkills();
+
   /**
    * Ensures that ~/.everfern/SYSTEM_PROMPT.md exists, creating it with defaults if not.
+   * NOTE: This is now handled by the prompt sync system, but kept for backward compatibility.
    */
   function ensureSystemPromptExists() {
     const everfernDir = path.join(os.homedir(), '.everfern');
@@ -514,7 +530,7 @@ Your goal is to be the ultimate workplace companion.
     }
   }
 
-  // Ensure system prompt exists
+  // Ensure system prompt exists (fallback for prompt sync)
   ensureSystemPromptExists();
 
   voiceOverlayManager = new VoiceOverlayManager();

@@ -345,146 +345,117 @@ If a specialized agent failed to complete a step, identify the issue and use you
     .addNode('multi_tool_orchestrator', orchestratorNode)
     .addNode('judge', judgeNode);
 
+  // New Brain-Centric Routing Architecture
   compiledGraph
     .addEdge(START, 'intent_classifier')
-    .addConditionalEdges('intent_classifier', (state) => {
-        // Always route through task_decomposer to ensure proper task type evaluation
-        // and routing to specialized agents (data_analyst, coding_specialist, etc.)
-        const intent = state.currentIntent;
+    .addEdge('intent_classifier', 'task_decomposer')
+    .addEdge('task_decomposer', 'global_planner')
+    .addEdge('global_planner', 'brain')
 
-        console.log(`[Graph] 🔀 Routing from intent_classifier: intent=${intent} → task_decomposer`);
+    // Brain is the central router - it decides whether to handle tasks itself or route to specialists
+    .addConditionalEdges('brain', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+        const routingDecision = state.routingDecision;
 
-        return 'task_decomposer';
-    }, {
-        task_decomposer: 'task_decomposer',
-    })
-    .addConditionalEdges('task_decomposer', (state) => {
-        const intent = state.currentIntent;
+        // If brain has tools to execute, validate them first
+        if (hasTools) {
+            console.log('[Graph] 🔀 Brain has tools → action_validation');
+            return 'action_validation';
+        }
 
-        // Guard: Ensure task decomposition is fully processed
-        // If decomposedTask exists, verify it has valid structure
-        if (state.decomposedTask) {
-            const plan = state.decomposedTask;
-            if (!plan.steps || plan.steps.length === 0) {
-                console.warn('[Graph] ⚠️ Task decomposition incomplete - no steps defined');
+        // If brain made a routing decision to specialized agents
+        if (routingDecision) {
+            console.log(`[Graph] 🔀 Brain routing decision: ${routingDecision.decision}`);
+
+            switch (routingDecision.decision) {
+                case 'route_coding':
+                    return 'coding_specialist';
+                case 'route_data_analyst':
+                    return 'data_analyst';
+                case 'route_computer_use':
+                    return 'computer_use_agent';
+                case 'route_web_explorer':
+                    return 'web_explorer';
+                case 'complete_task':
+                case 'continue_brain':
+                default:
+                    return 'judge';
             }
         }
 
-        // Route to specialized agents based on task type
-        let destination = 'global_planner';
-
-        if (intent === 'automate') {
-            destination = 'computer_use_agent';
-        } else if (intent === 'coding') {
-            destination = 'coding_specialist';
-        } else if (intent === 'analyze') {
-            destination = 'data_analyst';
-        } else if (intent === 'research') {
-            destination = 'web_explorer';
-        }
-
-        console.log(`[Graph] 🔀 Routing from task_decomposer: intent=${intent} → ${destination}`);
-
-        return destination;
+        // Default to judge for completion assessment
+        return 'judge';
     }, {
-        computer_use_agent: 'computer_use_agent',
+        action_validation: 'action_validation',
         coding_specialist: 'coding_specialist',
         data_analyst: 'data_analyst',
+        computer_use_agent: 'computer_use_agent',
         web_explorer: 'web_explorer',
-        global_planner: 'global_planner',
-    })
-    .addEdge('global_planner', 'brain')
-    .addConditionalEdges('computer_use_agent', (state) => {
-        // Guard: Validate specialized agent has completed work before routing to judge
-        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
-
-        // If agent has pending tools, route to validation
-        if (hasTools) {
-            return 'action_validation';
-        }
-
-        // If agent has no tools and no completion signal, it may not have finished its work
-        // Route back to itself to continue iteration
-        if (!hasCompletionSignal) {
-            console.log('[Graph] ⚠️ computer_use_agent has no tools and no completion signal - may need more iterations');
-        }
-
-        return 'judge';
-    }, {
-        action_validation: 'action_validation',
         judge: 'judge',
     })
+
+    // All specialized agents route back to brain for coordination
     .addConditionalEdges('coding_specialist', (state) => {
-        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
 
-        // If agent has pending tools, route to validation
         if (hasTools) {
+            console.log('[Graph] 🔀 Coding specialist has tools → action_validation');
             return 'action_validation';
         }
 
-        // If agent has no tools and no completion signal, it may not have finished its work
-        // Route back to itself to continue iteration
-        if (!hasCompletionSignal) {
-            console.log('[Graph] ⚠️ coding_specialist has no tools and no completion signal - may need more iterations');
-        }
-
-        return 'judge';
+        console.log('[Graph] 🔀 Coding specialist complete → brain');
+        return 'brain';
     }, {
         action_validation: 'action_validation',
-        judge: 'judge',
+        brain: 'brain',
     })
+
     .addConditionalEdges('data_analyst', (state) => {
-        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
 
-        // If agent has pending tools, route to validation
         if (hasTools) {
+            console.log('[Graph] 🔀 Data analyst has tools → action_validation');
             return 'action_validation';
         }
 
-        // If agent has no tools and no completion signal, it may not have finished its work
-        // Route back to itself to continue iteration
-        if (!hasCompletionSignal) {
-            console.log('[Graph] ⚠️ data_analyst has no tools and no completion signal - may need more iterations');
-        }
-
-        return 'judge';
+        console.log('[Graph] 🔀 Data analyst complete → brain');
+        return 'brain';
     }, {
         action_validation: 'action_validation',
-        judge: 'judge',
+        brain: 'brain',
     })
+
+    .addConditionalEdges('computer_use_agent', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+
+        if (hasTools) {
+            console.log('[Graph] 🔀 Computer use agent has tools → action_validation');
+            return 'action_validation';
+        }
+
+        console.log('[Graph] 🔀 Computer use agent complete → brain');
+        return 'brain';
+    }, {
+        action_validation: 'action_validation',
+        brain: 'brain',
+    })
+
     .addConditionalEdges('web_explorer', (state) => {
-        // Guard: Validate specialized agent has completed work before routing to judge
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        const hasCompletionSignal = state.completionSignal !== null && state.completionSignal !== undefined;
 
-        // If agent has pending tools, route to validation
         if (hasTools) {
+            console.log('[Graph] 🔀 Web explorer has tools → action_validation');
             return 'action_validation';
         }
 
-        // If agent has no tools and no completion signal, it may not have finished its work
-        // Route back to itself to continue iteration
-        if (!hasCompletionSignal) {
-            console.log('[Graph] ⚠️ web_explorer has no tools and no completion signal - may need more iterations');
-        }
+        console.log('[Graph] 🔀 Web explorer complete → brain');
+        return 'brain';
+    }, {
+        action_validation: 'action_validation',
+        brain: 'brain',
+    })
 
-        return 'judge';
-    }, {
-        action_validation: 'action_validation',
-        judge: 'judge',
-    })
-    .addConditionalEdges('brain', (state) => {
-        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
-        return hasTools ? 'action_validation' : 'judge';
-    }, {
-        action_validation: 'action_validation',
-        judge: 'judge',
-    })
+    // Tool validation and execution flow
     .addConditionalEdges('action_validation', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
         if (hasTools) {
@@ -512,49 +483,32 @@ If a specialized agent failed to complete a step, identify the issue and use you
 
           return state.validationResult?.isHighRisk ? 'hitl_approval' : 'multi_tool_orchestrator';
         }
-        return 'judge';
+        return 'brain';
     }, {
         hitl_approval: 'hitl_approval',
         multi_tool_orchestrator: 'multi_tool_orchestrator',
-        judge: 'judge',
+        brain: 'brain',
     })
+
     .addConditionalEdges('hitl_approval', (state) => {
         const approved = state.hitlApprovalResult?.approved;
         if (approved === true) {
           return 'multi_tool_orchestrator';
         } else if (approved === false) {
-          return 'judge';
+          return 'brain';
         } else {
           return END;
         }
     }, {
         multi_tool_orchestrator: 'multi_tool_orchestrator',
-        judge: 'judge',
+        brain: 'brain',
         [END]: END
     })
-    .addConditionalEdges('multi_tool_orchestrator', (state) => {
-        // Route back to the originating specialized agent to allow iterative execution
-        const intent = state.currentIntent;
 
-        console.log(`[Graph] 🔀 Routing from multi_tool_orchestrator: intent=${intent}`);
+    // After tool execution, always return to brain for coordination
+    .addEdge('multi_tool_orchestrator', 'brain')
 
-        // Route back to the specialized agent that initiated the tool call
-        // This allows each agent to iterate until their task is complete
-        if (intent === 'automate') return 'computer_use_agent';
-        if (intent === 'coding') return 'coding_specialist';
-        if (intent === 'analyze') return 'data_analyst';
-        if (intent === 'research') return 'web_explorer';
-
-        // Default to brain for general tasks
-        return 'brain';
-    }, {
-        computer_use_agent: 'computer_use_agent',
-        coding_specialist: 'coding_specialist',
-        data_analyst: 'data_analyst',
-        web_explorer: 'web_explorer',
-        judge: 'judge',
-        brain: 'brain',
-    })
+    // Judge makes final completion decision
     .addConditionalEdges('judge', (state) => {
         return state.shouldContinueIteration ? 'brain' : END;
     }, {

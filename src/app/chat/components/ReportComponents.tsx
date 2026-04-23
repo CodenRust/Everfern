@@ -16,29 +16,12 @@ const ReportLink = ({ content, onOpen }: { content: string; onOpen: (label: stri
     if (links.length === 0) return null;
 
     return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+        <div className="flex flex-wrap gap-2 mt-2.5">
             {links.map((link, idx) => (
                 <button
                     key={idx}
                     onClick={() => onOpen(link.label, link.path)}
-                    style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 7,
-                        padding: '7px 14px', borderRadius: 10,
-                        backgroundColor: '#f4f3ef', border: '1px solid #e0ded9',
-                        color: '#4a4846', fontSize: 12, fontWeight: 500,
-                        cursor: 'pointer', transition: 'all 0.15s',
-                        fontFamily: "'Figtree', system-ui, sans-serif"
-                    }}
-                    onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = '#eceae4';
-                        e.currentTarget.style.borderColor = '#ccc9c3';
-                        e.currentTarget.style.color = '#201e24';
-                    }}
-                    onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = '#f4f3ef';
-                        e.currentTarget.style.borderColor = '#e0ded9';
-                        e.currentTarget.style.color = '#4a4846';
-                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-[7px] rounded-[10px] bg-[#f4f3ef] border border-[#e0ded9] text-[#4a4846] text-xs font-medium cursor-pointer transition-all duration-150 hover:bg-[#eceae4] hover:border-[#ccc9c3] hover:text-[#201e24]"
                 >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
@@ -64,80 +47,64 @@ const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose
                     animate={{ x: 0, opacity: 1 }}
                     exit={{ x: '100%', opacity: 0 }}
                     transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-                    style={{
-                        position: 'fixed',
-                        top: 12,
-                        right: 12,
-                        bottom: 12,
-                        width: '65vw',
-                        maxWidth: 1100,
-                        backgroundColor: '#ffffff',
-                        border: '1px solid #e8e6d9',
-                        borderRadius: 24,
-                        boxShadow: '-10px 0 40px rgba(0,0,0,0.08), 0 10px 30px rgba(0,0,0,0.03)',
-                        zIndex: 1000,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        overflow: 'hidden'
-                    }}
+                    className="fixed top-3 right-3 bottom-3 w-[65vw] max-w-[1100px] bg-white border border-[#e8e6d9] rounded-3xl shadow-[−10px_0_40px_rgba(0,0,0,0.08),0_10px_30px_rgba(0,0,0,0.03)] z-1000 flex flex-col overflow-hidden"
                 >
                     {/* Header */}
-                    <div style={{ padding: '20px 28px', borderBottom: '1px solid #f0ede8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#faf9f7' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div className="px-7 py-5 border-b border-[#f0ede8] flex items-center justify-between bg-[#faf9f7]">
+                        <div className="flex items-center gap-3.5">
+                            <div className="w-10 h-10 rounded-xl bg-[rgba(99,102,241,0.1)] flex items-center justify-center">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
                                     <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
                                 </svg>
                             </div>
                             <div>
-                                <h2 style={{ fontSize: 17, fontWeight: 600, color: '#201e24', margin: 0 }}>{label}</h2>
-                                <p style={{ fontSize: 12, color: '#8a8886', margin: '2px 0 0', fontFamily: "'JetBrains Mono', monospace" }}>{path.split(/[/\\]/).pop()}</p>
+                                <h2 className="text-[17px] font-semibold text-[#201e24] m-0">{label}</h2>
+                                <p className="text-xs text-[#8a8886] mt-0.5 font-mono">{path.split(/[/\\]/).pop()}</p>
                             </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 10 }}>
+                        <div className="flex gap-2.5">
                             <button
                                 onClick={() => window.open(fileUrl, '_blank')}
-                                style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid #e0ded9', backgroundColor: 'transparent', color: '#4a4846', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}
-                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f4f3ef'; }}
-                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                                className="px-4 py-2 rounded-[10px] border border-[#e0ded9] bg-transparent text-[#4a4846] text-[13px] font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-150 hover:bg-[#f4f3ef]"
                             >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                                </svg>
                                 Open in Browser
                             </button>
                             <button
                                 onClick={onClose}
-                                style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: 'transparent', border: '1px solid #e0ded9', color: '#8a8886', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
-                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f4f3ef'; e.currentTarget.style.color = '#201e24'; }}
-                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#8a8886'; }}
+                                className="w-9 h-9 rounded-[10px] bg-transparent border border-[#e0ded9] text-[#8a8886] cursor-pointer flex items-center justify-center transition-all duration-150 hover:bg-[#f4f3ef] hover:text-[#201e24]"
                             >
                                 <XMarkIcon width={18} height={18} />
                             </button>
                         </div>
                     </div>
+
                     {/* Content */}
-                    <div style={{ flex: 1, overflow: 'hidden', backgroundColor: '#fafaf8' }}>
+                    <div className="flex-1 overflow-hidden bg-[#fafaf8]">
                         {isHtml ? (
                             <iframe
                                 src={fileUrl}
                                 title={label}
-                                style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+                                className="w-full h-full border-none block"
                                 sandbox="allow-same-origin allow-scripts"
                             />
                         ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: 16 }}>
-                                <div style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: '#f4f3ef', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div className="flex items-center justify-center h-full flex-col gap-4">
+                                <div className="w-16 h-16 rounded-[20px] bg-[#f4f3ef] flex items-center justify-center">
                                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8a8886" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
                                     </svg>
                                 </div>
-                                <div style={{ textAlign: 'center' }}>
-                                    <p style={{ fontSize: 15, fontWeight: 600, color: '#201e24', margin: '0 0 4px' }}>Preview not available</p>
-                                    <p style={{ fontSize: 13, color: '#8a8886', margin: 0 }}>Open in browser to view this file</p>
+                                <div className="text-center">
+                                    <p className="text-[15px] font-semibold text-[#201e24] mb-1">Preview not available</p>
+                                    <p className="text-[13px] text-[#8a8886]">Open in browser to view this file</p>
                                 </div>
                                 <button
                                     onClick={() => window.open(fileUrl, '_blank')}
-                                    style={{ padding: '10px 22px', borderRadius: 10, border: 'none', backgroundColor: '#6366f1', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                                    className="px-[22px] py-2.5 rounded-[10px] border-none bg-[#6366f1] text-white text-[13px] font-semibold cursor-pointer"
                                 >
                                     Open in Browser
                                 </button>
@@ -150,7 +117,7 @@ const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose
     );
 };
 
-// ── Report Container (for displaying reports in a card-like container) ────────
+// ── Report Container (card shown in chat for generated reports) ───────────────
 interface ReportContainerProps {
     content: string;
     onView: (label: string, path: string) => void;
@@ -167,7 +134,7 @@ const ReportContainer = ({ content, onView }: ReportContainerProps) => {
     if (links.length === 0) return null;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+        <div className="flex flex-col gap-2.5 mt-3">
             {links.map((link, idx) => {
                 const ext = link.path.split('.').pop()?.toUpperCase() || 'FILE';
                 return (
@@ -176,42 +143,11 @@ const ReportContainer = ({ content, onView }: ReportContainerProps) => {
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.25, delay: idx * 0.05 }}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            padding: '14px 18px',
-                            borderRadius: 14,
-                            backgroundColor: '#f4f3ef',
-                            border: '1px solid #e8e6d9',
-                            transition: 'all 0.2s ease',
-                            fontFamily: "'Figtree', system-ui, sans-serif",
-                        }}
-                        onMouseEnter={(e) => {
-                            const el = e.currentTarget as HTMLDivElement;
-                            el.style.backgroundColor = '#eceae4';
-                            el.style.borderColor = '#ddd9ce';
-                        }}
-                        onMouseLeave={(e) => {
-                            const el = e.currentTarget as HTMLDivElement;
-                            el.style.backgroundColor = '#f4f3ef';
-                            el.style.borderColor = '#e8e6d9';
-                        }}
+                        className="flex items-center justify-between px-[18px] py-[14px] rounded-2xl bg-[#f4f3ef] border border-[#e8e6d9] transition-all duration-200 hover:bg-[#eceae4] hover:border-[#ddd9ce]"
                     >
-                        {/* Left side - Icon and text */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
-                            <div
-                                style={{
-                                    width: 44,
-                                    height: 44,
-                                    borderRadius: 10,
-                                    backgroundColor: 'rgba(99,102,241,0.1)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    flexShrink: 0,
-                                }}
-                            >
+                        {/* Left — icon + label */}
+                        <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                            <div className="w-11 h-11 rounded-[10px] bg-[rgba(99,102,241,0.1)] flex items-center justify-center shrink-0">
                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                     <polyline points="14 2 14 8 20 8" />
@@ -220,47 +156,20 @@ const ReportContainer = ({ content, onView }: ReportContainerProps) => {
                                     <polyline points="10 9 9 9 8 9" />
                                 </svg>
                             </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                                <span style={{ fontSize: 14, fontWeight: 600, color: '#201e24', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <div className="flex flex-col gap-0.5 min-w-0">
+                                <span className="text-[14px] font-semibold text-[#201e24] whitespace-nowrap overflow-hidden text-ellipsis">
                                     {link.label}
                                 </span>
-                                <span style={{ fontSize: 11, color: '#8a8886', fontFamily: "'JetBrains Mono', monospace" }}>
+                                <span className="text-[11px] text-[#8a8886] font-mono">
                                     {ext}
                                 </span>
                             </div>
                         </div>
 
-                        {/* Right side - View button */}
+                        {/* Right — View button */}
                         <button
                             onClick={() => onView(link.label, link.path)}
-                            style={{
-                                padding: '8px 18px',
-                                borderRadius: 10,
-                                backgroundColor: 'transparent',
-                                border: '1.5px solid #c9c6be',
-                                color: '#4a4846',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 7,
-                                transition: 'all 0.15s ease',
-                                flexShrink: 0,
-                                fontFamily: "'Figtree', system-ui, sans-serif",
-                            }}
-                            onMouseEnter={(e) => {
-                                const el = e.currentTarget as HTMLButtonElement;
-                                el.style.backgroundColor = '#201e24';
-                                el.style.borderColor = '#201e24';
-                                el.style.color = '#ffffff';
-                            }}
-                            onMouseLeave={(e) => {
-                                const el = e.currentTarget as HTMLButtonElement;
-                                el.style.backgroundColor = 'transparent';
-                                el.style.borderColor = '#c9c6be';
-                                el.style.color = '#4a4846';
-                            }}
+                            className="px-[18px] py-2 rounded-[10px] bg-transparent border-[1.5px] border-[#c9c6be] text-[#4a4846] text-[13px] font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-150 shrink-0 hover:bg-[#201e24] hover:border-[#201e24] hover:text-white"
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
