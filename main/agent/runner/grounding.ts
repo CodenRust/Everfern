@@ -809,3 +809,529 @@ async function raceToFound<T>(promises: Promise<T | null>[]): Promise<T | null> 
     }
   });
 }
+
+// ── Enhanced Grounding Engine ────────────────────────────────────────────────
+
+/**
+ * ElementData from Chrome extension
+ * Represents a captured DOM element with its properties and location
+ */
+export interface ElementData {
+  selector: string;
+  boundingRect: DOMRect | { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  tagName: string;
+  textContent: string;
+  attributes: Record<string, string>;
+  isInteractive: boolean;
+  ariaLabel?: string;
+  dataTestId?: string;
+}
+
+/**
+ * Enhanced grounding result with method information
+ */
+export interface VisualGroundingResult extends GroundingResult {
+  method: 'dom' | 'visual' | 'hybrid';
+  domSelector?: string;
+  visualConfidence?: number;
+  fallbackReason?: string;
+  extensionData?: ElementData;
+}
+
+/**
+ * Configuration for enhanced grounding with fallback capabilities
+ */
+export interface EnhancedGroundingConfig extends GroundingConfig {
+  enableSoMDetection?: boolean;
+  fallbackToVisual?: boolean;
+  confidenceThreshold?: number;
+  maxRetryAttempts?: number;
+  enableExtensionData?: boolean;
+}
+
+/**
+ * Learning record for successful visual interactions
+ */
+interface VisualInteractionLearning {
+  query: string;
+  method: 'dom' | 'visual' | 'hybrid';
+  selector?: string;
+  confidence: number;
+  timestamp: string;
+  success: boolean;
+  coordinates?: { x: number; y: number };
+  viewportSize?: { width: number; height: number };
+}
+
+/**
+ * EnhancedGroundingEngine extends GroundingEngine with hybrid detection
+ * and intelligent fallback logic combining DOM and visual approaches.
+ */
+export class EnhancedGroundingEngine extends GroundingEngine {
+  public enhancedConfig: EnhancedGroundingConfig;
+  private extensionElements: Map<string, ElementData> = new Map();
+  private lastExtensionUpdate: number = 0;
+  private extensionUpdateTTL: number = 5000; // 5 seconds
+  private learningLog: VisualInteractionLearning[] = [];
+  private maxLearningLogSize: number = 1000;
+  private selectorOptimizations: Map<string, string> = new Map(); // Maps queries to optimized selectors
+
+  constructor(config: EnhancedGroundingConfig) {
+    super(config);
+    this.enhancedConfig = {
+      enableSoMDetection: true,
+      fallbackToVisual: true,
+      confidenceThreshold: 0.75,
+      maxRetryAttempts: 3,
+      enableExtensionData: true,
+      ...config,
+    };
+  }
+
+  /**
+   * Update extension element data from Chrome extension
+   * This data is used as a primary source for DOM-based detection
+   */
+  updateExtensionElements(elements: ElementData[]): void {
+    this.extensionElements.clear();
+    for (const el of elements) {
+      this.extensionElements.set(el.selector, el);
+    }
+    this.lastExtensionUpdate = Date.now();
+    console.log(`[EnhancedGrounding] Updated ${elements.length} extension elements`);
+  }
+
+  /**
+   * Check if extension data is still fresh
+   */
+  private isExtensionDataFresh(): boolean {
+    return Date.now() - this.lastExtensionUpdate < this.extensionUpdateTTL;
+  }
+
+  /**
+   * Try to match query against extension element data
+   * Returns a VisualGroundingResult if a match is found
+   */
+  private matchExtensionElements(query: string): VisualGroundingResult | null {
+    if (!this.enhancedConfig.enableExtensionData || !this.isExtensionDataFresh()) {
+      return null;
+    }
+
+    const q = query.toLowerCase().trim();
+    let bestMatch: { selector: string; el: ElementData; confidence: number } | null = null;
+    let bestConfidence = 0;
+
+    // Search through extension elements with scoring
+    for (const [selector, el] of this.extensionElements) {
+      const text = el.textContent.toLowerCase().trim();
+      const ariaLabel = (el.ariaLabel || '').toLowerCase().trim();
+      const dataTestId = (el.dataTestId || '').toLowerCase().trim();
+      const tagName = el.tagName.toLowerCase();
+
+      let confidence = 0;
+
+      // Exact matches get highest confidence
+      if (text === q || ariaLabel === q || dataTestId === q) {
+        confidence = 0.98;
+      }
+      // Substring matches get good confidence
+      else if (text.includes(q) || ariaLabel.includes(q) || dataTestId.includes(q)) {
+        confidence = 0.85;
+      }
+      // Partial word matches
+      else if (text.split(/\s+/).some(word => word.includes(q)) ||
+               ariaLabel.split(/\s+/).some(word => word.includes(q))) {
+        confidence = 0.75;
+      }
+
+      // Boost confidence for interactive elements
+      if (confidence > 0 && el.isInteractive) {
+        confidence = Math.min(0.99, confidence + 0.05);
+      }
+
+      // Track best match
+      if (confidence > bestConfidence) {
+        bestConfidence = confidence;
+        bestMatch = { selector, el, confidence };
+      }
+    }
+
+    if (bestMatch && bestConfidence >= this.enhancedConfig.confidenceThreshold!) {
+      const rect = bestMatch.el.boundingRect;
+      const x = Math.round((rect.left + rect.right) / 2);
+      const y = Math.round((rect.top + rect.bottom) / 2);
+
+      console.log(`[EnhancedGrounding] ✅ Extension match: "${query}" → ${bestMatch.selector} (confidence: ${bestConfidence.toFixed(2)})`);
+
+      return {
+        found: true,
+        x,
+        y,
+        confidence: bestConfidence,
+        source: 'showui-local', // Treat as high-confidence DOM match
+        method: 'dom',
+        domSelector: bestMatch.selector,
+        extensionData: bestMatch.el,
+        visualConfidence: bestConfidence,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Validate coordinates against viewport bounds with detailed checks
+   */
+  private validateCoordinates(x: number, y: number, imgW: number, imgH: number): boolean {
+    // Allow small margin for edge elements (10px)
+    const margin = 10;
+
+    // Check if coordinates are within reasonable bounds
+    const withinBounds = x >= -margin && x <= imgW + margin && y >= -margin && y <= imgH + margin;
+
+    if (!withinBounds) {
+      console.warn(`[EnhancedGrounding] ⚠️ Coordinates out of bounds: (${x}, ${y}) vs viewport (${imgW}x${imgH})`);
+      return false;
+    }
+
+    // Warn if coordinates are at extreme edges (might be unreliable)
+    if (x < margin || x > imgW - margin || y < margin || y > imgH - margin) {
+      console.warn(`[EnhancedGrounding] ⚠️ Coordinates at viewport edge: (${x}, ${y})`);
+    }
+
+    return true;
+  }
+
+  /**
+   * Hybrid detection: try DOM first, then visual grounding
+   * Combines extension data with visual grounding for robust element detection
+   */
+  async hybridDetection(
+    screenshot: string,
+    domElements: ElementData[] | undefined,
+    query: string,
+    imgW: number,
+    imgH: number,
+  ): Promise<VisualGroundingResult> {
+    console.log(`[EnhancedGrounding] 🔄 Hybrid detection for: "${query}"`);
+    const startTime = Date.now();
+
+    // Step 1: Try extension element matching (if available)
+    if (domElements && domElements.length > 0) {
+      this.updateExtensionElements(domElements);
+      const extensionMatch = this.matchExtensionElements(query);
+      if (extensionMatch && extensionMatch.confidence >= this.enhancedConfig.confidenceThreshold!) {
+        const duration = Date.now() - startTime;
+        this.recordLearning(query, 'dom', extensionMatch.domSelector, extensionMatch.confidence, true, extensionMatch, imgW, imgH, duration);
+        return extensionMatch;
+      }
+    }
+
+    // Step 2: Try SoM text matching (fast path)
+    const textMatch = this.matchElementByText(screenshot, query);
+    if (textMatch && textMatch.confidence >= this.enhancedConfig.confidenceThreshold!) {
+      const duration = Date.now() - startTime;
+      this.recordLearning(query, 'dom', undefined, textMatch.confidence, true, textMatch, imgW, imgH, duration);
+      return {
+        ...textMatch,
+        method: 'dom',
+        visualConfidence: textMatch.confidence,
+      } as VisualGroundingResult;
+    }
+
+    // Step 3: Fall back to visual grounding
+    if (this.enhancedConfig.fallbackToVisual) {
+      console.log(`[EnhancedGrounding] 📸 Falling back to visual grounding`);
+      const visualResult = await this.locate(screenshot, imgW, imgH, query);
+
+      if (visualResult.found) {
+        // Validate coordinates
+        if (!this.validateCoordinates(visualResult.x, visualResult.y, imgW, imgH)) {
+          console.warn(`[EnhancedGrounding] ⚠️ Visual result out of bounds: (${visualResult.x}, ${visualResult.y})`);
+          const duration = Date.now() - startTime;
+          this.recordLearning(query, 'visual', undefined, 0, false, undefined, imgW, imgH, duration, 'coordinates_out_of_bounds');
+          return {
+            found: false,
+            x: 0,
+            y: 0,
+            confidence: 0,
+            source: visualResult.source,
+            method: 'visual',
+            fallbackReason: 'coordinates_out_of_bounds',
+          };
+        }
+
+        const duration = Date.now() - startTime;
+        this.recordLearning(query, 'visual', undefined, visualResult.confidence, true, visualResult, imgW, imgH, duration);
+        return {
+          ...visualResult,
+          method: 'visual',
+          visualConfidence: visualResult.confidence,
+          fallbackReason: 'dom_insufficient',
+        } as VisualGroundingResult;
+      }
+    }
+
+    // All methods failed
+    const duration = Date.now() - startTime;
+    this.recordLearning(query, 'hybrid', undefined, 0, false, undefined, imgW, imgH, duration, 'all_methods_failed');
+    console.warn(`[EnhancedGrounding] ❌ Hybrid detection failed for: "${query}"`);
+    return {
+      found: false,
+      x: 0,
+      y: 0,
+      confidence: 0,
+      source: 'vision-fallback',
+      method: 'hybrid',
+      fallbackReason: 'all_methods_failed',
+    };
+  }
+
+  /**
+   * Record a visual interaction for learning and optimization
+   */
+  private recordLearning(
+    query: string,
+    method: 'dom' | 'visual' | 'hybrid',
+    selector: string | undefined,
+    confidence: number,
+    success: boolean,
+    result: any,
+    viewportWidth: number,
+    viewportHeight: number,
+    duration: number,
+    error?: string,
+  ): void {
+    const learning: VisualInteractionLearning = {
+      query,
+      method,
+      selector,
+      confidence,
+      timestamp: new Date().toISOString(),
+      success,
+      coordinates: result?.found ? { x: result.x, y: result.y } : undefined,
+      viewportSize: { width: viewportWidth, height: viewportHeight },
+    };
+
+    this.learningLog.push(learning);
+
+    // Keep learning log size manageable
+    if (this.learningLog.length > this.maxLearningLogSize) {
+      this.learningLog = this.learningLog.slice(-this.maxLearningLogSize);
+    }
+
+    // Log for debugging
+    console.log(`[EnhancedGrounding] 📚 Learning recorded: ${method} for "${query}" (success: ${success}, confidence: ${confidence.toFixed(2)}, duration: ${duration}ms)`);
+
+    // If successful with DOM method, store selector optimization
+    if (success && method === 'dom' && selector) {
+      this.selectorOptimizations.set(query, selector);
+    }
+  }
+
+  /**
+   * Get learning log for debugging and analysis
+   */
+  getLearningLog(): VisualInteractionLearning[] {
+    return [...this.learningLog];
+  }
+
+  /**
+   * Get selector optimizations learned from successful interactions
+   */
+  getSelectorOptimizations(): Map<string, string> {
+    return new Map(this.selectorOptimizations);
+  }
+
+  /**
+   * Get learning statistics
+   */
+  getLearningStats(): {
+    totalAttempts: number;
+    successRate: number;
+    averageConfidence: number;
+    methodBreakdown: Record<string, number>;
+  } {
+    if (this.learningLog.length === 0) {
+      return {
+        totalAttempts: 0,
+        successRate: 0,
+        averageConfidence: 0,
+        methodBreakdown: {},
+      };
+    }
+
+    const successful = this.learningLog.filter(l => l.success).length;
+    const avgConfidence = this.learningLog.reduce((sum, l) => sum + l.confidence, 0) / this.learningLog.length;
+
+    const methodBreakdown: Record<string, number> = {};
+    for (const log of this.learningLog) {
+      methodBreakdown[log.method] = (methodBreakdown[log.method] || 0) + 1;
+    }
+
+    return {
+      totalAttempts: this.learningLog.length,
+      successRate: successful / this.learningLog.length,
+      averageConfidence: avgConfidence,
+      methodBreakdown,
+    };
+  }
+
+  /**
+   * Locate with fallback: primary DOM detection with visual grounding fallback
+   * This is the main entry point for enhanced grounding with intelligent fallback
+   */
+  async locateWithFallback(
+    b64: string,
+    imgW: number,
+    imgH: number,
+    query: string,
+    domElements?: ElementData[],
+  ): Promise<VisualGroundingResult> {
+    console.log(`[EnhancedGrounding] 🎯 Locate with fallback: "${query}"`);
+
+    // Check cache first
+    const ck = locateCacheKey(query, b64);
+    const cached = locateCacheGet(ck);
+    if (cached) {
+      console.log(`[EnhancedGrounding] ⚡ Cache hit → (${cached.x}, ${cached.y})`);
+      return {
+        ...cached,
+        method: 'dom',
+      } as VisualGroundingResult;
+    }
+
+    // Check if we have a learned selector for this query
+    const learnedSelector = this.selectorOptimizations.get(query);
+    if (learnedSelector && domElements) {
+      const learnedElement = domElements.find(el => el.selector === learnedSelector);
+      if (learnedElement) {
+        const rect = learnedElement.boundingRect;
+        const x = Math.round((rect.left + rect.right) / 2);
+        const y = Math.round((rect.top + rect.bottom) / 2);
+
+        if (this.validateCoordinates(x, y, imgW, imgH)) {
+          console.log(`[EnhancedGrounding] 🧠 Using learned selector: ${learnedSelector}`);
+          const result: VisualGroundingResult = {
+            found: true,
+            x,
+            y,
+            confidence: 0.92,
+            source: 'showui-local',
+            method: 'dom',
+            domSelector: learnedSelector,
+            extensionData: learnedElement,
+          };
+          locateCacheSet(ck, result);
+          return result;
+        }
+      }
+    }
+
+    // Try hybrid detection
+    const result = await this.hybridDetection(b64, domElements, query, imgW, imgH);
+
+    // Cache successful results with high confidence
+    if (result.found && result.confidence >= 0.85) {
+      locateCacheSet(ck, result);
+    }
+
+    return result;
+  }
+
+  /**
+   * Intelligent method selection based on element type and page state
+   * Determines whether to use DOM-first or visual-first approach
+   */
+  selectDetectionMethod(
+    elementType?: string,
+    pageComplexity?: 'simple' | 'moderate' | 'complex',
+  ): 'dom' | 'visual' | 'hybrid' {
+    // For simple pages with known element types, prefer DOM
+    if (pageComplexity === 'simple' && elementType && ['button', 'input', 'link'].includes(elementType)) {
+      return 'dom';
+    }
+
+    // For complex pages or unknown elements, use hybrid
+    if (pageComplexity === 'complex' || !elementType) {
+      return 'hybrid';
+    }
+
+    // Default to hybrid for robustness
+    return 'hybrid';
+  }
+
+  /**
+   * Log grounding attempt for learning and debugging
+   */
+  logGroundingAttempt(
+    query: string,
+    method: 'dom' | 'visual' | 'hybrid',
+    success: boolean,
+    confidence: number,
+    duration: number,
+    error?: string,
+  ): void {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      query,
+      method,
+      success,
+      confidence,
+      duration,
+      error,
+    };
+
+    console.log(`[EnhancedGrounding] 📊 Attempt log:`, logEntry);
+
+    // In a real implementation, this would be sent to a learning system
+    // for improving future DOM selector generation and method selection
+    // This is already handled by recordLearning() in hybridDetection
+  }
+
+  /**
+   * Enhanced error handling with actionable messages
+   */
+  handleGroundingError(
+    error: Error,
+    query: string,
+    attemptedMethods: string[],
+  ): VisualGroundingResult {
+    console.error(`[EnhancedGrounding] ❌ Error during grounding: ${error.message}`);
+
+    const fallbackReason = error.message.includes('timeout')
+      ? 'timeout'
+      : error.message.includes('confidence')
+        ? 'low_confidence'
+        : error.message.includes('not found')
+          ? 'element_not_found'
+          : 'unknown_error';
+
+    // Log the error for learning
+    this.recordLearning(query, 'hybrid', undefined, 0, false, undefined, 0, 0, 0, fallbackReason);
+
+    return {
+      found: false,
+      x: 0,
+      y: 0,
+      confidence: 0,
+      source: 'vision-fallback',
+      method: 'hybrid',
+      fallbackReason,
+    };
+  }
+}
+
+// ── Backward compatibility wrapper ───────────────────────────────────────────
+
+/**
+ * Factory function to create appropriate grounding engine
+ * Returns EnhancedGroundingEngine if enhanced config is provided,
+ * otherwise returns standard GroundingEngine for backward compatibility
+ */
+export function createGroundingEngine(config: EnhancedGroundingConfig | GroundingConfig): GroundingEngine | EnhancedGroundingEngine {
+  if ('enableSoMDetection' in config || 'fallbackToVisual' in config) {
+    return new EnhancedGroundingEngine(config as EnhancedGroundingConfig);
+  }
+  return new GroundingEngine(config);
+}

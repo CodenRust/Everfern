@@ -14,7 +14,7 @@ exports.executeSynchronizedParallelGroup = executeSynchronizedParallelGroup;
  */
 function analyzeToolDependencies(tools) {
     const fileWriteTools = new Set(['write', 'write_file', 'edit', 'delete', 'bash', 'run_command', 'apply_patch', 'executePwsh']);
-    const readOnlyTools = new Set(['read', 'read_file', 'web_search', 'web_fetch', 'memory_search', 'list_directory']);
+    const readOnlyTools = new Set(['read', 'read_file', 'web_search', 'memory_search', 'list_directory']);
     return tools.map(tool => {
         const isWrite = fileWriteTools.has(tool.name);
         const isGlobalLocking = ['run_command', 'bash', 'apply_patch', 'executePwsh'].includes(tool.name) && tool.args.safe_for_parallel !== true;

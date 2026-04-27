@@ -158,7 +158,7 @@ export const createCallModelNode = (
     runner.telemetry.metrics(state.iterations);
 
     const iterations = state.iterations;
-    let client = (runner as any).client; 
+    let client = (runner as any).client;
     let modelUsed = client.model;
 
     // Telemetry Update
@@ -183,7 +183,7 @@ export const createCallModelNode = (
     if (needsVisionGrounding && vlm) {
       runner.telemetry.info(` telescope Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
       client = new AIClient({
-        provider: vlm.provider as any,
+        provider: (vlm.engine === 'cloud' && vlm.provider === 'ollama' ? 'ollama-cloud' : vlm.provider) as any,
         apiKey: vlm.apiKey,
         model: vlm.model,
         baseUrl: vlm.baseUrl
@@ -196,12 +196,12 @@ export const createCallModelNode = (
         if (screenshotData && screenshotData.b64) {
           const lastMsgIdx = normalizedMessages.length - 1;
           const lastMsg = normalizedMessages[lastMsgIdx];
-          
+
           if (lastMsg && lastMsg.role === 'user') {
-            const originalContent = typeof lastMsg.content === 'string' 
-              ? [{ type: 'text' as const, text: lastMsg.content }] 
+            const originalContent = typeof lastMsg.content === 'string'
+              ? [{ type: 'text' as const, text: lastMsg.content }]
               : lastMsg.content;
-              
+
             const newContent: ChatMessage['content'] = [
               ...originalContent,
               {
@@ -209,7 +209,7 @@ export const createCallModelNode = (
                 image_url: { url: `data:image/jpeg;base64,${screenshotData.b64}` }
               }
             ];
-            
+
             // Create a copy of the normalized messages and update the last one
             updatedMessages = [...normalizedMessages];
             updatedMessages[lastMsgIdx] = { ...lastMsg, content: newContent };
@@ -222,18 +222,18 @@ export const createCallModelNode = (
       }
     }
 
-    
+
     // Get current intent for AI-based decisions
     const currentIntent = state.currentIntent || 'unknown';
-    
+
     // Use AI to determine if system prompt slimming is appropriate
     const shouldSlimPrompt = await shouldUseSlimmedPrompt(currentIntent, normalizedMessages, client);
-    
+
     if (shouldSlimPrompt && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
       const originalPrompt = normalizedMessages[0].content as string;
-      normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant. 
-Keep your responses friendly and direct. 
-The user is engaging in a simple conversation or asking a direct question. 
+      normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant.
+Keep your responses friendly and direct.
+The user is engaging in a simple conversation or asking a direct question.
 You do not need to use complex execution plans or tools for this interaction.`;
       runner.telemetry.info('Optima: Using slimmed system prompt for read-only intent.');
     }
@@ -263,7 +263,7 @@ You do not need to use complex execution plans or tools for this interaction.`;
 
     // Limit message history for performance (keep last 20 messages)
     const maxMessages = 20;
-    const limitedMessages = prunedMessages.length > maxMessages 
+    const limitedMessages = prunedMessages.length > maxMessages
       ? [prunedMessages[0], ...prunedMessages.slice(-maxMessages + 1)] // Keep system prompt + last N messages
       : prunedMessages;
 

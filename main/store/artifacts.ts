@@ -9,6 +9,8 @@ export interface ArtifactMeta {
   lastEdited: number;
   snippet: string;
   size: number;
+  template?: string;
+  editCount?: number;
 }
 
 /**
@@ -20,7 +22,7 @@ export function listArtifacts(chatId?: string): ArtifactMeta[] {
   if (!fs.existsSync(artifactsDir)) return [];
 
   const results: ArtifactMeta[] = [];
-  
+
   // Scans all subdirectories (each represents a chatId) unless a specific one is provided
   let dirsToScan: string[] = [];
   try {
@@ -32,7 +34,7 @@ export function listArtifacts(chatId?: string): ArtifactMeta[] {
   for (const dir of dirsToScan) {
     const dirPath = path.join(artifactsDir, dir);
     if (!fs.existsSync(dirPath)) continue;
-    
+
     let files: string[] = [];
     try {
         files = fs.readdirSync(dirPath).filter(f => fs.statSync(path.join(dirPath, f)).isFile());
@@ -42,7 +44,7 @@ export function listArtifacts(chatId?: string): ArtifactMeta[] {
 
     for (const file of files) {
       if (file.startsWith('.')) continue; // ignore hidden files
-      
+
       const filePath = path.join(dirPath, file);
       try {
           const stats = fs.statSync(filePath);
@@ -107,5 +109,59 @@ export function deleteArtifact(chatId: string, filename: string): { success: boo
     return { success: true };
   } catch {
     return { success: false };
+  }
+}
+
+/**
+ * Writes an artifact file atomically using a temporary file.
+ * This prevents corruption if the write operation is interrupted.
+ */
+export function writeArtifactAtomic(chatId: string, filename: string, content: string): { success: boolean; error?: string } {
+  try {
+    const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const filePath = path.join(dir, filename);
+    const tempPath = `${filePath}.tmp`;
+
+    // Write to temporary file
+    fs.writeFileSync(tempPath, content, 'utf-8');
+
+    // Atomic rename
+    fs.renameSync(tempPath, filePath);
+
+    return { success: true };
+  } catch (e) {
+    // Clean up temporary file if it exists
+    try {
+      const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+      const filePath = path.join(dir, filename);
+      const tempPath = `${filePath}.tmp`;
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
+ * Updates the last modified timestamp of an artifact file.
+ */
+export function updateArtifactTimestamp(chatId: string, filename: string): { success: boolean; error?: string } {
+  try {
+    const filePath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: 'Artifact file not found' };
+    }
+
+    const now = new Date();
+    fs.utimesSync(filePath, now, now);
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
   }
 }

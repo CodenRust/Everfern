@@ -14,7 +14,11 @@ export type SubAgentProgressEventType =
   | 'action'     // Action execution
   | 'screenshot' // Screenshot captured
   | 'complete'   // Sub-agent completed
-  | 'abort';     // Sub-agent aborted
+  | 'abort'      // Sub-agent aborted
+  | 'branch_start'    // Timeline branch started
+  | 'branch_update'   // Timeline branch progress update
+  | 'branch_complete' // Timeline branch completed
+  | 'branch_abort';   // Timeline branch aborted
 
 /**
  * Sub-agent progress event
@@ -57,6 +61,24 @@ export interface SubAgentProgressEvent {
     model?: string;
     provider?: string;
     [key: string]: unknown;
+  };
+
+  /** Timeline branch metadata for visualization */
+  timelineBranch?: {
+    /** Parent agent/tool call ID that spawned this subagent */
+    parentId?: string;
+    /** Agent type for visual styling */
+    agentType?: 'web-explorer' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
+    /** Branch level in hierarchy (0 = root, 1 = first level subagent, etc.) */
+    branchLevel?: number;
+    /** Visual position hint for UI rendering */
+    visualPosition?: { x: number; y: number };
+    /** Branch status for timeline visualization */
+    branchStatus?: 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
+    /** Task description for branch labeling */
+    taskDescription?: string;
+    /** Subagent session ID for grouping related events */
+    sessionId?: string;
   };
 }
 

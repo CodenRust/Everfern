@@ -115,10 +115,10 @@ class ChatHistoryStore {
         await this.init();
         try {
             const rows = await db_1.dbOps.all(`
-        SELECT c.*, COUNT(m.id) as messageCount 
-        FROM conversations c 
-        LEFT JOIN messages m ON c.id = m.conversation_id 
-        GROUP BY c.id 
+        SELECT c.*, COUNT(m.id) as messageCount
+        FROM conversations c
+        LEFT JOIN messages m ON c.id = m.conversation_id
+        GROUP BY c.id
         ORDER BY c.updated_at DESC
       `);
             return rows.map(row => ({
@@ -177,26 +177,28 @@ class ChatHistoryStore {
             await this.init();
         }
         try {
-            // 1. Upsert Conversation
-            const existing = await db_1.dbOps.get('SELECT id FROM conversations WHERE id = ?', [conversation.id]);
-            if (existing) {
-                await db_1.dbOps.run('UPDATE conversations SET title = ?, provider = ?, model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [conversation.title, conversation.provider, conversation.model, conversation.id]);
-            }
-            else {
-                await db_1.dbOps.run('INSERT INTO conversations (id, title, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [
-                    conversation.id,
-                    conversation.title,
-                    conversation.provider,
-                    conversation.model,
-                    conversation.createdAt || new Date().toISOString(),
-                    conversation.updatedAt || new Date().toISOString()
-                ]);
-            }
+            // 1. Upsert Conversation — use INSERT OR REPLACE to avoid race conditions
+            // when saveConversation is called concurrently from the frontend.
+            await db_1.dbOps.run(`INSERT INTO conversations (id, title, provider, model, created_at, updated_at)
+         VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM conversations WHERE id = ?), ?), ?)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           provider = excluded.provider,
+           model = excluded.model,
+           updated_at = excluded.updated_at`, [
+                conversation.id,
+                conversation.title,
+                conversation.provider,
+                conversation.model,
+                conversation.id,
+                conversation.createdAt || new Date().toISOString(),
+                conversation.updatedAt || new Date().toISOString(),
+            ]);
             // 2. Sync Messages (Upsert to prevent UNIQUE constraint failures on concurrent saves)
             for (const msg of conversation.messages) {
                 const msgId = msg.id || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                await db_1.dbOps.run(`INSERT OR REPLACE INTO messages 
-           (id, conversation_id, role, content, thought, tool_calls, has_timeline, created_at) 
+                await db_1.dbOps.run(`INSERT OR REPLACE INTO messages
+           (id, conversation_id, role, content, thought, tool_calls, has_timeline, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM messages WHERE id = ?), ?))`, [
                     msgId,
                     conversation.id,

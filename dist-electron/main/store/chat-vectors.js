@@ -4,7 +4,7 @@
  *
  * Stores chat messages in SQLite for semantic search.
  * Uses text-based keyword matching (no vector embeddings).
- * Messages are stored in ~/.everfern/vectors/chat.sqlite
+ * Messages are stored in ~/.everfern/sql/chat.sqlite
  *
  * Has a write queue to prevent concurrent write errors.
  */
@@ -27,7 +27,7 @@ const fs_1 = __importDefault(require("fs"));
 const os_1 = __importDefault(require("os"));
 let instance = null;
 let isInitialized = false;
-const VECTORS_DIR = path_1.default.join(os_1.default.homedir(), '.everfern', 'vectors');
+const VECTORS_DIR = path_1.default.join(os_1.default.homedir(), '.everfern', 'sql');
 const DEBUG = false;
 function log(...args) {
     if (DEBUG) {
@@ -161,7 +161,7 @@ async function searchChatVectors(query, topK = 10, filterChatId) {
         const db = await getChatVectorDb();
         const queryLower = query.toLowerCase();
         let sql = `
-      SELECT 
+      SELECT
         cm.id, cm.chat_id as chatId, cm.role, cm.content, cm.created_at as createdAt
       FROM chat_messages cm
     `;

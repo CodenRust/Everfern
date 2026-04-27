@@ -5,6 +5,7 @@ import { runAgentStep } from '../services/agent-runtime';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 import { loadPrompt } from '../../../lib/prompt-sync';
+import type { AIClient } from '../../../lib/ai-client';
 
 type CompletionReason = 'task_complete' | 'waiting_for_user_input' | 'needs_hitl' | 'cannot_proceed';
 type RoutingDecision = 'continue_brain' | 'route_coding' | 'route_data_analyst' | 'route_computer_use' | 'route_web_explorer' | 'complete_task';
@@ -118,31 +119,51 @@ async function determineRouting(
       : '';
     const conversationHistory = state.messages?.slice(-3) || []; // Last 3 messages for context
 
+    // Deterministic pre-check: force route_web_explorer for web-research tasks
+    // Skip if web explorer has already completed its work
+    const WEB_RESEARCH_PRE_CHECK = /\[RESEARCH TASK\]|\b(search|find|look up|research|browse|fetch|crawl)\b.*\b(online|web|internet|google|news|articles?|bots?|tools?|products?)\b|\b(compile.*list|top \d+|find the best|comprehensive list|compare.*options)\b/i;
+    if (!state.webExplorerComplete && (WEB_RESEARCH_PRE_CHECK.test(userRequest) || WEB_RESEARCH_PRE_CHECK.test(responseContent))) {
+      if (!state.currentIntent || state.currentIntent === 'research' || state.currentIntent === 'task') {
+        console.log('[Brain] Deterministic pre-check: web-research keywords detected → route_web_explorer');
+        return { decision: 'route_web_explorer', explanation: 'Deterministic pre-check: task contains web-research keywords' };
+      }
+    }
+
+
     // Emit analysis phase
     eventQueue?.push({
       type: 'thought',
       content: '\n🔍 Brain: Analyzing task requirements and available agents...'
     });
 
-    const prompt = `You are the EverFern Brain - the central orchestrator. Analyze the user request and current state to determine the best routing decision.
+    const intentConstraint = state.currentIntent
+      ? `\nTRIAGE INTENT (HARD CONSTRAINT): "${state.currentIntent}"\n` +
+        (state.currentIntent === 'research'
+          ? `Because the triage intent is "research", the ONLY valid routing decisions are: "route_web_explorer", "continue_brain", or "complete_task". You MUST NOT route to "route_computer_use".\n`
+          : '')
+      : '';
 
+    const prompt = `You are the EverFern Brain - the central orchestrator. Analyze the user request and current state to determine the best routing decision.
+${intentConstraint}
 USER REQUEST: "${userRequest.slice(0, 400)}"
 YOUR CURRENT RESPONSE: "${responseContent.slice(0, 300)}"
 CONVERSATION CONTEXT: ${JSON.stringify(conversationHistory).slice(0, 200)}
 
 Available routing options:
-- "continue_brain"     — Continue handling this yourself with general capabilities
-- "route_coding"       — Route to Coding Specialist for software development tasks
-- "route_data_analyst" — Route to Data Analyst for data processing and visualization
-- "route_computer_use" — Route to Computer Use agent for GUI automation
-- "route_web_explorer" — Route to Web Explorer for research and information gathering
+- "continue_brain"     — Continue handling this yourself with general capabilities (conversation, simple tasks)
+- "route_coding"       — Route to Coding Specialist for software development, code writing, debugging
+- "route_data_analyst" — Route to Data Analyst for data processing, CSV/Excel analysis, charts
+- "route_computer_use" — Route to Computer Use agent ONLY for GUI automation (clicking UI elements, desktop apps, filling forms on screen). NEVER use for web research or searching the internet.
+- "route_web_explorer" — Route to Web Explorer for ANY web research, searching the internet, finding information online, fetching URLs, looking up facts, news, products, bots, tools, etc.
 - "complete_task"      — Task is complete, no further routing needed
 
-Consider:
-- Does this require specialized expertise?
-- Are there specific tools that a specialized agent would handle better?
-- Is the task already complete?
-- Would routing improve the outcome?
+CRITICAL ROUTING RULES:
+1. If the task involves searching the web, finding information, researching topics, looking up news, finding tools/bots/products → ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for web research.
+2. "route_computer_use" is ONLY for tasks that require clicking on desktop GUI elements, interacting with native apps, or automating screen interactions. It is NOT for web browsing or research.
+3. If web_search AND browser_use tools were already called successfully and returned comprehensive results, THEN consider "complete_task".
+4. Do NOT re-route to web_explorer if both web_search and browser_use have already completed successfully.
+5. NEVER run web_search yourself and then claim the task is complete — the web_explorer must fetch the actual page content from the URLs found.
+6. For ANY web research task (searching, finding information online, looking up websites), use "route_web_explorer" NOT "route_computer_use".
 
 Respond with JSON only:
 {
@@ -200,6 +221,36 @@ Respond with JSON only:
 }
 
 /**
+ * Detect if the last tool result in messages is from web_search.
+ */
+function lastToolResultIsWebSearch(messages: any[]): boolean {
+  if (!messages || messages.length === 0) return false;
+  // Walk backwards to find the most recent tool result message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const role = msg.role || msg._getType?.();
+    if (role === 'tool' || role === 'function') {
+      // Check if the tool name is web_search
+      const name = msg.name || msg.tool_name || msg.toolName || '';
+      return name === 'web_search';
+    }
+    // Stop at assistant messages (tool results come right after assistant tool calls)
+    if (role === 'assistant' || role === 'ai') break;
+  }
+  return false;
+}
+
+/**
+ * Extract URLs from a web_search tool result content string.
+ */
+function extractUrlsFromSearchResult(content: string): string[] {
+  const urlRegex = /https?:\/\/[^\s"'<>)]+/g;
+  const matches = content.match(urlRegex) || [];
+  // Deduplicate and limit to first 3 URLs
+  return [...new Set(matches)].slice(0, 3);
+}
+
+/**
  * Central Brain Node - The Main Orchestrator and Router
  *
  * The Brain node now serves as the central decision maker that:
@@ -224,7 +275,16 @@ export const createBrainNode = (
       throw new Error('Execution aborted by user (stop button clicked)');
     }
 
-    const tools = toolDefs || (runner as any)._buildToolDefinitions();
+    const allTools = toolDefs || (runner as any)._buildToolDefinitions();
+
+    // Filter out web research tools from brain - these should only be available to web_explorer
+    const WEB_RESEARCH_TOOLS = new Set(['web_search', 'remote_web_search', 'browser_use', 'browser_use', 'website_crawl']);
+    const tools = allTools.filter((tool: any) => !WEB_RESEARCH_TOOLS.has(tool.name));
+
+    // Debug logging
+    console.log(`[Brain] Current intent: ${state.currentIntent}`);
+    console.log(`[Brain] Available tools: ${allTools.map((t: any) => t.name).join(', ')}`);
+    console.log(`[Brain] Filtered tools: ${tools.map((t: any) => t.name).join(', ')}`);
 
     // Emit phase change event for execution phase (only on first brain call)
     if (missionTracker && state.iterations === 0) {
@@ -249,6 +309,59 @@ export const createBrainNode = (
       }
     }
 
+    // Get original user request for context
+    const allMessages = state.messages || [];
+    const firstUserMsg = allMessages.find((m: any) => {
+      const role = m.role || m._getType?.();
+      return role === 'user' || role === 'human';
+    });
+    const originalRequest = firstUserMsg
+      ? (typeof (firstUserMsg as any).content === 'string'
+          ? (firstUserMsg as any).content
+          : JSON.stringify((firstUserMsg as any).content))
+      : '';
+
+    // Bug 7: Narrower regex for web research early pre-check
+    // Requires explicit web intent alongside broad nouns to avoid false positives in coding tasks
+    const WEB_RESEARCH_EARLY_CHECK = /\[RESEARCH TASK\]|\b(search|find|look up|research|browse|fetch|crawl)\b.*\b(online|web|internet|google|news|articles?|bots?|tools?|products?)\b|\b(compile.*list|top \d+|find the best|comprehensive list|compare.*options)\b/i;
+
+    const isResearchIntent = !state.currentIntent || state.currentIntent === 'research' || state.currentIntent === 'task';
+
+    // Bug 1, 6, 10: Early deterministic short-circuit logic
+    // Skip if: not research intent OR iterations > 0 OR returning from tool call OR returning from specialist
+    const isFirstEntry = (state.iterations === 0 || !state.iterations) && !state.brainToolsInFlight && !state.returningFromSpecialist;
+
+    // Strict Routing: If we just returned from a specialist, we MUST evaluate if they should continue
+    // This prevents the brain from taking over and looping on tools itself.
+    if (state.returningFromSpecialist) {
+      console.log(`[Brain] Returning from specialist: ${state.returningFromSpecialist} — evaluating continuation`);
+      
+      // If returning from web_explorer and it's not complete, route back immediately
+      if (state.returningFromSpecialist === 'web_explorer' && !state.webExplorerComplete) {
+         console.log('[Brain] Web explorer not complete → routing back');
+         return {
+           routingDecision: { decision: 'route_web_explorer', explanation: 'Continuation: Web explorer has more work to do' },
+           taskPhase: 'specialized_agent' as const,
+           brainToolsInFlight: false,
+           returningFromSpecialist: null
+         };
+      }
+    }
+
+    if (isFirstEntry && isResearchIntent && WEB_RESEARCH_EARLY_CHECK.test(originalRequest)) {
+
+      console.log('[Brain] Early pre-check: web-research keywords in user request → route_web_explorer immediately');
+      eventQueue?.push({ type: 'thought', content: '🧭 BRAIN: Routing to web explorer (research task detected)' });
+      return {
+        messages: state.messages,
+        routingDecision: { decision: 'route_web_explorer' as const, explanation: 'Early pre-check: research task detected before LLM call' },
+        completionSignal: null,
+        taskPhase: 'specialized_agent' as const,
+        brainToolsInFlight: false,
+        returningFromSpecialist: null
+      };
+    }
+
     const result = await integrator.wrapNode(
       'brain',
       () => runAgentStep(state, {
@@ -260,6 +373,7 @@ export const createBrainNode = (
       }),
       'Processing request with Brain orchestrator'
     );
+
 
     // Extract the brain's response text for analysis
     const messages = result.messages as any[] | undefined;
@@ -277,25 +391,15 @@ export const createBrainNode = (
       });
     }
 
-    // Get original user request for context
-    const allMessages = state.messages || [];
-    const firstUserMsg = allMessages.find((m: any) => {
-      const role = m.role || m._getType?.();
-      return role === 'user' || role === 'human';
-    });
-    const originalRequest = firstUserMsg
-      ? (typeof (firstUserMsg as any).content === 'string'
-          ? (firstUserMsg as any).content
-          : JSON.stringify((firstUserMsg as any).content))
-      : '';
-
     // If there are pending tool calls, continue with brain execution
     const hasPendingTools = result.pendingToolCalls && result.pendingToolCalls.length > 0;
     if (hasPendingTools) {
       return {
         ...result,
         completionSignal: null,
-        routingDecision: null
+        routingDecision: null,
+        brainToolsInFlight: true,
+        returningFromSpecialist: null
       };
     }
 
@@ -303,7 +407,9 @@ export const createBrainNode = (
     const routingDecision = await determineRouting(runner, state, responseContent, eventQueue);
 
     if (routingDecision) {
+
       runner.telemetry.info(`Brain routing decision: ${routingDecision.decision} — ${routingDecision.explanation}`);
+      console.log(`[Brain] Routing decision: ${routingDecision.decision} for intent: ${state.currentIntent}`);
       eventQueue?.push({
         type: 'thought',
         content: `🧠 Brain Router: ${routingDecision.decision} — ${routingDecision.explanation}`
@@ -317,7 +423,9 @@ export const createBrainNode = (
         routingDecision: routingDecision,
         completionSignal: null,
         // Set task phase to route to specialized agents
-        taskPhase: 'specialized_agent' as const
+        taskPhase: 'specialized_agent' as const,
+        brainToolsInFlight: false,
+        returningFromSpecialist: null
       };
     }
 
@@ -335,7 +443,9 @@ export const createBrainNode = (
     return {
       ...result,
       completionSignal: signal,
-      routingDecision: routingDecision
+      routingDecision: routingDecision,
+      brainToolsInFlight: false,
+      returningFromSpecialist: null
     };
   };
 };

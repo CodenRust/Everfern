@@ -444,7 +444,6 @@ class MessageHandler extends events_1.EventEmitter {
     getToolEmoji(toolName) {
         const emojiMap = {
             'web_search': '🔍',
-            'web_fetch': '🌐',
             'read_file': '📄',
             'write_file': '✍️',
             'list_directory': '📁',

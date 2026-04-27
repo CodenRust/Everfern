@@ -215,8 +215,15 @@ export class AIClient {
 
   constructor(config: AIClientConfig) {
     let finalApiKey = config.apiKey ?? '';
-    const match = finalApiKey.match(/(?:nvapi-[A-Za-z0-9_-]+|sk-[A-Za-z0-9T\-]+)/);
-    if (match) finalApiKey = match[0];
+    
+    // Only apply cleaning for legacy providers if they contain noise
+    // Ollama Cloud / Custom keys must be preserved exactly as provided
+    if (['openai', 'anthropic', 'nvidia'].includes(config.provider)) {
+        if (finalApiKey.includes(' ') || finalApiKey.includes('\n')) {
+            const match = finalApiKey.match(/(?:nvapi-[A-Za-z0-9_-]+|sk-[A-Za-z0-9T\-]+|[A-Za-z0-9]{32,})/);
+            if (match) finalApiKey = match[0];
+        }
+    }
 
     this.config = {
       provider: config.provider,
@@ -259,6 +266,17 @@ export class AIClient {
 
   setModel(model: string) {
     this.config.model = model;
+  }
+
+  /**
+   * Returns the full configuration for this client.
+   * Useful for coordinated fallback logic.
+   */
+  public getFullConfig(): AIClientConfig {
+    return {
+      ...this.config,
+      vlm: this.config.vlm
+    };
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
@@ -724,8 +742,12 @@ export class AIClient {
 
   private get _ollamaHeaders(): Record<string, string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    // Ollama Cloud requires Authorization header, local Ollama does not
-    if (this.config.provider === 'ollama-cloud' && this.config.apiKey) {
+    // Ollama Cloud / Remote Ollama requires Authorization header
+    const isRemote = this.config.provider === 'ollama-cloud' || 
+                     this.config.baseUrl.includes('ollama.com') || 
+                     !this.config.baseUrl.includes('localhost') && !this.config.baseUrl.includes('127.0.0.1');
+                     
+    if (isRemote && this.config.apiKey) {
       headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
     return headers;

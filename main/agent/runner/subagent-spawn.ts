@@ -1,21 +1,21 @@
 /**
  * EverFern Desktop — Subagent Spawner
- * 
+ *
  * Spawns parallel subagents with session isolation.
  * Implements OpenClaw-style depth limiting and workspace inheritance.
  */
 
 import * as crypto from 'crypto';
 import { getSubagentRegistry, generateAgentId, type SubagentEntry } from './subagent-registry';
-import { 
-    getAgentEvents, 
-    emitTool, 
-    emitLifecycle 
+import {
+    getAgentEvents,
+    emitTool,
+    emitLifecycle
 } from '../infra/agent-events';
-import { 
-    sessionCreated, 
-    sessionCompleted, 
-    sessionFailed 
+import {
+    sessionCreated,
+    sessionCompleted,
+    sessionFailed
 } from '../sessions/session-lifecycle-events';
 
 export interface SpawnOptions {
@@ -25,6 +25,7 @@ export interface SpawnOptions {
     mode?: 'run' | 'session';
     workspaceDir?: string;
     maxDepth?: number;
+    parentHistory?: Array<{ role: string; content: string | any[] }>;
 }
 
 export interface SpawnedAgent {
@@ -66,23 +67,26 @@ class SubagentSpawner {
             model,
             mode = 'run',
             workspaceDir,
-            maxDepth = 3
+            maxDepth = 3,
+            parentHistory = []
         } = options;
 
         if (!this.runner) {
+            console.warn('[SubagentSpawner] No runner configured. Spawning failed.');
             throw new Error('SubagentSpawner: No runner configured');
         }
 
+
         const registry = getSubagentRegistry();
-        
+
         // Check depth limit
         const parentEntry = registry.getBySessionKey(parentSessionId);
         const currentDepth = (parentEntry?.currentDepth || 0) + 1;
-        
+
         if (currentDepth > this.maxGlobalDepth) {
             throw new Error(`Maximum spawn depth (${this.maxGlobalDepth}) exceeded`);
         }
-        
+
         if (currentDepth > maxDepth) {
             throw new Error(`Task max depth (${maxDepth}) exceeded`);
         }
@@ -125,14 +129,14 @@ class SubagentSpawner {
         };
 
         // Start the agent
-        this.runSubagent(spawnedAgent, model);
+        this.runSubagent(spawnedAgent, model, parentHistory);
 
         return spawnedAgent;
     }
 
-    private async runSubagent(agent: SpawnedAgent, model?: string): Promise<void> {
+    private async runSubagent(agent: SpawnedAgent, model?: string, parentHistory: Array<{ role: string; content: string | any[] }> = []): Promise<void> {
         const registry = getSubagentRegistry();
-        
+
         registry.update(agent.agentId, { status: 'running' });
         agent.status = 'running';
 
@@ -147,10 +151,17 @@ class SubagentSpawner {
         });
 
         try {
-            // Run the agent
+            // Apply context window cap: limit parentHistory to most recent 20 turns (40 messages max)
+            // This prevents context window overflow when passing parent conversation to subagent
+            const cappedHistory = parentHistory.slice(-40).map((msg: any) => ({
+              role: msg.role || (msg._getType?.() === 'human' ? 'user' : 'assistant'),
+              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            }));
+
+            // Run the agent with parent conversation context
             const result = await this.runner!.run(
                 agent.task,
-                [], // Start fresh for subagent
+                cappedHistory,
                 model
             );
 
@@ -170,7 +181,7 @@ class SubagentSpawner {
 
         } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
-            
+
             registry.complete(agent.agentId, undefined, errMsg);
             sessionFailed(agent.sessionKey, { error: errMsg });
 

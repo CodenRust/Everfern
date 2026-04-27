@@ -182,7 +182,7 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             if (needsVisionGrounding && vlm) {
                 runner.telemetry.info(` telescope Vision Grounding: Analyzing workspace footprint with ${vlm.model} (${vlm.provider})`);
                 client = new ai_client_1.AIClient({
-                    provider: vlm.provider,
+                    provider: (vlm.engine === 'cloud' && vlm.provider === 'ollama' ? 'ollama-cloud' : vlm.provider),
                     apiKey: vlm.apiKey,
                     model: vlm.model,
                     baseUrl: vlm.baseUrl
@@ -223,9 +223,9 @@ const createCallModelNode = (runner, toolDefs, eventQueue, maxIterations = 10, m
             const shouldSlimPrompt = await shouldUseSlimmedPrompt(currentIntent, normalizedMessages, client);
             if (shouldSlimPrompt && normalizedMessages.length > 0 && normalizedMessages[0].role === 'system') {
                 const originalPrompt = normalizedMessages[0].content;
-                normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant. 
-Keep your responses friendly and direct. 
-The user is engaging in a simple conversation or asking a direct question. 
+                normalizedMessages[0].content = `You are EverFern, a helpful and concise AI assistant.
+Keep your responses friendly and direct.
+The user is engaging in a simple conversation or asking a direct question.
 You do not need to use complex execution plans or tools for this interaction.`;
                 runner.telemetry.info('Optima: Using slimmed system prompt for read-only intent.');
             }

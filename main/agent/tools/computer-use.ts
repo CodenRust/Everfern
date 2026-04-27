@@ -83,7 +83,11 @@ export type SubAgentProgressEventType =
   | 'action'     // Action execution
   | 'screenshot' // Screenshot captured
   | 'complete'   // Sub-agent completed
-  | 'abort';     // Sub-agent aborted
+  | 'abort'      // Sub-agent aborted
+  | 'branch_start'    // Timeline branch started
+  | 'branch_update'   // Timeline branch progress update
+  | 'branch_complete' // Timeline branch completed
+  | 'branch_abort';   // Timeline branch aborted
 
 /**
  * Sub-agent progress event
@@ -127,6 +131,24 @@ export interface SubAgentProgressEvent {
     provider?: string;
     [key: string]: unknown;
   };
+
+  /** Timeline branch metadata for visualization */
+  timelineBranch?: {
+    /** Parent agent/tool call ID that spawned this subagent */
+    parentId?: string;
+    /** Agent type for visual styling */
+    agentType?: 'web-explorer' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
+    /** Branch level in hierarchy (0 = root, 1 = first level subagent, etc.) */
+    branchLevel?: number;
+    /** Visual position hint for UI rendering */
+    visualPosition?: { x: number; y: number };
+    /** Branch status for timeline visualization */
+    branchStatus?: 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
+    /** Task description for branch labeling */
+    taskDescription?: string;
+    /** Subagent session ID for grouping related events */
+    sessionId?: string;
+  };
 }
 
 /**
@@ -141,40 +163,69 @@ export interface SubAgentProgressBatch {
 // ── Progress Event Emitter ──────────────────────────────────────────────────
 
 /**
- * Manages buffering and flushing of sub-agent progress events.
+ * Manages buffering and flushing of sub-agent progress events with timeline branch support.
  *
  * Implements efficient event transmission with:
  * - Time-based flushing (16ms intervals for ~60fps)
  * - Size-based flushing (immediate flush at 10 events)
+ * - Timeline branch event prioritization (branch events flush immediately)
  * - Graceful error handling (serialization failures don't crash agent)
+ * - Enhanced metadata for timeline visualization
  *
- * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
+ * Requirements: 1.1, 1.2, 6.1, 6.2, 7.1, 7.2, 7.3, 7.4, 7.5
  */
 class ProgressEventEmitter {
   private buffer: SubAgentProgressEvent[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private readonly FLUSH_INTERVAL_MS = 16; // ~60fps
   private readonly MAX_BUFFER_SIZE = 10;
+  private readonly PRIORITY_EVENT_TYPES = new Set<SubAgentProgressEventType>([
+    'branch_start', 'branch_complete', 'branch_abort', 'complete', 'abort'
+  ]);
 
   constructor(
     private toolCallId: string,
-    private sender: Electron.WebContents | null
+    private sender: Electron.WebContents | null,
+    private timelineBranchMetadata?: {
+      parentId?: string;
+      agentType?: string;
+      branchLevel?: number;
+      sessionId?: string;
+      taskDescription?: string;
+    }
   ) {}
 
   /**
-   * Emit a progress event.
+   * Emit a progress event with timeline branch support.
    *
    * Adds the event to the buffer and schedules a flush if not already scheduled.
+   * Timeline branch events (branch_start, branch_complete, branch_abort) are flushed immediately.
    * If the buffer size reaches MAX_BUFFER_SIZE, flushes immediately.
+   * Automatically injects timeline branch metadata if configured.
    *
-   * Requirements: 7.2, 7.4
+   * Requirements: 1.1, 1.2, 6.1, 6.2, 7.2, 7.4
    */
   emit(event: SubAgentProgressEvent): void {
+    // Inject timeline branch metadata if configured and not already present
+    if (this.timelineBranchMetadata && !event.timelineBranch) {
+      event.timelineBranch = {
+        parentId: this.timelineBranchMetadata.parentId,
+        agentType: this.timelineBranchMetadata.agentType as any,
+        branchLevel: this.timelineBranchMetadata.branchLevel,
+        sessionId: this.timelineBranchMetadata.sessionId,
+        taskDescription: this.timelineBranchMetadata.taskDescription,
+        branchStatus: this.mapEventTypeToBranchStatus(event.type),
+      };
+    }
+
     // Add event to buffer
     this.buffer.push(event);
 
-    // Flush immediately if buffer size >= MAX_BUFFER_SIZE
-    if (this.buffer.length >= this.MAX_BUFFER_SIZE) {
+    // Flush immediately for priority events (timeline branch events)
+    if (this.PRIORITY_EVENT_TYPES.has(event.type)) {
+      this.flush();
+    } else if (this.buffer.length >= this.MAX_BUFFER_SIZE) {
+      // Flush immediately if buffer size >= MAX_BUFFER_SIZE
       this.flush();
     } else {
       // Schedule flush if not already scheduled
@@ -183,13 +234,112 @@ class ProgressEventEmitter {
   }
 
   /**
-   * Flush all buffered events to the frontend via IPC.
+   * Map event type to branch status for timeline visualization.
+   */
+  private mapEventTypeToBranchStatus(eventType: SubAgentProgressEventType): 'pending' | 'running' | 'completed' | 'failed' | 'aborted' {
+    switch (eventType) {
+      case 'branch_start':
+      case 'step':
+      case 'reasoning':
+      case 'action':
+      case 'screenshot':
+      case 'branch_update':
+        return 'running';
+      case 'branch_complete':
+      case 'complete':
+        return 'completed';
+      case 'branch_abort':
+      case 'abort':
+        return 'aborted';
+      default:
+        return 'running';
+    }
+  }
+
+  /**
+   * Emit a timeline branch start event.
+   *
+   * Requirements: 1.1, 1.2
+   */
+  emitBranchStart(taskDescription?: string): void {
+    this.emit({
+      type: 'branch_start',
+      toolCallId: this.toolCallId,
+      timestamp: new Date().toISOString(),
+      content: taskDescription || 'Subagent branch started',
+      timelineBranch: {
+        ...this.timelineBranchMetadata,
+        branchStatus: 'running',
+        taskDescription: taskDescription || this.timelineBranchMetadata?.taskDescription,
+      } as any,
+    });
+  }
+
+  /**
+   * Emit a timeline branch update event.
+   *
+   * Requirements: 6.1, 6.2
+   */
+  emitBranchUpdate(content: string, stepNumber?: number, totalSteps?: number): void {
+    this.emit({
+      type: 'branch_update',
+      toolCallId: this.toolCallId,
+      timestamp: new Date().toISOString(),
+      content,
+      stepNumber,
+      totalSteps,
+      timelineBranch: {
+        ...this.timelineBranchMetadata,
+        branchStatus: 'running',
+      } as any,
+    });
+  }
+
+  /**
+   * Emit a timeline branch complete event.
+   *
+   * Requirements: 1.1, 1.2
+   */
+  emitBranchComplete(result?: string): void {
+    this.emit({
+      type: 'branch_complete',
+      toolCallId: this.toolCallId,
+      timestamp: new Date().toISOString(),
+      content: result || 'Subagent branch completed successfully',
+      timelineBranch: {
+        ...this.timelineBranchMetadata,
+        branchStatus: 'completed',
+      } as any,
+    });
+  }
+
+  /**
+   * Emit a timeline branch abort event.
+   *
+   * Requirements: 1.1, 1.2
+   */
+  emitBranchAbort(reason?: string): void {
+    this.emit({
+      type: 'branch_abort',
+      toolCallId: this.toolCallId,
+      timestamp: new Date().toISOString(),
+      content: reason || 'Subagent branch aborted',
+      timelineBranch: {
+        ...this.timelineBranchMetadata,
+        branchStatus: 'aborted',
+      } as any,
+    });
+  }
+
+  /**
+   * Flush all buffered events to the frontend via IPC with timeline branch support.
    *
    * Serializes buffered events to JSON and sends them via the 'acp:sub-agent-progress' channel.
    * Clears the buffer after successful send. Handles serialization errors gracefully by logging
-   * and continuing execution (errors don't crash agent).
+   * and continuing execution (errors don't crash agent). Timeline branch events are prioritized
+   * and include enhanced metadata for visualization.
    *
-   * Requirements: 4.2, 4.3, 4.4, 10.1, 10.2
+   * Requirements: 1.1, 1.2, 4.2, 4.3, 4.4, 6.1, 6.2, 10.1, 10.2
    */
   private flush(): void {
     // Nothing to flush if buffer is empty
@@ -212,11 +362,38 @@ class ProgressEventEmitter {
 
     // Attempt to serialize and send events
     try {
-      // Serialize events to JSON
-      const serialized = JSON.stringify(this.buffer);
+      // Sort events by priority (timeline branch events first) and timestamp
+      const sortedEvents = [...this.buffer].sort((a, b) => {
+        // Priority events first
+        const aPriority = this.PRIORITY_EVENT_TYPES.has(a.type) ? 0 : 1;
+        const bPriority = this.PRIORITY_EVENT_TYPES.has(b.type) ? 0 : 1;
+
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority;
+        }
+
+        // Then by timestamp
+        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      });
+
+      // Create batch with timeline metadata
+      const batch: SubAgentProgressBatch = {
+        toolCallId: this.toolCallId,
+        events: sortedEvents,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Serialize batch to JSON
+      const serialized = JSON.stringify(batch);
 
       // Send via IPC channel
       this.sender.send('acp:sub-agent-progress', serialized);
+
+      // Log timeline branch events for debugging
+      const branchEvents = sortedEvents.filter(e => this.PRIORITY_EVENT_TYPES.has(e.type));
+      if (branchEvents.length > 0) {
+        console.debug(`[SubAgentProgress] Flushed ${branchEvents.length} timeline branch events for ${this.toolCallId}`);
+      }
 
       // Clear buffer after successful send
       this.buffer = [];
@@ -1802,12 +1979,29 @@ export function createComputerUseTool(
 
       activeAgentInstance = agent;
 
-      // Create ProgressEventEmitter for sub-agent progress streaming
-      // Requirements: 5.1, 5.2, 5.3, 5.4
+      // Create ProgressEventEmitter for sub-agent progress streaming with timeline branch support
+      // Requirements: 1.1, 1.2, 5.1, 5.2, 5.3, 5.4, 6.1, 6.2
       const mainWindow = (global as any).mainWindow;
       const sender = mainWindow?.webContents || null;
       const effectiveToolCallId = toolCallId || crypto.randomUUID();
-      const progressEmitter = new ProgressEventEmitter(effectiveToolCallId, sender);
+
+      // Extract timeline branch metadata from context or parameters
+      const timelineBranchMetadata = {
+        parentId: toolCallId, // The parent tool call that spawned this subagent
+        agentType: 'computer-use', // This is a computer-use subagent
+        branchLevel: 1, // First level subagent (could be enhanced to track actual depth)
+        sessionId: effectiveToolCallId,
+        taskDescription: task || 'Computer use automation task',
+      };
+
+      const progressEmitter = new ProgressEventEmitter(
+        effectiveToolCallId,
+        sender,
+        timelineBranchMetadata
+      );
+
+      // Emit branch start event for timeline visualization
+      progressEmitter.emitBranchStart(task);
 
       try {
         const { finalAnswer, lastScreenshot } = await agent.run(
@@ -1820,14 +2014,17 @@ export function createComputerUseTool(
         );
         const b64 = lastScreenshot?.split(',')[1];
 
-        // Emit completion event
+        const finalOutput = finalAnswer || `Successfully completed GUI task: ${task}`;
+
+        // Emit timeline branch completion event
+        progressEmitter.emitBranchComplete(finalOutput);
+
+        // Also emit traditional completion event for backward compatibility
         progressEmitter.emit({
           type: 'complete',
           toolCallId: effectiveToolCallId,
           timestamp: new Date().toISOString(),
         });
-
-        const finalOutput = finalAnswer || `Successfully completed GUI task: ${task}`;
 
         return {
           success: true,
@@ -1835,6 +2032,21 @@ export function createComputerUseTool(
           base64Image: b64,
           data: { task, finalAnswer: finalOutput, screenshot: b64 }
         };
+      } catch (error) {
+        // Emit timeline branch abort event on error
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        progressEmitter.emitBranchAbort(`Task failed: ${errorMessage}`);
+
+        // Also emit traditional abort event for backward compatibility
+        progressEmitter.emit({
+          type: 'abort',
+          toolCallId: effectiveToolCallId,
+          timestamp: new Date().toISOString(),
+          content: errorMessage,
+        });
+
+        // Re-throw the error to maintain existing error handling behavior
+        throw error;
       } finally {
         // Destroy emitter to flush remaining events and clean up
         progressEmitter.destroy();
@@ -1846,6 +2058,14 @@ export function createComputerUseTool(
     },
 
     abort() {
+      // Emit timeline branch abort event if there's an active agent
+      if (activeAgentInstance) {
+        // Try to get the progress emitter from the active agent context
+        // Note: This is a simplified approach - in a full implementation,
+        // we'd need to track the progress emitter instance
+        console.debug('[ComputerUse] Aborting active agent instance');
+      }
+
       activeAgentInstance?.abort();
       activeAgentInstance = null;
     }

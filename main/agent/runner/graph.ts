@@ -7,11 +7,13 @@ import { createValidationNode } from './nodes/validation';
 import { createBrainNode } from './nodes/brain';
 import { createJudgeNode } from './nodes/judge';
 import { createDecomposerNode } from './nodes/decomposer';
+import { loadPrompt } from '../../lib/prompt-sync';
 import {
   createComputerUseNode,
   createCodingSpecialistNode,
   createDataAnalystNode,
-  createWebExplorerNode
+  createWebExplorerNode,
+  createDeepResearchNode
 } from './nodes/specialized_agents';
 import { AgentRunner } from './runner';
 import type { MissionTracker } from './mission-tracker';
@@ -21,6 +23,7 @@ import * as crypto from 'crypto';
 
 // Cache compiled graphs for better performance
 const graphCache = new Map<string, any>();
+
 
 /**
  * ExecutionContext provides access to runtime-specific objects (queue, tracker, etc.)
@@ -50,13 +53,18 @@ export const buildGraph = (
   toolDefs: any[],
   tools: any[],
 ) => {
-  // Create a hash of tool names to include in cache key
-  // This prevents reusing a cached graph when tool availability changes
-  const toolNames = toolDefs.map(t => t.name).sort().join(',');
-  const toolNamesHash = require('crypto').createHash('md5').update(toolNames).digest('hex').substring(0, 8);
-  const cacheKey = `graph_v7_specialized_${toolDefs.length}_${toolNamesHash}`;
+  // Bug 9: Create a hash of tool names, descriptions, and schemas to include in cache key
+  // This prevents reusing a cached graph when tool definitions change
+  const toolDefsStr = JSON.stringify(toolDefs.map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters
+  })).sort((a, b) => a.name.localeCompare(b.name)));
+  const toolDefsHash = require('crypto').createHash('md5').update(toolDefsStr).digest('hex').substring(0, 8);
+  const cacheKey = `graph_v8_specialized_${toolDefs.length}_${toolDefsHash}`;
 
   if (graphCache.has(cacheKey)) {
+
     console.log(`[Graph] 📦 Using CACHED execution graph (key: ${cacheKey})`);
     console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
     return graphCache.get(cacheKey);
@@ -246,16 +254,24 @@ export const buildGraph = (
     let systemPromptOverride = undefined;
     const plan = state.decomposedTask;
     if (plan) {
-        systemPromptOverride = `You are the EverFern Orchestrator.
+        const intentGuard = state.currentIntent
+            ? `\nTRIAGE INTENT: ${state.currentIntent} — routing MUST respect this intent. If intent is 'research', route to web_explorer, NOT computer_use.\n`
+            : '';
+        // Bug 4: Prepend plan context to brain prompt instead of replacing it
+        const planContext = `You are the EverFern Orchestrator.
 Your goal is to ensure the following execution plan is completed successfully.
-
+${intentGuard}
 CURRENT EXECUTION PLAN:
 Title: ${plan.title}
 Steps:
 ${plan.steps.map(s => `${s.id}: ${s.description} (Tool: ${s.tool})`).join('\n')}
 
-If a specialized agent failed to complete a step, identify the issue and use your tools to proceed.`;
+If a specialized agent failed to complete a step, identify the issue and use your tools to proceed.\n\n`;
+
+        const mainPrompt = loadPrompt('SYSTEM_PROMPT.md') || '';
+        systemPromptOverride = planContext + mainPrompt;
     }
+
 
     const node = createBrainNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs, ctx.shouldAbort, systemPromptOverride);
     return node(state);
@@ -301,6 +317,15 @@ If a specialized agent failed to complete a step, identify the issue and use you
     return node(state);
   };
 
+  const deepResearchNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    if (ctx.shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+    const node = createDeepResearchNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, toolDefs);
+    return node(state);
+  };
+
   const validatorNode = async (state: GraphStateType, config?: any) => {
     const ctx = getContext(config);
     // Guard: Check abort before node execution
@@ -340,6 +365,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
     .addNode('coding_specialist', codingNode)
     .addNode('data_analyst', dataAnalystNode)
     .addNode('web_explorer', webExplorerNode)
+    .addNode('deep_research', deepResearchNode)
     .addNode('action_validation', validatorNode)
     .addNode('hitl_approval', hitlNode)
     .addNode('multi_tool_orchestrator', orchestratorNode)
@@ -375,6 +401,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
                 case 'route_computer_use':
                     return 'computer_use_agent';
                 case 'route_web_explorer':
+                    // Always use web_explorer for web research tasks to ensure browser_use is used
                     return 'web_explorer';
                 case 'complete_task':
                 case 'continue_brain':
@@ -391,6 +418,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
         data_analyst: 'data_analyst',
         computer_use_agent: 'computer_use_agent',
         web_explorer: 'web_explorer',
+        deep_research: 'deep_research',
         judge: 'judge',
     })
 
@@ -403,10 +431,17 @@ If a specialized agent failed to complete a step, identify the issue and use you
             return 'action_validation';
         }
 
+        // Keep specialist in control if not complete
+        if (!state.codingComplete) {
+            console.log('[Graph] 🔀 Coding specialist not complete → coding_specialist');
+            return 'coding_specialist';
+        }
+
         console.log('[Graph] 🔀 Coding specialist complete → brain');
         return 'brain';
     }, {
         action_validation: 'action_validation',
+        coding_specialist: 'coding_specialist',
         brain: 'brain',
     })
 
@@ -418,10 +453,17 @@ If a specialized agent failed to complete a step, identify the issue and use you
             return 'action_validation';
         }
 
+        // Keep specialist in control if not complete
+        if (!state.dataAnalysisComplete) {
+            console.log('[Graph] 🔀 Data analyst not complete → data_analyst');
+            return 'data_analyst';
+        }
+
         console.log('[Graph] 🔀 Data analyst complete → brain');
         return 'brain';
     }, {
         action_validation: 'action_validation',
+        data_analyst: 'data_analyst',
         brain: 'brain',
     })
 
@@ -433,10 +475,17 @@ If a specialized agent failed to complete a step, identify the issue and use you
             return 'action_validation';
         }
 
+        // Keep specialist in control if not complete
+        if (!state.computerUseComplete) {
+            console.log('[Graph] 🔀 Computer use agent not complete → computer_use_agent');
+            return 'computer_use_agent';
+        }
+
         console.log('[Graph] 🔀 Computer use agent complete → brain');
         return 'brain';
     }, {
         action_validation: 'action_validation',
+        computer_use_agent: 'computer_use_agent',
         brain: 'brain',
     })
 
@@ -448,12 +497,53 @@ If a specialized agent failed to complete a step, identify the issue and use you
             return 'action_validation';
         }
 
-        console.log('[Graph] 🔀 Web explorer complete → brain');
-        return 'brain';
+        // Check if web explorer workflow is complete
+        const webExplorerComplete = state.webExplorerComplete;
+        if (webExplorerComplete) {
+            console.log('[Graph] 🔀 Web explorer workflow complete → brain');
+            return 'brain';
+        }
+
+        // Bug 5: Iteration limit for web_explorer self-loop
+        const loopCount = state.webExplorerSelfLoopCount || 0;
+        const MAX_SELF_LOOPS = 5;
+        if (loopCount >= MAX_SELF_LOOPS) {
+            console.warn(`[Graph] ⚠️ Web explorer reached MAX_SELF_LOOPS (${MAX_SELF_LOOPS}) → breaking loop`);
+            return 'brain';
+        }
+
+        // If no tools and not complete, continue web explorer workflow
+        console.log('[Graph] 🔀 Web explorer continuing workflow → web_explorer');
+        return 'web_explorer';
+
     }, {
         action_validation: 'action_validation',
         brain: 'brain',
+        web_explorer: 'web_explorer',
     })
+
+    .addConditionalEdges('deep_research', (state) => {
+        const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
+
+        if (hasTools) {
+            console.log('[Graph] 🔀 Deep research has tools → action_validation');
+            return 'action_validation';
+        }
+
+        // Keep specialist in control if not complete
+        if (!state.deepResearchComplete) {
+            console.log('[Graph] 🔀 Deep research not complete → deep_research');
+            return 'deep_research';
+        }
+
+        console.log('[Graph] 🔀 Deep research complete → brain');
+        return 'brain';
+    }, {
+        action_validation: 'action_validation',
+        deep_research: 'deep_research',
+        brain: 'brain',
+    })
+
 
     // Tool validation and execution flow
     .addConditionalEdges('action_validation', (state) => {
@@ -505,8 +595,35 @@ If a specialized agent failed to complete a step, identify the issue and use you
         [END]: END
     })
 
-    // After tool execution, always return to brain for coordination
-    .addEdge('multi_tool_orchestrator', 'brain')
+    // After tool execution, route back to brain for coordination
+    // UNLESS we are in the middle of a specialist workflow
+    .addConditionalEdges('multi_tool_orchestrator', (state) => {
+        if (state.returningFromSpecialist) {
+            console.log(`[Graph] 🔀 Multi-tool complete → returning to specialist: ${state.returningFromSpecialist}`);
+            switch (state.returningFromSpecialist) {
+                case 'coding_specialist':
+                    return 'coding_specialist';
+                case 'data_analyst':
+                    return 'data_analyst';
+                case 'computer_use_agent':
+                    return 'computer_use_agent';
+                case 'web_explorer':
+                    return 'web_explorer';
+                case 'deep_research':
+                    return 'deep_research';
+            }
+        }
+        console.log('[Graph] 🔀 Multi-tool complete → brain');
+        return 'brain';
+    }, {
+        coding_specialist: 'coding_specialist',
+        data_analyst: 'data_analyst',
+        computer_use_agent: 'computer_use_agent',
+        web_explorer: 'web_explorer',
+        deep_research: 'deep_research',
+        brain: 'brain',
+    })
+
 
     // Judge makes final completion decision
     .addConditionalEdges('judge', (state) => {

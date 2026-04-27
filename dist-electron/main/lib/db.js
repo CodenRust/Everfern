@@ -43,9 +43,9 @@ exports.closeDb = closeDb;
 exports.ensureVectorTable = ensureVectorTable;
 const sqlite3_1 = __importDefault(require("sqlite3"));
 const sqliteVec = __importStar(require("sqlite-vec"));
-const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
+const os_1 = __importDefault(require("os"));
 let instance = null;
 let currentVectorDims = null;
 function continueWithSetup(db, resolve, reject) {
@@ -120,8 +120,7 @@ function continueWithSetup(db, resolve, reject) {
 async function initMemoryDb() {
     if (instance)
         return instance;
-    const userDataPath = electron_1.app.getPath('userData');
-    const dbDir = path_1.default.join(userDataPath, 'memory');
+    const dbDir = path_1.default.join(os_1.default.homedir(), '.everfern', 'sql');
     if (!fs_1.default.existsSync(dbDir)) {
         fs_1.default.mkdirSync(dbDir, { recursive: true });
     }

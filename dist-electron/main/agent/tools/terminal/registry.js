@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CommandRegistry = void 0;
 const child_process_1 = require("child_process");
 const os = __importStar(require("os"));
+const path = __importStar(require("path"));
 class CommandRegistry {
     static instance;
     commands = new Map();
@@ -47,7 +48,7 @@ class CommandRegistry {
         }
         return CommandRegistry.instance;
     }
-    async execute(id, command, cwd = os.homedir()) {
+    async execute(id, command, cwd = path.join(os.homedir(), '.everfern')) {
         const info = {
             id,
             command,

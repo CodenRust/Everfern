@@ -11,6 +11,9 @@
  */
 
 import type { AgentTool, ToolResult } from '../runner/types';
+import { toolSettingsStore } from '../../store/tool-settings';
+import { playwrightWebSearch } from './web-playwright';
+import { exaSearch } from './exa-client';
 
 // ── search-engine-nodejs wrapper ─────────────────────────────────────
 
@@ -174,7 +177,28 @@ export const webSearchTool: AgentTool = {
     }
 
     try {
-      const results = await search(query);
+      const config = toolSettingsStore.get().webSearch;
+      let results: SearchResult[];
+
+      if (config.mode === 'local') {
+        try {
+          const pwResults = await playwrightWebSearch(query, config.headless);
+          results = pwResults.map(r => ({ title: r.title, url: r.url, snippet: r.snippet }));
+        } catch (err) {
+          console.log(`[WebSearch] Playwright failed, falling back to scraper: ${err instanceof Error ? err.message : String(err)}`);
+          results = await search(query);
+        }
+      } else if (config.mode === 'api') {
+        try {
+          const exaResults = await exaSearch(query, config.apiKey);
+          results = exaResults.map(r => ({ title: r.title, url: r.url, snippet: r.snippet }));
+        } catch (err) {
+          console.log(`[WebSearch] Exa API failed, falling back to scraper: ${err instanceof Error ? err.message : String(err)}`);
+          results = await search(query);
+        }
+      } else {
+        results = await search(query);
+      }
 
       if (results.length === 0) {
         return {

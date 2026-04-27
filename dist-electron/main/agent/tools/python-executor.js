@@ -165,7 +165,7 @@ if _kiro_plot_paths:
         // Escape code for shell execution
         const escapedCode = this.escapeCodeForShell(codeToExecute);
         const command = `python -c ${escapedCode}`;
-        const cwd = os.homedir();
+        const cwd = path.join(os.homedir(), '.everfern');
         // Start execution
         const executionPromise = registry.execute(id, command, cwd);
         // Create timeout promise

@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { LoadingBreadcrumb } from "@/components/ui/animated-loading-svg-text-shimmer";
+import { GlobeAltIcon } from '@heroicons/react/24/outline';
 
 export interface ToolCallDisplay {
     id: string;
@@ -32,17 +33,336 @@ interface AgentTimelineProps {
     planSteps?: Array<{ id: string; description: string; tool?: string }> | null;
     planTitle?: string | null;
     subAgentProgress?: Map<string, SubAgentProgressEvent[]>;
+    timelineBranches?: Map<string, TimelineBranch>;
 }
 
 // Import SubAgentProgressEvent type
 import type { SubAgentProgressEvent } from "@/app/chat/types";
+
+// ── Timeline Branch Interfaces ───────────────────────────────────────────────
+interface TimelineBranch {
+    id: string;
+    parentId: string;
+    agentType: 'web-explorer' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
+    events: SubAgentProgressEvent[];
+    status: 'running' | 'completed' | 'failed' | 'aborted';
+    startTime: string;
+    endTime?: string;
+    taskDescription?: string;
+    branchLevel: number;
+    isCollapsed?: boolean;
+}
+
+interface TimelineRenderer {
+    renderBranch(branch: TimelineBranch): React.ReactNode;
+    updateBranch(branchId: string, events: SubAgentProgressEvent[]): void;
+    collapseBranch(branchId: string): void;
+    expandBranch(branchId: string): void;
+}
+
+// ── SearchResult Interfaces ──────────────────────────────────────────────────
+interface SearchResult {
+    title: string;
+    url: string;
+    snippet: string;
+    publishedDate?: string;
+    domain?: string;
+    breadcrumbs?: string[];
+}
+
+interface SearchResultCardProps {
+    result: SearchResult;
+    index: number;
+}
+
+/**
+ * Extracts domain from a URL string, removing 'www.' prefix
+ * @param url - The URL string to extract domain from
+ * @returns The extracted domain without 'www.' prefix, or null if URL is invalid
+ */
+const extractDomain = (url: string): string | null => {
+    try {
+        return new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Validates if a string is a valid URL
+ * @param url - The URL string to validate
+ * @returns True if URL is valid, false otherwise
+ */
+const isValidUrl = (url: string): boolean => {
+    try {
+        new URL(url);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+// ── SearchResultCard Component ───────────────────────────────────────────────
+const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, index }) => {
+    const [faviconError, setFaviconError] = useState(false);
+    const domain = result.domain || extractDomain(result.url) || 'Unknown';
+    const title = result.title || result.url || 'Untitled Result';
+    const hasValidUrl = isValidUrl(result.url);
+
+    // Try multiple favicon sources
+    const getFaviconSrc = () => {
+        if (faviconError) return null;
+        // First try Google's favicon service, then fallback to site's own favicon
+        return `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+    };
+
+    const getFallbackFaviconSrc = () => {
+        try {
+            const { origin } = new URL(result.url);
+            return `${origin}/favicon.ico`;
+        } catch {
+            return null;
+        }
+    };
+
+    return (
+        <motion.article
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+                duration: 0.2,
+                delay: index * 0.05,
+                ease: "easeOut"
+            }}
+            whileHover={{
+                y: -1,
+                transition: { duration: 0.15 }
+            }}
+            role="article"
+            aria-label="Search result"
+            style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+                padding: '10px 12px',
+                borderRadius: 12,
+                backgroundColor: 'white',
+                border: '1px solid #e5e7eb',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+                position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#c7d2fe';
+                e.currentTarget.style.backgroundColor = '#f5f3ff';
+                e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.1)';
+            }}
+            onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e5e7eb';
+                e.currentTarget.style.backgroundColor = 'white';
+                e.currentTarget.style.boxShadow = 'none';
+            }}
+        >
+            {/* Citation Badge */}
+            <div style={{
+                position: 'absolute',
+                top: 6,
+                right: 6,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 6px',
+                borderRadius: 12,
+                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                fontSize: 9,
+                fontWeight: 600,
+                color: '#6366f1',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontFamily: "'Matter', sans-serif"
+            }}>
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14,2 14,8 20,8" />
+                </svg>
+                Source
+            </div>
+
+            {hasValidUrl ? (
+                <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Visit ${title} at ${domain}`}
+                    style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                        textDecoration: 'none',
+                        color: 'inherit'
+                    }}
+                >
+                    <SearchResultContent
+                        result={result}
+                        domain={domain}
+                        title={title}
+                        faviconSrc={getFaviconSrc()}
+                        fallbackFaviconSrc={getFallbackFaviconSrc()}
+                        onFaviconError={() => setFaviconError(true)}
+                    />
+                </a>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <SearchResultContent
+                        result={result}
+                        domain={domain}
+                        title={title}
+                        faviconSrc={getFaviconSrc()}
+                        fallbackFaviconSrc={getFallbackFaviconSrc()}
+                        onFaviconError={() => setFaviconError(true)}
+                    />
+                </div>
+            )}
+        </motion.article>
+    );
+};
+
+// ── SearchResultContent Component ────────────────────────────────────────────
+const SearchResultContent: React.FC<{
+    result: SearchResult;
+    domain: string;
+    title: string;
+    faviconSrc: string | null;
+    fallbackFaviconSrc: string | null;
+    onFaviconError: () => void;
+}> = ({ result, domain, title, faviconSrc, fallbackFaviconSrc, onFaviconError }) => {
+    const [primaryFaviconError, setPrimaryFaviconError] = useState(false);
+    const [fallbackFaviconError, setFallbackFaviconError] = useState(false);
+
+    const handlePrimaryFaviconError = () => {
+        setPrimaryFaviconError(true);
+        onFaviconError();
+    };
+
+    const handleFallbackFaviconError = () => {
+        setFallbackFaviconError(true);
+    };
+
+    return (
+        <>
+            {/* Domain Header with Enhanced Favicon */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {/* Enhanced Favicon with Fallback */}
+                {!primaryFaviconError && faviconSrc ? (
+                    <img
+                        src={faviconSrc}
+                        alt=""
+                        width={14}
+                        height={14}
+                        style={{ borderRadius: 2, flexShrink: 0 }}
+                        loading="lazy"
+                        onError={handlePrimaryFaviconError}
+                    />
+                ) : !fallbackFaviconError && fallbackFaviconSrc ? (
+                    <img
+                        src={fallbackFaviconSrc}
+                        alt=""
+                        width={14}
+                        height={14}
+                        style={{ borderRadius: 2, flexShrink: 0 }}
+                        loading="lazy"
+                        onError={handleFallbackFaviconError}
+                    />
+                ) : (
+                    <GlobeAltIcon
+                        width={14}
+                        height={14}
+                        style={{ flexShrink: 0, color: '#6b7280' }}
+                    />
+                )}
+
+                <span
+                    style={{
+                        fontSize: 11,
+                        color: '#6b7280',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontFamily: "'Matter', sans-serif",
+                        letterSpacing: '0.01em'
+                    }}
+                >
+                    {domain}
+                </span>
+            </div>
+
+            {/* Title Link */}
+            <div
+                style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#1a56db',
+                    lineHeight: 1.3,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontFamily: "'Matter', sans-serif",
+                    letterSpacing: '-0.01em',
+                    transition: 'text-decoration 0.15s ease-out'
+                }}
+                onMouseEnter={(e) => {
+                    e.currentTarget.style.textDecoration = 'underline';
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.textDecoration = 'none';
+                }}
+            >
+                {title}
+            </div>
+
+            {/* Snippet */}
+            {result.snippet && (
+                <div
+                    style={{
+                        fontSize: 12,
+                        color: '#4b5563',
+                        lineHeight: 1.5,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        fontFamily: "'Matter', sans-serif"
+                    }}
+                >
+                    {result.snippet}
+                </div>
+            )}
+
+            {/* Metadata Row */}
+            {result.publishedDate && (
+                <div
+                    style={{
+                        fontSize: 11,
+                        color: '#9ca3af',
+                        fontFamily: "'Matter', sans-serif",
+                        letterSpacing: '0.01em'
+                    }}
+                >
+                    {result.publishedDate}
+                </div>
+            )}
+        </>
+    );
+};
 
 // Timeline item types
 type TimelineItem =
     | { type: "tool"; data: ToolCallDisplay }
     | { type: "thought"; data: { id: string; content: string; isLive?: boolean } }
     | { type: "plan"; data: { steps: Array<{ id: string; description: string; tool?: string }>; title?: string | null } }
-    | { type: "subagent-progress"; data: SubAgentProgressEvent };
+    | { type: "subagent-progress"; data: SubAgentProgressEvent }
+    | { type: "timeline-branch"; data: TimelineBranch };
 
 const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
@@ -61,7 +381,6 @@ const toolLabel = (toolName: string, label?: string, displayName?: string): stri
         bash: "Run command",
         executePwsh: "Run command",
         web_search: "Web search",
-        web_fetch: "Fetch URL",
         grep_search: "Search codebase",
         file_search: "Find file",
         list_directory: "List directory",
@@ -927,6 +1246,348 @@ const SubAgentProgressItem = ({
     return null;
 };
 
+// Timeline Branch Component - displays subagent branches as connected visual elements
+const TimelineBranchItem = ({
+    branch,
+    isLast,
+    onToggleCollapse,
+    onShowTooltip,
+    onHideTooltip
+}: {
+    branch: TimelineBranch;
+    isLast: boolean;
+    onToggleCollapse: (branchId: string) => void;
+    onShowTooltip: (event: React.MouseEvent, branch: TimelineBranch) => void;
+    onHideTooltip: () => void;
+}) => {
+    const [screenshotExpanded, setScreenshotExpanded] = useState(false);
+    const isRunning = branch.status === 'running';
+    const isCompleted = branch.status === 'completed';
+    const isFailed = branch.status === 'failed';
+    const isAborted = branch.status === 'aborted';
+
+    // Get agent type styling
+    const getAgentTypeColor = (agentType: string) => {
+        const colors = {
+            'web-explorer': '#3b82f6',
+            'browser-use': '#8b5cf6',
+            'computer-use': '#06b6d4',
+            'research': '#10b981',
+            'coding-specialist': '#f59e0b',
+            'data-analyst': '#ef4444'
+        };
+        return colors[agentType as keyof typeof colors] || '#6b7280';
+    };
+
+    const agentColor = getAgentTypeColor(branch.agentType);
+    const statusColor = isRunning ? agentColor :
+                       isCompleted ? '#22c55e' :
+                       isFailed ? '#ef4444' :
+                       isAborted ? '#f59e0b' : '#6b7280';
+
+    // Get agent type icon
+    const getAgentTypeIcon = (agentType: string) => {
+        const icons = {
+            'web-explorer': '🌐',
+            'browser-use': '🖥️',
+            'computer-use': '💻',
+            'research': '🔍',
+            'coding-specialist': '👨‍💻',
+            'data-analyst': '📊'
+        };
+        return icons[agentType as keyof typeof icons] || '🤖';
+    };
+
+    const agentIcon = getAgentTypeIcon(branch.agentType);
+
+    return (
+        <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+            {/* Timeline line with branch connection */}
+            <div style={{
+                width: 20,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                position: "relative",
+            }}>
+                {/* Vertical line before */}
+                <div style={{
+                    width: 2,
+                    height: 12,
+                    backgroundColor: "#e8e6d9",
+                }} />
+
+                {/* Branch connection point */}
+                <div style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    backgroundColor: statusColor,
+                    border: "2px solid #faf9f7",
+                    boxShadow: "0 0 0 1px #e8e6d9",
+                    flexShrink: 0,
+                    zIndex: 2,
+                    position: "relative"
+                }}>
+                    {isRunning && (
+                        <motion.div
+                            animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
+                            transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+                            style={{
+                                position: "absolute", inset: -2,
+                                borderRadius: "50%",
+                                backgroundColor: statusColor,
+                            }}
+                        />
+                    )}
+                </div>
+
+                {/* Vertical line after - extends through entire content */}
+                {!isLast && (
+                    <div style={{
+                        position: "absolute",
+                        top: 24,
+                        bottom: -20,
+                        width: 2,
+                        backgroundColor: "#e8e6d9",
+                    }} />
+                )}
+
+                {/* Branch curve - visual connection to parent */}
+                <svg
+                    width="50"
+                    height="50"
+                    viewBox="0 0 50 50"
+                    style={{
+                        position: "absolute",
+                        left: 12,
+                        top: 6,
+                        pointerEvents: "none",
+                    }}
+                >
+                    <path
+                        d="M 0 6 Q 25 6 25 25 L 25 50"
+                        stroke={agentColor}
+                        strokeWidth="2"
+                        fill="none"
+                        strokeDasharray="4,4"
+                        opacity="0.6"
+                    />
+                </svg>
+            </div>
+
+            {/* Branch content */}
+            <div style={{ flex: 1, paddingLeft: 32, paddingTop: 0, paddingBottom: 20 }}>
+                {/* Branch header - clickable for collapse/expand */}
+                <div
+                    onClick={() => onToggleCollapse(branch.id)}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = `${agentColor}08`;
+                        e.currentTarget.style.borderColor = `${agentColor}40`;
+                        onShowTooltip(e, branch);
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "#faf9f7";
+                        e.currentTarget.style.borderColor = `${agentColor}20`;
+                        onHideTooltip();
+                    }}
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: "pointer",
+                        userSelect: "none",
+                        padding: "6px 12px",
+                        backgroundColor: "#faf9f7",
+                        borderRadius: 8,
+                        border: `1px solid ${agentColor}20`,
+                        borderLeft: `3px solid ${agentColor}`,
+                        marginBottom: branch.isCollapsed ? 0 : 12,
+                        transition: "all 0.15s ease-out"
+                    }}
+                >
+                    <span style={{ fontSize: 16 }}>{agentIcon}</span>
+
+                    <div style={{ flex: 1 }}>
+                        <div style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: agentColor,
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                            textTransform: "capitalize",
+                            letterSpacing: "0.02em"
+                        }}>
+                            {branch.agentType.replace('-', ' ')} Subagent
+                        </div>
+
+                        {branch.taskDescription && (
+                            <div style={{
+                                fontSize: 11,
+                                color: "#6b7280",
+                                marginTop: 2,
+                                fontFamily: "'Figtree', system-ui, sans-serif",
+                                lineHeight: 1.4
+                            }}>
+                                {branch.taskDescription}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Status indicator */}
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6
+                    }}>
+                        {isRunning && (
+                            <motion.div
+                                animate={{ opacity: [0.4, 1, 0.4] }}
+                                transition={{ repeat: Infinity, duration: 1.2 }}
+                                style={{ display: "flex", gap: 2, alignItems: "center" }}
+                            >
+                                {[0, 1, 2].map(i => (
+                                    <motion.div
+                                        key={i}
+                                        animate={{ opacity: [0.3, 1, 0.3] }}
+                                        transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
+                                        style={{ width: 2, height: 2, borderRadius: "50%", backgroundColor: agentColor }}
+                                    />
+                                ))}
+                            </motion.div>
+                        )}
+
+                        <span style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: statusColor,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                            fontFamily: "'Figtree', system-ui, sans-serif"
+                        }}>
+                            {branch.events.length} event{branch.events.length !== 1 ? 's' : ''}
+                        </span>
+
+                        {/* Collapse/expand chevron */}
+                        <motion.svg
+                            animate={{ rotate: branch.isCollapsed ? -90 : 0 }}
+                            transition={{ duration: 0.18 }}
+                            width={12} height={12} viewBox="0 0 24 24"
+                            fill="none" stroke={agentColor} strokeWidth={2.5}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            style={{ flexShrink: 0 }}
+                        >
+                            <polyline points="6 9 12 15 18 9" />
+                        </motion.svg>
+                    </div>
+                </div>
+
+                {/* Branch events - collapsible */}
+                <AnimatePresence>
+                    {!branch.isCollapsed && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2, ease: "easeInOut" }}
+                            style={{ overflow: "hidden" }}
+                        >
+                            <div style={{
+                                paddingLeft: 16,
+                                borderLeft: `2px solid ${agentColor}20`,
+                                marginLeft: 8
+                            }}>
+                                {branch.events.map((event, idx) => (
+                                    <div key={`${event.toolCallId}-${event.timestamp}-${idx}`} style={{ marginBottom: 8 }}>
+                                        <SubAgentProgressItem
+                                            event={event}
+                                            isLast={idx === branch.events.length - 1}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+        </div>
+    );
+};
+
+// Tooltip Component for Branch Details
+const BranchTooltip = ({
+    branch,
+    position,
+    visible
+}: {
+    branch: TimelineBranch | null;
+    position: { x: number; y: number };
+    visible: boolean;
+}) => {
+    if (!visible || !branch) return null;
+
+    const formatTime = (timestamp: string) => {
+        try {
+            return new Date(timestamp).toLocaleTimeString();
+        } catch {
+            return timestamp;
+        }
+    };
+
+    const getDuration = () => {
+        if (!branch.endTime) return 'Running...';
+        try {
+            const start = new Date(branch.startTime).getTime();
+            const end = new Date(branch.endTime).getTime();
+            const duration = end - start;
+            return formatDuration(duration);
+        } catch {
+            return 'Unknown';
+        }
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ duration: 0.15 }}
+            style={{
+                position: "fixed",
+                left: position.x,
+                top: position.y - 10,
+                zIndex: 1000,
+                backgroundColor: "#1f2937",
+                color: "white",
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 11,
+                fontFamily: "'Figtree', system-ui, sans-serif",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+                maxWidth: 250,
+                pointerEvents: "none"
+            }}
+        >
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                {branch.agentType.replace('-', ' ')} Subagent
+            </div>
+
+            {branch.taskDescription && (
+                <div style={{ marginBottom: 6, opacity: 0.9 }}>
+                    {branch.taskDescription}
+                </div>
+            )}
+
+            <div style={{ fontSize: 10, opacity: 0.8, lineHeight: 1.4 }}>
+                <div>Started: {formatTime(branch.startTime)}</div>
+                <div>Duration: {getDuration()}</div>
+                <div>Events: {branch.events.length}</div>
+                <div>Level: {branch.branchLevel}</div>
+                <div>Status: {branch.status}</div>
+            </div>
+        </motion.div>
+    );
+};
+
 // Single tool row on the main timeline
 const ToolRow = ({
     tc, isExpanded, onToggle, isLast,
@@ -951,6 +1612,24 @@ const ToolRow = ({
     const artifactContent = tc.args?.content as string | undefined;
     const artifactType = tc.args?.type as string | undefined;
     const artifactTitle = tc.args?.title as string | undefined;
+
+    // Check if this is a search tool with results
+    const isSearchTool = tc.toolName === 'web_search' || tc.toolName === 'remote_web_search' || tc.toolName === 'search_docs' || tc.label?.toLowerCase().includes('search');
+    const hasSearchResults = isSearchTool && Array.isArray(tc.data?.results) && tc.data.results.length > 0;
+    const queries: string[] = Array.isArray(tc.args?.queries) ? tc.args.queries : (typeof tc.args?.query === 'string' ? [tc.args.query] : []);
+    const docs: string[] = Array.isArray(tc.args?.docs) ? tc.args.docs : [];
+    const hasSearchPills = isSearchTool && (queries.length > 0 || docs.length > 0);
+    const hasExpandableContent = hasOutput || hasSearchResults || hasSearchPills;
+
+    // Auto-expand search tools when they have results (only once, not repeatedly)
+    const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
+
+    useEffect(() => {
+        if (!hasAutoExpanded && !isExpanded && ((hasSearchPills && hasOutput) || hasSearchResults)) {
+            setHasAutoExpanded(true);
+            onToggle();
+        }
+    }, [hasSearchPills, hasOutput, hasSearchResults, isExpanded, hasAutoExpanded]);
 
     return (
         <div style={{ display: "flex", gap: 0, paddingBottom: 0, position: "relative" }}>
@@ -987,10 +1666,10 @@ const ToolRow = ({
             {/* Content */}
             <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
                 <div
-                    onClick={() => hasOutput && onToggle()}
+                    onClick={() => hasExpandableContent && onToggle()}
                     style={{
                         display: "flex", alignItems: "center", gap: 8,
-                        cursor: hasOutput ? "pointer" : "default",
+                        cursor: hasExpandableContent ? "pointer" : "default",
                         userSelect: "none",
                         padding: "2px 0",
                     }}
@@ -1031,7 +1710,7 @@ const ToolRow = ({
                         </span>
                     )}
 
-                    {hasOutput && (
+                    {hasExpandableContent && (
                         <motion.svg
                             animate={{ rotate: isExpanded ? 180 : 0 }}
                             transition={{ duration: 0.18 }}
@@ -1118,60 +1797,179 @@ const ToolRow = ({
                 )}
 
                 <AnimatePresence>
-                    {isExpanded && tc.output && (() => {
-                        const lines = tc.output.split("\n");
-                        const MAX = 100;
-                        const truncated = lines.length > MAX;
-                        const display = truncated
-                            ? `[Showing last ${MAX} lines]\n` + lines.slice(-MAX).join("\n")
-                            : tc.output;
-                        return (
-                            <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: "auto", opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.18 }}
-                                style={{ overflow: "hidden" }}
-                            >
-                                {/* Command header for terminal commands */}
-                                {isTerminalCommand && (commandPath || command) && (
-                                    <div style={{
-                                        marginTop: 10,
-                                        padding: "8px 12px",
-                                        backgroundColor: "#faf9f7",
-                                        borderRadius: "8px 8px 0 0",
-                                        fontSize: 11,
-                                        fontFamily: "'JetBrains Mono', monospace",
-                                        color: "#6366f1",
-                                        borderLeft: "2px solid #6366f1",
-                                        borderRight: "1px solid #e8e6d9",
-                                        borderTop: "1px solid #e8e6d9",
-                                    }}>
-                                        {commandPath && <span style={{ color: "#8a8886" }}>{commandPath} : </span>}
-                                        <span style={{ color: "#201e24", fontWeight: 500 }}>{command}</span>
-                                    </div>
-                                )}
+                    {isExpanded && (hasOutput || hasSearchResults || hasSearchPills) && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            style={{ overflow: "hidden" }}
+                        >
+                            {/* Search Results Display */}
+                            {(hasSearchPills || hasSearchResults) ? (
+                                <div style={{ marginTop: 10 }}>
+                                    {/* Query Pills */}
+                                    {queries.length > 0 && (
+                                        <div style={{ marginBottom: 12 }}>
+                                            <div style={{
+                                                fontSize: 11,
+                                                color: '#6b7280',
+                                                fontWeight: 500,
+                                                marginBottom: 6,
+                                                fontFamily: "'Figtree', system-ui, sans-serif"
+                                            }}>
+                                                Querying
+                                            </div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                                {queries.map((q, i) => (
+                                                    <div key={i} style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 4,
+                                                        padding: '4px 10px',
+                                                        borderRadius: 16,
+                                                        backgroundColor: '#f3f4f6',
+                                                        border: '1px solid transparent',
+                                                        fontSize: 11,
+                                                        color: '#374151',
+                                                        fontWeight: 500,
+                                                        fontFamily: "'Figtree', system-ui, sans-serif"
+                                                    }}>
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <circle cx="11" cy="11" r="8" />
+                                                            <path d="m21 21-4.35-4.35" />
+                                                        </svg>
+                                                        {q}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
 
-                                <div style={{
-                                    marginTop: isTerminalCommand && (commandPath || command) ? 0 : 10,
-                                    padding: "10px 14px",
-                                    backgroundColor: "#f4f3ef",
-                                    borderRadius: isTerminalCommand && (commandPath || command) ? "0 0 8px 8px" : 8,
-                                    fontSize: 11.5,
-                                    fontFamily: "'JetBrains Mono', monospace",
-                                    color: "#4a4846",
-                                    whiteSpace: "pre-wrap",
-                                    maxHeight: 260,
-                                    overflowY: "auto",
-                                    border: "1px solid #e8e6d9",
-                                    borderTop: isTerminalCommand && (commandPath || command) ? "none" : "1px solid #e8e6d9",
-                                    lineHeight: 1.6,
-                                }}>
-                                    {display}
+                                    {/* Docs Pills */}
+                                    {docs.length > 0 && (
+                                        <div style={{ marginBottom: 12 }}>
+                                            <div style={{
+                                                fontSize: 11,
+                                                color: '#6b7280',
+                                                fontWeight: 500,
+                                                marginBottom: 6,
+                                                fontFamily: "'Figtree', system-ui, sans-serif"
+                                            }}>
+                                                Reading
+                                            </div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                                                {docs.slice(0, 2).map((d, i) => (
+                                                    <div key={i} style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 4,
+                                                        padding: '4px 10px',
+                                                        borderRadius: 16,
+                                                        backgroundColor: '#f3f4f6',
+                                                        border: '1px solid transparent',
+                                                        fontSize: 11,
+                                                        color: '#374151',
+                                                        fontWeight: 500,
+                                                        cursor: 'pointer',
+                                                        fontFamily: "'Figtree', system-ui, sans-serif"
+                                                    }}>
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                                            <polyline points="14,2 14,8 20,8" />
+                                                            <line x1="16" y1="13" x2="8" y2="13" />
+                                                            <line x1="16" y1="17" x2="8" y2="17" />
+                                                            <polyline points="10,9 9,9 8,9" />
+                                                        </svg>
+                                                        {d}
+                                                    </div>
+                                                ))}
+                                                {docs.length > 2 && (
+                                                    <div style={{
+                                                        fontSize: 11,
+                                                        color: '#2563eb',
+                                                        fontWeight: 600,
+                                                        marginLeft: 4,
+                                                        cursor: 'pointer',
+                                                        fontFamily: "'Figtree', system-ui, sans-serif"
+                                                    }}>
+                                                        + {docs.length - 2} more
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Search Results */}
+                                    {hasSearchResults && (
+                                        <div>
+                                            <div style={{
+                                                fontSize: 11,
+                                                color: '#6b7280',
+                                                fontWeight: 500,
+                                                marginBottom: 8,
+                                                fontFamily: "'Figtree', system-ui, sans-serif"
+                                            }}>
+                                                {tc.data.results.length} result{tc.data.results.length !== 1 ? 's' : ''}
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                {(tc.data.results as SearchResult[]).map((result, i) => (
+                                                    <SearchResultCard key={i} result={result} index={i} />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                            </motion.div>
-                        );
-                    })()}
+                            ) : tc.output && (() => {
+                                const lines = tc.output.split("\n");
+                                const MAX = 100;
+                                const truncated = lines.length > MAX;
+                                const display = truncated
+                                    ? `[Showing last ${MAX} lines]\n` + lines.slice(-MAX).join("\n")
+                                    : tc.output;
+                                return (
+                                    <>
+                                        {/* Command header for terminal commands */}
+                                        {isTerminalCommand && (commandPath || command) && (
+                                            <div style={{
+                                                marginTop: 10,
+                                                padding: "8px 12px",
+                                                backgroundColor: "#faf9f7",
+                                                borderRadius: "8px 8px 0 0",
+                                                fontSize: 11,
+                                                fontFamily: "'JetBrains Mono', monospace",
+                                                color: "#6366f1",
+                                                borderLeft: "2px solid #6366f1",
+                                                borderRight: "1px solid #e8e6d9",
+                                                borderTop: "1px solid #e8e6d9",
+                                            }}>
+                                                {commandPath && <span style={{ color: "#8a8886" }}>{commandPath} : </span>}
+                                                <span style={{ color: "#201e24", fontWeight: 500 }}>{command}</span>
+                                            </div>
+                                        )}
+
+                                        <div style={{
+                                            marginTop: isTerminalCommand && (commandPath || command) ? 0 : 10,
+                                            padding: "10px 14px",
+                                            backgroundColor: "#f4f3ef",
+                                            borderRadius: isTerminalCommand && (commandPath || command) ? "0 0 8px 8px" : 8,
+                                            fontSize: 11.5,
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            color: "#4a4846",
+                                            whiteSpace: "pre-wrap",
+                                            maxHeight: 260,
+                                            overflowY: "auto",
+                                            border: "1px solid #e8e6d9",
+                                            borderTop: isTerminalCommand && (commandPath || command) ? "none" : "1px solid #e8e6d9",
+                                            lineHeight: 1.6,
+                                        }}>
+                                            {display}
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </motion.div>
+                    )}
                 </AnimatePresence>
             </div>
         </div>
@@ -1179,10 +1977,84 @@ const ToolRow = ({
 };
 
 export const AgentTimeline = ({
-    toolCalls, thought, isLive, currentNode, planSteps, planTitle, subAgentProgress,
+    toolCalls, thought, isLive, currentNode, planSteps, planTitle, subAgentProgress, timelineBranches,
 }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
     const [collapsed, setCollapsed] = useState(false);
+    const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
+    const [tooltipState, setTooltipState] = useState<{
+        visible: boolean;
+        branch: TimelineBranch | null;
+        position: { x: number; y: number };
+    }>({ visible: false, branch: null, position: { x: 0, y: 0 } });
+
+    // Helper function to build timeline branches from subagent progress events
+    const buildTimelineBranches = useMemo((): Map<string, TimelineBranch> => {
+        const branches = new Map<string, TimelineBranch>();
+
+        // Use provided timeline branches if available
+        if (timelineBranches) {
+            timelineBranches.forEach((branch, id) => {
+                branches.set(id, {
+                    ...branch,
+                    isCollapsed: collapsedBranches.has(id)
+                });
+            });
+            return branches;
+        }
+
+        // Otherwise, build branches from subagent progress events
+        if (subAgentProgress) {
+            subAgentProgress.forEach((events, toolCallId) => {
+                if (events.length === 0) return;
+
+                // Group events by timeline branch metadata
+                const branchGroups = new Map<string, SubAgentProgressEvent[]>();
+
+                events.forEach(event => {
+                    if (event.timelineBranch) {
+                        const branchId = event.timelineBranch.sessionId || `${toolCallId}-${event.timelineBranch.agentType}`;
+                        if (!branchGroups.has(branchId)) {
+                            branchGroups.set(branchId, []);
+                        }
+                        branchGroups.get(branchId)!.push(event);
+                    }
+                });
+
+                // Create timeline branches from grouped events
+                branchGroups.forEach((branchEvents, branchId) => {
+                    if (branchEvents.length === 0) return;
+
+                    const firstEvent = branchEvents[0];
+                    const lastEvent = branchEvents[branchEvents.length - 1];
+                    const branchMetadata = firstEvent.timelineBranch!;
+
+                    // Determine branch status
+                    let status: TimelineBranch['status'] = 'running';
+                    if (lastEvent.type === 'complete') status = 'completed';
+                    else if (lastEvent.type === 'abort') status = 'aborted';
+                    else if (branchMetadata.branchStatus === 'failed') status = 'failed';
+
+                    const branch: TimelineBranch = {
+                        id: branchId,
+                        parentId: branchMetadata.parentId || toolCallId,
+                        agentType: branchMetadata.agentType || 'computer-use',
+                        events: branchEvents,
+                        status,
+                        startTime: firstEvent.timestamp,
+                        endTime: (lastEvent.type === 'complete' || lastEvent.type === 'abort') ? lastEvent.timestamp : undefined,
+                        taskDescription: branchMetadata.taskDescription,
+                        branchLevel: branchMetadata.branchLevel || 1,
+                        isCollapsed: collapsedBranches.has(branchId)
+                    };
+
+                    branches.set(branchId, branch);
+                });
+            });
+        }
+
+        return branches;
+    }, [subAgentProgress, timelineBranches, collapsedBranches]);
 
     // Build unified timeline with thoughts interspersed in chronological order
     const timelineItems = useMemo((): TimelineItem[] => {
@@ -1208,7 +2080,7 @@ export const AgentTimeline = ({
             });
         }
 
-        // Add tools and their individual thoughts in chronological order
+        // Add tools and their timeline branches in chronological order
         visibleTools.forEach(tc => {
             // Add tool-specific thought before the tool if it exists
             if (tc.thought && tc.thought.trim()) {
@@ -1228,22 +2100,63 @@ export const AgentTimeline = ({
                 data: tc
             });
 
-            // Add sub-agent progress events for this tool if available
+            // Add timeline branches for this tool
+            buildTimelineBranches.forEach(branch => {
+                if (branch.parentId === tc.id) {
+                    items.push({
+                        type: "timeline-branch",
+                        data: branch
+                    });
+                }
+            });
+
+            // Add individual sub-agent progress events that don't belong to branches
             if (subAgentProgress && subAgentProgress.has(tc.id)) {
                 const progressEvents = subAgentProgress.get(tc.id) || [];
                 progressEvents.forEach(event => {
-                    items.push({
-                        type: "subagent-progress",
-                        data: event
-                    });
+                    // Only add events that don't have timeline branch metadata (standalone events)
+                    if (!event.timelineBranch) {
+                        items.push({
+                            type: "subagent-progress",
+                            data: event
+                        });
+                    }
                 });
             }
         });
 
         return items;
-    }, [toolCalls, thought, isLive, planSteps, planTitle, subAgentProgress]);
+    }, [toolCalls, thought, isLive, planSteps, planTitle, subAgentProgress, buildTimelineBranches]);
 
     const toggleTool = (id: string) => setExpandedToolId(p => p === id ? null : id);
+
+    const toggleBranchCollapse = (branchId: string) => {
+        setCollapsedBranches(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(branchId)) {
+                newSet.delete(branchId);
+            } else {
+                newSet.add(branchId);
+            }
+            return newSet;
+        });
+    };
+
+    const showTooltip = (event: React.MouseEvent, branch: TimelineBranch) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setTooltipState({
+            visible: true,
+            branch,
+            position: {
+                x: rect.right + 10,
+                y: rect.top
+            }
+        });
+    };
+
+    const hideTooltip = () => {
+        setTooltipState(prev => ({ ...prev, visible: false }));
+    };
 
     const hasContent = timelineItems.length > 0;
 
@@ -1429,10 +2342,34 @@ export const AgentTimeline = ({
                                     );
                                 }
 
+                                if (item.type === "timeline-branch") {
+                                    return (
+                                        <TimelineBranchItem
+                                            key={item.data.id}
+                                            branch={item.data}
+                                            isLast={isLast}
+                                            onToggleCollapse={toggleBranchCollapse}
+                                            onShowTooltip={showTooltip}
+                                            onHideTooltip={hideTooltip}
+                                        />
+                                    );
+                                }
+
                                 return null;
                             })}
                         </div>
                     </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Tooltip for branch details */}
+            <AnimatePresence>
+                {tooltipState.visible && (
+                    <BranchTooltip
+                        branch={tooltipState.branch}
+                        position={tooltipState.position}
+                        visible={tooltipState.visible}
+                    />
                 )}
             </AnimatePresence>
         </motion.div>

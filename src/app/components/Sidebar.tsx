@@ -10,12 +10,13 @@ interface SidebarProps {
     isOpen: boolean;
     onToggle: () => void;
     activeConversationId: string | null;
+    activeTaskIds: string[]; // Track which chats have active background tasks
     onSelectConversation: (id: string) => void;
     onNewChat: () => void;
     onSettingsClick?: () => void;
     onArtifactsClick?: () => void;
     onCustomizeClick?: () => void;
-    onIntegrationClick?: () => void; // Integration settings callback
+    onIntegrationClick?: () => void;
 }
 
 interface ConversationSummary {
@@ -25,7 +26,7 @@ interface ConversationSummary {
     updatedAt: string;
 }
 
-export default function Sidebar({ isOpen, onToggle, activeConversationId, onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick, onIntegrationClick }: SidebarProps) {
+export default function Sidebar({ isOpen, onToggle, activeConversationId, activeTaskIds = [], onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick, onIntegrationClick }: SidebarProps) {
     const [showOptionsId, setShowOptionsId] = useState<string | null>(null);
     const [username, setUsername] = useState<string>("User");
     const [showSearch, setShowSearch] = useState<boolean>(false);
@@ -278,7 +279,28 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, onSele
                         }}
                     >
                         <div style={{ flexShrink: 0, opacity: 0.7, display: "flex", lineHeight: 1 }}>
-                            <ChatBubbleLeftIcon width={15} height={15} />
+                            {activeTaskIds.includes(item.id) ? (
+                                <div style={{ position: "relative", width: 15, height: 15 }}>
+                                    <div style={{
+                                        position: "absolute",
+                                        top: 0,
+                                        left: 0,
+                                        width: "100%",
+                                        height: "100%",
+                                        borderRadius: "50%",
+                                        border: "2px solid rgba(0, 102, 255, 0.2)",
+                                        borderTopColor: "#0066ff",
+                                        animation: "everfern-spin 1s linear infinite"
+                                    }}></div>
+                                    <style>{`
+                                        @keyframes everfern-spin {
+                                            to { transform: rotate(360deg); }
+                                        }
+                                    `}</style>
+                                </div>
+                            ) : (
+                                <ChatBubbleLeftIcon width={15} height={15} />
+                            )}
                         </div>
                         {isOpen && (
                             <>

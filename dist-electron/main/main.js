@@ -89,6 +89,7 @@ const vector_1 = require("./context-engine/vector");
 const skills_sync_1 = require("./lib/skills-sync");
 const registry_1 = require("./agent/tools/terminal/registry");
 const prompt_sync_1 = require("./lib/prompt-sync");
+const playwright_setup_1 = require("./lib/playwright-setup");
 // ── GPU / Cache Startup Fixes (must run before app.whenReady) ───────────────
 // Disable GPU shader disk cache — prevents "Access is denied (0x5)" on Windows
 // when a previous Electron process left the GPUCache directory locked.
@@ -456,11 +457,16 @@ async function autoStartEnabledBots() {
 // ── App lifecycle ───────────────────────────────────────────────────
 const voice_overlay_1 = require("./voice-overlay");
 let voiceOverlayManager;
+const extension_server_1 = require("./lib/extension-server");
 electron_1.app.whenReady().then(async () => {
     console.log('[App] App ready, starting initialization...');
+    // Start the extension bridge server (localhost:4001)
+    extension_server_1.bridgeServer.start();
     // ── Initialize Prompt Synchronization System ──────────────────────
     console.log('[Startup] 🔄 Initializing prompt synchronization...');
     (0, prompt_sync_1.initializePromptSync)();
+    // ── Ensure Playwright Chromium is installed (non-blocking) ─────────
+    (0, playwright_setup_1.ensurePlaywrightChromium)();
     // Watch for prompt changes in development mode
     if (process.env.NODE_ENV === 'development') {
         (0, prompt_sync_1.watchPrompts)();

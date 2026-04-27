@@ -6,7 +6,7 @@ import { systemFilesTool } from '../tools/system-files';
 import { memorySaveTool } from '../tools/memory-save';
 import { memorySearchTool } from '../tools/memory-search';
 import { webSearchTool } from '../tools/web-search';
-import { webFetchTool } from '../tools/web-fetch';
+import { websiteCrawlTool } from '../tools/website-crawl';
 import { todoWriteTool } from '../tools/todo-write';
 import { askUserTool } from '../tools/ask-user';
 import { skillTool } from '../tools/skill-tool';
@@ -15,8 +15,10 @@ import { createWorkspaceRequestTool, allowFileDeleteTool } from '../tools/contro
 import { terminalTool, terminalStatusTool } from '../tools/terminal';
 import { searchMcpRegistryTool, connectMcpServerTool, listMcpToolsTool } from '../tools/mcp-registry-tool';
 import { createArtifactTool, createSiteTool } from '../tools/create-artifact';
+import { editArtifactTool } from '../tools/edit-artifact';
 import { visualizeTool } from '../tools/visualize';
 import { mcpRegistry } from '../tools/mcp';
+import { createBrowserUseTool } from '../tools/browser-use';
 import { AIClient } from '../../lib/ai-client';
 import * as os from 'os';
 
@@ -74,13 +76,15 @@ export const getBaseTools = (runner: any): AgentTool[] => {
     askUserTool,
     skillTool,
     presentFilesTool,
-    webFetchTool,
+    websiteCrawlTool,
+    ...(runner.client ? [createBrowserUseTool(runner.client, (runner as any).groundingEngine)] : []),
     createWorkspaceRequestTool(config.requestPermission),
     allowFileDeleteTool,
     searchMcpRegistryTool,
     connectMcpServerTool,
     listMcpToolsTool,
     createArtifactTool,
+    editArtifactTool,
     createSiteTool,
     visualizeTool
   );

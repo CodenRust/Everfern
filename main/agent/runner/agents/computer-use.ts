@@ -43,8 +43,12 @@ export const createComputerUseNode = (
       return {
         messages: [assistantMsg as any],
         pendingToolCalls: [toolCall],
-        taskPhase: 'executing' as const
+        taskPhase: 'executing' as const,
+        returningFromSpecialist: 'computer_use_agent',
+        computerUseComplete: false
       };
+
+
     } catch (error) {
       integrator.failNode('computer_use_agent', error instanceof Error ? error.message : String(error));
       throw error;

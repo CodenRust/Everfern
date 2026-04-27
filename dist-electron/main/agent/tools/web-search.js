@@ -12,6 +12,9 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.webSearchTool = void 0;
+const tool_settings_1 = require("../../store/tool-settings");
+const web_playwright_1 = require("./web-playwright");
+const exa_client_1 = require("./exa-client");
 function searchViaEngine(engine, query) {
     return new Promise((resolve) => {
         try {
@@ -146,7 +149,31 @@ exports.webSearchTool = {
             return { success: false, output: 'No search query provided', error: 'query is required' };
         }
         try {
-            const results = await search(query);
+            const config = tool_settings_1.toolSettingsStore.get().webSearch;
+            let results;
+            if (config.mode === 'local') {
+                try {
+                    const pwResults = await (0, web_playwright_1.playwrightWebSearch)(query, config.headless);
+                    results = pwResults.map(r => ({ title: r.title, url: r.url, snippet: r.snippet }));
+                }
+                catch (err) {
+                    console.log(`[WebSearch] Playwright failed, falling back to scraper: ${err instanceof Error ? err.message : String(err)}`);
+                    results = await search(query);
+                }
+            }
+            else if (config.mode === 'api') {
+                try {
+                    const exaResults = await (0, exa_client_1.exaSearch)(query, config.apiKey);
+                    results = exaResults.map(r => ({ title: r.title, url: r.url, snippet: r.snippet }));
+                }
+                catch (err) {
+                    console.log(`[WebSearch] Exa API failed, falling back to scraper: ${err instanceof Error ? err.message : String(err)}`);
+                    results = await search(query);
+                }
+            }
+            else {
+                results = await search(query);
+            }
             if (results.length === 0) {
                 return {
                     success: true,

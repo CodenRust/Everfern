@@ -3,5 +3,6 @@ export {
   createCodingSpecialistNode,
   createDataAnalystNode,
   createComputerUseNode,
-  createWebExplorerNode
+  createWebExplorerNode,
+  createDeepResearchNode
 } from '../agents';

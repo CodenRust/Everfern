@@ -28,7 +28,9 @@ const createComputerUseNode = (runner, eventQueue, missionTracker, toolDefs) => 
             return {
                 messages: [assistantMsg],
                 pendingToolCalls: [toolCall],
-                taskPhase: 'executing'
+                taskPhase: 'executing',
+                returningFromSpecialist: 'computer_use_agent',
+                computerUseComplete: false
             };
         }
         catch (error) {

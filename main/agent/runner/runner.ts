@@ -32,7 +32,6 @@ import { systemFilesTool } from '../tools/system-files';
 import { memorySaveTool } from '../tools/memory-save';
 import { memorySearchTool } from '../tools/memory-search';
 import { webSearchTool } from '../tools/web-search';
-import { webFetchTool } from '../tools/web-fetch';
 import { todoWriteTool } from '../tools/todo-write';
 import { askUserTool } from '../tools/ask-user';
 import { skillTool } from '../tools/skill-tool';
@@ -185,6 +184,28 @@ export class AgentRunner {
         }
 
         try {
+          // Load parent conversation history
+          let parentHistory: Array<{ role: string; content: string | any[] }> = [];
+          try {
+            const chatHistoryStore = new ChatHistoryStore();
+            const fullConversation = await chatHistoryStore.load(this.currentConversationId || 'default');
+
+            if (fullConversation && fullConversation.messages.length > 0) {
+              // Reconstruct full history including tool calls
+              // Use empty string as currentUserInput since we're not adding a new message
+              const reconstructed = reconstructFullHistory(fullConversation.messages, '');
+
+              // Apply context window cap: limit to most recent 20 turns (40 messages max)
+              parentHistory = reconstructed.slice(-40);
+
+              console.log(`[SubagentSpawn] Loaded ${parentHistory.length} messages from parent conversation`);
+            }
+          } catch (historyErr) {
+            // If history loading fails, fall back to empty array (current behavior)
+            console.warn('[SubagentSpawn] Failed to load parent history, continuing with empty history:', historyErr);
+            parentHistory = [];
+          }
+
           const { getSubagentSpawner } = await import('./subagent-spawn');
           const spawner = getSubagentSpawner();
           spawner.setRunner({
@@ -194,7 +215,13 @@ export class AgentRunner {
               const clonedHistory = [...h] as any[];
               let lastResponse = '';
               let toolCalls: any[] = [];
-              const stream = subRunner.runStream(t, clonedHistory, m, `sub:${agentId}`);
+              const RESEARCH_PATTERN = /compile.*list|top \d+|find the best|comprehensive list|compare|best.*bots|best.*tools|best.*products/i;
+              const parentIsResearch = (this as any).currentIntent === 'research';
+              const taskIsResearch = RESEARCH_PATTERN.test(t);
+              const enrichedTask = (parentIsResearch || taskIsResearch)
+                ? `[RESEARCH TASK - USE WEB SEARCH]\n${t}`
+                : t;
+              const stream = subRunner.runStream(enrichedTask, clonedHistory, m, `sub:${agentId}`);
 
               for await (const event of stream) {
                   if (event.type === 'done') break;
@@ -282,7 +309,8 @@ export class AgentRunner {
             parentSessionId: this.currentConversationId || 'default',
             task,
             model: this.client.model,
-            maxDepth
+            maxDepth,
+            parentHistory
           });
           const children = await spawner.waitForCompletion(this.currentConversationId || 'default', 300000);
           const myChild = children.find(c => c.agentId === spawnedAgent.agentId);

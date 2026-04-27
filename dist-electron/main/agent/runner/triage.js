@@ -8,8 +8,14 @@ class IntentCache {
     cache = new Map();
     maxSize = 500;
     maxAge = 300000; // 5 minutes
-    key(input, historyLength) {
-        const ctx = `${input}:${historyLength}`;
+    key(input, history) {
+        const historyLength = history.length;
+        // Bug 2: Incorporate content-based hash of recent history to prevent stale cache hits
+        const recentHistory = history.slice(-3).map(m => {
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return content.substring(0, 50);
+        }).join('|');
+        const ctx = `${input}:${historyLength}:${recentHistory}`;
         let hash = 0;
         for (let i = 0; i < ctx.length; i++) {
             hash = ((hash << 5) - hash) + ctx.charCodeAt(i);
@@ -17,23 +23,23 @@ class IntentCache {
         }
         return hash.toString(36);
     }
-    get(input, historyLength) {
-        const entry = this.cache.get(this.key(input, historyLength));
+    get(input, history) {
+        const entry = this.cache.get(this.key(input, history));
         if (!entry)
             return null;
         if (Date.now() - entry.timestamp > this.maxAge) {
-            this.cache.delete(this.key(input, historyLength));
+            this.cache.delete(this.key(input, history));
             return null;
         }
         return entry.classification;
     }
-    set(input, historyLength, classification) {
+    set(input, history, classification) {
         if (this.cache.size >= this.maxSize) {
             const oldest = this.cache.keys().next().value;
             if (oldest)
                 this.cache.delete(oldest);
         }
-        this.cache.set(this.key(input, historyLength), { classification, timestamp: Date.now() });
+        this.cache.set(this.key(input, history), { classification, timestamp: Date.now() });
     }
     cleanup() {
         const now = Date.now();
@@ -53,7 +59,7 @@ INTENT CATEGORIES:
 - fix        → Fix a bug, error, crash, or broken behavior in existing code or systems
 - build      → Scaffold a new project, app, repo, or template from scratch
 - analyze    → Analyze data, files, documents, images, or CSV/Excel; generate reports, charts, visualizations
-- research   → Search the web, look up information, investigate a topic, find documentation
+- research   → Search the web, look up information, investigate a topic, find documentation, find tools/bots/products, look up news, research anything online
 - automate   → Control the GUI, click buttons, open/close apps, interact with the desktop or screen
 - question   → Answer a factual question, explain a concept, provide information
 - conversation → Greetings, small talk, acknowledgments, follow-ups with no clear task
@@ -66,6 +72,7 @@ CLASSIFICATION RULES:
 4. File attachments: .csv/.xlsx/.json/data files → analyze; .ts/.js/.py/code files → coding
 5. Short affirmatives (yes/ok/proceed/sure/go ahead) → inherit the previous intent from history
 6. When in doubt, prefer task over automate — automate is ONLY for actual GUI/screen interaction
+7. "search for", "find me", "look up", "what is the best X", "find the best X", "crawl a page", "fetch a URL" → ALWAYS research, NEVER automate
 
 Respond with JSON only. No explanation outside the JSON.`;
 const TRIAGE_USER_TEMPLATE = (userInput, historySnippet) => `
@@ -81,12 +88,29 @@ Classify the intent. JSON format:
 function classifyIntentFallback(userInput, history = []) {
     const normalized = userInput.toLowerCase().trim();
     // Short affirmatives — inherit from history
-    const affirmatives = ['yes', 'ok', 'okay', 'proceed', 'continue', 'sure', 'go ahead', 'yep', 'yeah'];
+    const affirmatives = ['yes', 'ok', 'okay', 'proceed', 'continue', 'sure', 'go ahead', 'yep', 'yeah', 'correct', 'right'];
     if (normalized.length < 20 && affirmatives.some(a => normalized === a || normalized.startsWith(a + ' '))) {
         // Try to find previous intent from history
-        const userMsgs = (history || []).filter((m) => m.role === 'user' || m.type === 'human');
+        const userMsgs = (history || []).filter((m) => {
+            const role = m.role || m._getType?.() || m.type;
+            return role === 'user' || role === 'human';
+        });
         if (userMsgs.length > 1) {
-            return { intent: 'task', confidence: 0.7, reasoning: 'Fallback: short affirmative, defaulting to task' };
+            // Find the last non-affirmative user message and re-evaluate it
+            for (let i = userMsgs.length - 2; i >= 0; i--) {
+                const prevMsg = userMsgs[i];
+                const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
+                const prevNormalized = prevContent.toLowerCase().trim();
+                if (prevNormalized.length >= 20 || !affirmatives.some(a => prevNormalized === a || prevNormalized.startsWith(a + ' '))) {
+                    // Recursively classify the previous message to get its intent
+                    const inherited = classifyIntentFallback(prevContent, []);
+                    return {
+                        ...inherited,
+                        confidence: 0.8, // Slightly lower confidence for inheritance
+                        reasoning: `Inherited intent "${inherited.intent}" from previous context: "${prevContent.substring(0, 30)}..."`
+                    };
+                }
+            }
         }
     }
     // File attachment context
@@ -96,6 +120,11 @@ function classifyIntentFallback(userInput, history = []) {
         return { intent: 'analyze', confidence: 0.75, reasoning: 'Fallback: data file detected' };
     if (hasCodeFile)
         return { intent: 'coding', confidence: 0.75, reasoning: 'Fallback: code file detected' };
+    // Web search / research keywords (including list-compilation and "top N" patterns)
+    if (/\b(search for|search the web|find me|look up|look for|what is the best|find the best|research|google|browse for|crawl|scrape|fetch url|find information|find news|find articles|find documentation)\b/i.test(normalized)
+        || /\b(compile.*list|top \d+|comprehensive list|compare.*options|best.*bots|best.*tools|best.*products)\b/i.test(normalized)) {
+        return { intent: 'research', confidence: 0.8, reasoning: 'Fallback: research/list-compilation keywords detected' };
+    }
     // Question patterns
     if (/^(what|how|why|when|where|which|who|can you explain|tell me about)\b/.test(normalized)) {
         return { intent: 'question', confidence: 0.75, reasoning: 'Fallback: question pattern' };
@@ -109,9 +138,8 @@ function classifyIntentFallback(userInput, history = []) {
 }
 // ── Main AI Classification ────────────────────────────────────────────
 async function classifyIntent(userInput, client, history = []) {
-    const historyLength = history?.length ?? 0;
     // Cache check
-    const cached = intentCache.get(userInput, historyLength);
+    const cached = intentCache.get(userInput, history);
     if (cached) {
         console.log('[IntentAgent] Cache hit');
         return cached;
@@ -162,7 +190,7 @@ async function classifyIntent(userInput, client, history = []) {
             reasoning: data.reasoning || 'AI classification',
         };
         if (result.confidence > 0.6) {
-            intentCache.set(userInput, historyLength, result);
+            intentCache.set(userInput, history, result);
         }
         return result;
     }

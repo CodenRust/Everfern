@@ -1,10 +1,111 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import AgentTimeline from '../AgentTimeline';
 import type { SubAgentProgressEvent } from '@/app/chat/types';
 import type { ToolCallDisplay } from '../AgentTimeline';
 
 describe('AgentTimeline Integration Tests', () => {
+  describe('Search Results Display', () => {
+    it('should display search results with SearchResultCard components', async () => {
+      const user = userEvent.setup();
+      const toolCalls: ToolCallDisplay[] = [
+        {
+          id: 'search-tool-1',
+          toolName: 'remote_web_search',
+          status: 'done',
+          label: 'Web search',
+          args: {
+            query: 'React testing best practices'
+          },
+          data: {
+            results: [
+              {
+                title: 'React Testing Library Documentation',
+                url: 'https://testing-library.com/docs/react-testing-library/intro/',
+                snippet: 'Simple and complete testing utilities that encourage good testing practices.',
+                domain: 'testing-library.com',
+                publishedDate: '2024-01-15'
+              },
+              {
+                title: 'Jest Testing Framework',
+                url: 'https://jestjs.io/docs/getting-started',
+                snippet: 'Jest is a delightful JavaScript Testing Framework with a focus on simplicity.',
+                domain: 'jestjs.io'
+              }
+            ]
+          },
+          output: 'Search completed successfully'
+        }
+      ];
+
+      render(
+        <AgentTimeline
+          toolCalls={toolCalls}
+          isLive={false}
+        />
+      );
+
+      // Check that the search tool is displayed
+      expect(screen.getByText('Web search')).toBeInTheDocument();
+
+      // The tool should auto-expand, but if not, click to expand
+      const expandButton = screen.getByText('Web search');
+      if (!screen.queryByText('React Testing Library Documentation')) {
+        await user.click(expandButton);
+      }
+
+      // Check that search results are displayed
+      expect(screen.getByText('React Testing Library Documentation')).toBeInTheDocument();
+      expect(screen.getByText('Jest Testing Framework')).toBeInTheDocument();
+
+      // Check that domains are displayed
+      expect(screen.getByText('testing-library.com')).toBeInTheDocument();
+      expect(screen.getByText('jestjs.io')).toBeInTheDocument();
+
+      // Check that snippets are displayed
+      expect(screen.getByText(/Simple and complete testing utilities/)).toBeInTheDocument();
+      expect(screen.getByText(/Jest is a delightful JavaScript Testing Framework/)).toBeInTheDocument();
+
+      // Check that result count is displayed
+      expect(screen.getByText('2 results')).toBeInTheDocument();
+    });
+
+    it('should display query pills for search tools', async () => {
+      const user = userEvent.setup();
+      const toolCalls: ToolCallDisplay[] = [
+        {
+          id: 'search-tool-2',
+          toolName: 'remote_web_search',
+          status: 'done',
+          label: 'Web search',
+          args: {
+            queries: ['React hooks', 'useState examples']
+          },
+          output: 'Search completed'
+        }
+      ];
+
+      render(
+        <AgentTimeline
+          toolCalls={toolCalls}
+          isLive={false}
+        />
+      );
+
+      // The tool should auto-expand, but if not, click to expand
+      const expandButton = screen.getByText('Web search');
+      if (!screen.queryByText('Querying')) {
+        await user.click(expandButton);
+      }
+
+      // Check that query pills are displayed
+      expect(screen.getByText('Querying')).toBeInTheDocument();
+      expect(screen.getByText('React hooks')).toBeInTheDocument();
+      expect(screen.getByText('useState examples')).toBeInTheDocument();
+    });
+  });
+
   describe('Single Sub-Agent Progress Display', () => {
     it('should display complete progress flow for a single sub-agent execution', () => {
       // Create a complete sequence of progress events for a single sub-agent

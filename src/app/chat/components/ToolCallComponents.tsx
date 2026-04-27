@@ -15,9 +15,147 @@ import {
 } from "@heroicons/react/24/outline";
 import type { ToolCallDisplay, LiveToolCall } from '../types/index';
 import { MarkdownRenderer } from './MarkdownComponents';
+import { FaviconCitation } from './FaviconCitation';
 import { DiffViewer } from '@/components/diff-viewer';
 import { SyntaxHighlighter } from '../ArtifactsPanel';
 import { Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
+import { SimpleFileNotification } from './SimpleFileNotification';
+
+// ── Utility Functions ────────────────────────────────────────────────────────
+/**
+ * Extracts domain from a URL string, removing 'www.' prefix
+ * @param url - The URL string to extract domain from
+ * @returns The extracted domain without 'www.' prefix, or null if URL is invalid
+ */
+const extractDomain = (url: string): string | null => {
+    try {
+        return new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+        return null;
+    }
+};
+
+// ── SearchResult Interfaces ──────────────────────────────────────────────────
+interface SearchResult {
+    title: string;
+    url: string;
+    snippet: string;
+    publishedDate?: string;
+    domain?: string;
+    breadcrumbs?: string[];
+}
+
+interface SearchResultCardProps {
+    result: SearchResult;
+    index: number;
+}
+
+// ── SearchResultCard Component ───────────────────────────────────────────────
+const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, index }) => {
+    // Validate URL
+    const isValidUrl = (url: string): boolean => {
+        try {
+            new URL(url);
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    const domain = result.domain || extractDomain(result.url) || 'Unknown';
+    const title = result.title || result.url || 'Untitled Result';
+    const hasValidUrl = isValidUrl(result.url);
+
+    return (
+        <motion.article
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+                duration: 0.2,
+                delay: index * 0.05,
+                ease: "easeOut"
+            }}
+            whileHover={{
+                y: -1,
+                transition: { duration: 0.15 }
+            }}
+            role="article"
+            aria-label="Search result"
+            className="group flex flex-col gap-1 px-3 py-2.5 rounded-xl bg-white border border-[#e5e7eb] hover:border-[#c7d2fe] hover:bg-[#f5f3ff] hover:shadow-sm transition-all duration-150 cursor-pointer"
+        >
+            {hasValidUrl ? (
+                <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Visit ${title} at ${domain}`}
+                    className="flex flex-col gap-1 no-underline"
+                    style={{ textDecoration: 'none' }}
+                >
+                    <SearchResultContent result={result} domain={domain} title={title} />
+                </a>
+            ) : (
+                <div className="flex flex-col gap-1">
+                    <SearchResultContent result={result} domain={domain} title={title} />
+                </div>
+            )}
+        </motion.article>
+    );
+};
+
+// ── SearchResultContent Component ────────────────────────────────────────────
+const SearchResultContent: React.FC<{ result: SearchResult; domain: string; title: string }> = ({ result, domain, title }) => {
+    return (
+        <>
+            {/* Domain Header */}
+            <div className="flex items-center gap-1.5">
+                <img
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`}
+                    alt=""
+                    width={14}
+                    height={14}
+                    className="rounded-sm shrink-0"
+                    loading="lazy"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                />
+                <span
+                    className="text-[11px] text-[#6b7280] truncate"
+                    style={{ fontFamily: "'Matter', sans-serif", letterSpacing: '0.01em' }}
+                >
+                    {domain}
+                </span>
+            </div>
+
+            {/* Title Link */}
+            <div
+                className="text-[14px] font-semibold text-[#1a56db] group-hover:underline leading-snug truncate mt-1"
+                style={{ fontFamily: "'Matter', sans-serif", letterSpacing: '-0.01em' }}
+            >
+                {title}
+            </div>
+
+            {/* Snippet */}
+            {result.snippet && (
+                <div
+                    className="text-[12px] text-[#4b5563] leading-relaxed line-clamp-2 md:line-clamp-3 mt-1.5"
+                    style={{ fontFamily: "'Matter', sans-serif", lineHeight: '1.5' }}
+                >
+                    {result.snippet}
+                </div>
+            )}
+
+            {/* Metadata Row */}
+            {result.publishedDate && (
+                <div
+                    className="text-[11px] text-[#9ca3af] mt-2"
+                    style={{ fontFamily: "'Matter', sans-serif", letterSpacing: '0.01em' }}
+                >
+                    {result.publishedDate}
+                </div>
+            )}
+        </>
+    );
+};
 
 // ── Tool Call Tag Component ──────────────────────────────────────────────────
 const ToolCallTag = ({ tc, isLast }: { tc: ToolCallDisplay; isLast?: boolean }) => {
@@ -193,7 +331,7 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
 
     const isLs = isTerminal && typeof cmdStr === 'string' && cmdStr.trim().startsWith('ls');
     const isRead = tc.toolName === 'read_file' || tc.toolName === 'read' || tc.toolName === 'view_file' || tc.toolName === 'cat';
-    const isFind = tc.toolName === 'find_files' || tc.toolName === 'find' || tc.toolName === 'search_docs' || tc.toolName === 'web_search' || tc.toolName === 'search' || tc.toolName === 'grep';
+    const isFind = tc.toolName === 'find_files' || tc.toolName === 'find' || tc.toolName === 'search_docs' || tc.toolName === 'web_search' || tc.toolName === 'remote_web_search' || tc.toolName === 'search' || tc.toolName === 'grep';
 
     let iconToDisplay = tc.icon;
     if (!iconToDisplay || (React.isValidElement(iconToDisplay) && (iconToDisplay.type === Cog6ToothIcon || iconToDisplay.type === Cog8ToothIcon))) {
@@ -223,12 +361,14 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
 
     const queries: string[] = Array.isArray(tc.args?.queries) ? tc.args.queries : (typeof tc.args?.query === 'string' ? [tc.args.query] : []);
     const docs: string[] = Array.isArray(tc.args?.docs) ? tc.args.docs : [];
-    const isSearchTool = tc.toolName === 'web_search' || tc.toolName === 'search_docs' || tc.label?.toLowerCase().includes('search');
+    const isSearchTool = tc.toolName === 'web_search' || tc.toolName === 'remote_web_search' || tc.toolName === 'search_docs' || tc.label?.toLowerCase().includes('search');
     const hasSearchPills = isSearchTool && (queries.length > 0 || docs.length > 0);
 
     useEffect(() => {
-        if (hasSearchPills && hasOutput) setExpanded(true);
-    }, [hasSearchPills, hasOutput]);
+        if ((hasSearchPills && hasOutput) || (isSearchTool && Array.isArray(tc.data?.results) && tc.data.results.length > 0)) {
+            setExpanded(true);
+        }
+    }, [hasSearchPills, hasOutput, isSearchTool, tc.data?.results]);
 
     const statusIcon = isRunning ? (
         <Loader size={14} strokeWidth={2} className="text-emerald-500" />
@@ -347,6 +487,18 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                         </div>
                                     </div>
                                 )}
+                                {Array.isArray(tc.data?.results) && tc.data.results.length > 0 && (
+                                    <div>
+                                        <div className="text-[13px] text-[#6b7280] font-medium mb-3" style={{ fontFamily: "'Matter', sans-serif" }}>
+                                            {tc.data.results.length} result{tc.data.results.length !== 1 ? 's' : ''}
+                                        </div>
+                                        <div className="flex flex-col gap-3">
+                                            {(tc.data.results as SearchResult[]).map((result, i) => (
+                                                <SearchResultCard key={i} result={result} index={i} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className={`px-4 py-3 rounded-xl text-[13px] leading-relaxed max-h-[400px] overflow-y-auto border ${
@@ -377,60 +529,107 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
     );
 };
 
-// ── WriteDiffCard: Shows a diff viewer for write/edit tool calls ────────────
-const WriteDiffCard = ({ tc }: { tc: ToolCallDisplay }) => {
+
+// Optional: Styled Scrollbar for the diff area
+const scrollbarStyles = `
+  .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 10px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #d1d5db; }
+`;
+
+const WriteDiffCard = ({ tc }: { tc: any }) => {
     const [expanded, setExpanded] = useState(false);
-    const filename = (tc.args?.path as string)?.split(/[/\\]/).pop() || 'file';
+
+    const path = (tc.args?.path as string) || '';
+    const filename = path.split(/[/\\]/).pop() || 'file';
     const content = (tc.args?.content as string) || '';
     const oldContent = (tc.args?.old_content as string) || '';
-    const ext = filename.split('.').pop()?.toUpperCase() || 'FILE';
     const hasDiff = !!oldContent && oldContent !== content;
+    const isNew = !hasDiff;
+
+    if (tc.status !== 'done' && tc.status !== 'running') return null;
 
     return (
-        <div className="rounded-xl border border-[#e8e6d9] bg-white overflow-hidden mb-2">
-            <div
-                onClick={() => setExpanded(!expanded)}
-                className="flex items-center gap-3 px-[14px] py-[10px] cursor-pointer transition-colors duration-100 hover:bg-[#fafaf8]"
-            >
-                <div className="w-[34px] h-[34px] rounded-lg border border-[#e8e6d9] bg-[#f8f7f4] flex items-center justify-center text-[9px] font-bold text-[#9ca3af] shrink-0 font-mono">
-                    {ext}
-                </div>
-                <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-[#111111] overflow-hidden text-ellipsis whitespace-nowrap">
-                        {filename}
-                    </div>
-                    <div className="text-[11px] text-[#9ca3af] mt-0.5">
-                        {hasDiff ? 'edited' : 'created'} · {(content.length / 1024).toFixed(1)} KB
-                    </div>
-                </div>
-                {tc.status === 'done' && (
-                    <svg width="14" height="14" viewBox="0 0 8 8" fill="none" className="shrink-0">
-                        <path d="M1.5 4L3 5.5L6.5 2" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                )}
-                <motion.span animate={{ rotate: expanded ? 180 : 0 }} className="flex shrink-0">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2">
-                        <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                </motion.span>
+        <div className="mb-6 w-full max-w-3xl">
+            {/* ── Main Notification Card ── */}
+            <div className={`relative z-10 transition-transform duration-200 ${expanded ? 'scale-[1.01]' : ''}`}>
+                <SimpleFileNotification
+                    filename={filename}
+                    content={content}
+                    size={content.length}
+                    isNew={isNew}
+                    status={tc.status === 'running' ? 'creating' : tc.status === 'done' ? 'success' : 'error'}
+                    onViewFile={() => setExpanded(!expanded)}
+                    onCopyContent={() => navigator.clipboard.writeText(content)}
+                    onOpenInEditor={() => {
+                        const blob = new Blob([content], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }}
+                />
             </div>
+
+            {/* ── Unified Diff Viewer Panel ── */}
             <AnimatePresence>
                 {expanded && (
                     <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.18 }}
-                        className="overflow-hidden border-t border-[#e8e6d9]"
+                        initial={{ height: 0, opacity: 0, y: -20 }}
+                        animate={{ height: 'auto', opacity: 1, y: -8 }}
+                        exit={{ height: 0, opacity: 0, y: -20 }}
+                        transition={{ type: "spring", duration: 0.4, bounce: 0 }}
+                        className="overflow-hidden"
                     >
-                        <DiffViewer
-                            oldFile={hasDiff ? { content: oldContent, name: filename } : { content: '', name: filename }}
-                            newFile={{ content, name: filename }}
-                            viewMode="unified"
-                            showLineNumbers
-                            showStats
-                            variant="ghost"
-                        />
+                        <div className="pt-2"> {/* Offset for the overlap effect */}
+                            <div className="rounded-b-2xl border-x border-b border-gray-200 bg-white shadow-sm">
+                                {/* Sub-header / Breadcrumbs */}
+                                <div className="flex items-center justify-between px-4 py-2 bg-gray-50/50 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                                        <span className="text-[11px] font-mono text-gray-400 truncate max-w-[300px]">
+                                            {path || filename}
+                                        </span>
+                                    </div>
+
+                                    <button
+                                        onClick={() => setExpanded(false)}
+                                        className="group p-1 hover:bg-gray-200/50 rounded-md transition-colors"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-gray-400 group-hover:text-gray-600">
+                                            <path d="M18 6L6 18M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                {/* Diff Area */}
+                                <div className="p-1 max-h-[500px] overflow-y-auto custom-scrollbar">
+                                    {/* Component Placeholder - Ensure your DiffViewer has internal padding */}
+                                    <div className="rounded-xl overflow-hidden border border-gray-100">
+                                        <DiffViewer
+                                            oldFile={hasDiff ? { content: oldContent, name: filename } : { content: '', name: filename }}
+                                            newFile={{ content, name: filename }}
+                                            viewMode="unified"
+                                            showLineNumbers
+                                            showStats
+                                            variant="ghost"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Footer / Status */}
+                                <div className="px-4 py-2 border-t border-gray-50 flex justify-end">
+                                    <p className="text-[10px] uppercase tracking-widest font-bold text-gray-300">
+                                        {hasDiff ? 'Modification' : 'New File'}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -542,4 +741,4 @@ export const LiveToolCallCard = ({ toolName, partialArguments, isStreaming }: Li
     );
 };
 
-export { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard };
+export { ToolCallTag, ToolCallRow, WriteDiffCard, ComputerUseResultCard, SearchResultCard };

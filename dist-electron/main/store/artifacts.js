@@ -37,6 +37,8 @@ exports.listArtifacts = listArtifacts;
 exports.readArtifact = readArtifact;
 exports.writeArtifact = writeArtifact;
 exports.deleteArtifact = deleteArtifact;
+exports.writeArtifactAtomic = writeArtifactAtomic;
+exports.updateArtifactTimestamp = updateArtifactTimestamp;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -136,5 +138,55 @@ function deleteArtifact(chatId, filename) {
     }
     catch {
         return { success: false };
+    }
+}
+/**
+ * Writes an artifact file atomically using a temporary file.
+ * This prevents corruption if the write operation is interrupted.
+ */
+function writeArtifactAtomic(chatId, filename, content) {
+    try {
+        const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+        if (!fs.existsSync(dir))
+            fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, filename);
+        const tempPath = `${filePath}.tmp`;
+        // Write to temporary file
+        fs.writeFileSync(tempPath, content, 'utf-8');
+        // Atomic rename
+        fs.renameSync(tempPath, filePath);
+        return { success: true };
+    }
+    catch (e) {
+        // Clean up temporary file if it exists
+        try {
+            const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+            const filePath = path.join(dir, filename);
+            const tempPath = `${filePath}.tmp`;
+            if (fs.existsSync(tempPath)) {
+                fs.unlinkSync(tempPath);
+            }
+        }
+        catch {
+            // Ignore cleanup errors
+        }
+        return { success: false, error: String(e) };
+    }
+}
+/**
+ * Updates the last modified timestamp of an artifact file.
+ */
+function updateArtifactTimestamp(chatId, filename) {
+    try {
+        const filePath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+        if (!fs.existsSync(filePath)) {
+            return { success: false, error: 'Artifact file not found' };
+        }
+        const now = new Date();
+        fs.utimesSync(filePath, now, now);
+        return { success: true };
+    }
+    catch (e) {
+        return { success: false, error: String(e) };
     }
 }

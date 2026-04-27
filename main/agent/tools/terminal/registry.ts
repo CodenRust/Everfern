@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as os from 'os';
+import * as path from 'path';
 
 export interface CommandInfo {
   id: string;
@@ -26,7 +27,7 @@ export class CommandRegistry {
     return CommandRegistry.instance;
   }
 
-  public async execute(id: string, command: string, cwd: string = os.homedir()): Promise<CommandInfo> {
+  public async execute(id: string, command: string, cwd: string = path.join(os.homedir(), '.everfern')): Promise<CommandInfo> {
     const info: CommandInfo = {
       id,
       command,
@@ -38,7 +39,7 @@ export class CommandRegistry {
     this.commands.set(id, info);
 
     const isWin = process.platform === 'win32';
-    
+
     // Ensure cwd exists
     const fs = require('fs');
     if (!fs.existsSync(cwd)) {
@@ -69,7 +70,7 @@ export class CommandRegistry {
           'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
           'C:\\Program Files\\PowerShell\\6\\pwsh.exe'
         ];
-        
+
         const foundPath = commonPaths.find(p => fs.existsSync(p));
         if (foundPath) {
           shell = foundPath;

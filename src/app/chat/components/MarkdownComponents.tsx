@@ -1,7 +1,138 @@
 'use client';
-import React, { memo } from 'react';
-import { motion } from 'framer-motion';
+import React, { memo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { SyntaxHighlighter } from '../ArtifactsPanel';
+
+// ── Link Confirmation Popup ───────────────────────────────────────────────────
+const LinkPopup = ({ url, label, onClose }: { url: string; label: string; onClose: () => void }) => {
+    const openInBrowser = () => {
+        const api = (window as any).electronAPI;
+        if (api?.shell?.openExternal) {
+            api.shell.openExternal(url);
+        } else {
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+        onClose();
+    };
+
+    return (
+        <AnimatePresence>
+            <div
+                style={{
+                    position: 'fixed', inset: 0, zIndex: 9999,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: 'rgba(0,0,0,0.35)',
+                }}
+                onClick={onClose}
+            >
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                    transition={{ duration: 0.15 }}
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                        backgroundColor: '#ffffff',
+                        borderRadius: 16,
+                        padding: '24px 24px 20px',
+                        width: 360,
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.18)',
+                        border: '1px solid #e5e7eb',
+                    }}
+                >
+                    {/* Icon */}
+                    <div style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                    </div>
+
+                    {/* Title */}
+                    <div style={{ fontSize: 15, fontWeight: 600, color: '#111827', marginBottom: 6, fontFamily: "'Matter', system-ui, sans-serif" }}>
+                        This link takes you to an external site
+                    </div>
+
+                    {/* Label */}
+                    {label && label !== url && (
+                        <div style={{ fontSize: 13, color: '#374151', marginBottom: 4, fontFamily: "'Matter', system-ui, sans-serif" }}>
+                            {label}
+                        </div>
+                    )}
+
+                    {/* URL */}
+                    <div style={{
+                        fontSize: 12, color: '#6b7280', backgroundColor: '#f9fafb',
+                        border: '1px solid #e5e7eb', borderRadius: 8,
+                        padding: '8px 12px', marginBottom: 20,
+                        wordBreak: 'break-all', fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                        {url}
+                    </div>
+
+                    {/* Buttons */}
+                    <div style={{ display: 'flex', gap: 10 }}>
+                        <button
+                            onClick={onClose}
+                            style={{
+                                flex: 1, padding: '10px 0', borderRadius: 10,
+                                border: '1px solid #e5e7eb', backgroundColor: '#ffffff',
+                                color: '#374151', fontSize: 14, fontWeight: 500,
+                                cursor: 'pointer', fontFamily: "'Matter', system-ui, sans-serif",
+                                transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                        >
+                            Close
+                        </button>
+                        <button
+                            onClick={openInBrowser}
+                            style={{
+                                flex: 1, padding: '10px 0', borderRadius: 10,
+                                border: 'none', backgroundColor: '#3b82f6',
+                                color: '#ffffff', fontSize: 14, fontWeight: 600,
+                                cursor: 'pointer', fontFamily: "'Matter', system-ui, sans-serif",
+                                transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#2563eb'; }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#3b82f6'; }}
+                        >
+                            Open in Browser
+                        </button>
+                    </div>
+                </motion.div>
+            </div>
+        </AnimatePresence>
+    );
+};
+
+// ── Inline Link Component ─────────────────────────────────────────────────────
+const InlineLink = ({ href, label }: { href: string; label: string }) => {
+    const [showPopup, setShowPopup] = useState(false);
+    return (
+        <>
+            <span
+                onClick={e => { e.preventDefault(); e.stopPropagation(); setShowPopup(true); }}
+                style={{
+                    color: '#2563eb',
+                    textDecoration: 'underline',
+                    textDecorationColor: 'rgba(37,99,235,0.4)',
+                    textUnderlineOffset: 2,
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                    transition: 'color 0.1s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#1d4ed8'; }}
+                onMouseLeave={e => { e.currentTarget.style.color = '#2563eb'; }}
+            >
+                {label}
+            </span>
+            {showPopup && <LinkPopup url={href} label={label} onClose={() => setShowPopup(false)} />}
+        </>
+    );
+};
 
 // ── Markdown Renderer ────────────────────────────────────────────────────────
 const MarkdownRenderer = memo(({ content }: { content: string }) => {
@@ -18,6 +149,10 @@ const MarkdownRenderer = memo(({ content }: { content: string }) => {
         const patterns: [RegExp, (m: RegExpMatchArray, k: string) => React.ReactNode | null][] = [
             // Strip computer:// links (handled by ReportLink/ReportPane)
             [/\[([^\]]*)\]\(computer:\/\/\/[^)]+\)/, () => null],
+            // Markdown links — render as blue clickable with popup
+            [/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/, (m, k) => <InlineLink key={k} href={m[2]} label={m[1]} />],
+            // Bare URLs
+            [/https?:\/\/[^\s"'<>)\]]+/, (m, k) => <InlineLink key={k} href={m[0]} label={m[0]} />],
             [/\*\*(.+?)\*\*/, (m, k) => <strong key={k} style={{ color: '#111111', fontWeight: 600 }}>{m[1]}</strong>],
             [/\*([^*]+)\*/, (m, k) => <em key={k} style={{ color: '#4a4846', fontStyle: 'italic' }}>{m[1]}</em>],
             [/`([^`]+)`/, (m, k) => <code key={k} style={{ backgroundColor: 'rgba(0, 0, 0, 0.05)', borderRadius: 4, padding: '2px 6px', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, color: '#111111' }}>{m[1]}</code>],

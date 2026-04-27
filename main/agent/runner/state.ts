@@ -138,6 +138,19 @@ export const GraphState = Annotation.Root({
   missionTimeline: Annotation<MissionTimeline | null>(),
   missionSteps: Annotation<MissionStep[]>(),
   currentStepId: Annotation<string>(),
+  // Specialized Agent State
+  webExplorerComplete: Annotation<boolean>(),
+  webExplorerSelfLoopCount: Annotation<number>(),
+  codingComplete: Annotation<boolean>(),
+  dataAnalysisComplete: Annotation<boolean>(),
+  computerUseComplete: Annotation<boolean>(),
+  deepResearchComplete: Annotation<boolean>(),
+  // Subagent State
+  subagentSpawned: Annotation<any>(),
+
+  // Bugfixes: Routing state persistence
+  brainToolsInFlight: Annotation<boolean>(),
+  returningFromSpecialist: Annotation<string | null>(),
 });
 
 export type GraphStateType = typeof GraphState.State;

@@ -52,8 +52,9 @@ class SubagentSpawner {
         this.runner = runner;
     }
     async spawn(options) {
-        const { parentSessionId, task, model, mode = 'run', workspaceDir, maxDepth = 3 } = options;
+        const { parentSessionId, task, model, mode = 'run', workspaceDir, maxDepth = 3, parentHistory = [] } = options;
         if (!this.runner) {
+            console.warn('[SubagentSpawner] No runner configured. Spawning failed.');
             throw new Error('SubagentSpawner: No runner configured');
         }
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
@@ -98,10 +99,10 @@ class SubagentSpawner {
             abort: () => registry.abort(agentId)
         };
         // Start the agent
-        this.runSubagent(spawnedAgent, model);
+        this.runSubagent(spawnedAgent, model, parentHistory);
         return spawnedAgent;
     }
-    async runSubagent(agent, model) {
+    async runSubagent(agent, model, parentHistory = []) {
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
         registry.update(agent.agentId, { status: 'running' });
         agent.status = 'running';
@@ -114,9 +115,14 @@ class SubagentSpawner {
             task: agent.task
         });
         try {
-            // Run the agent
-            const result = await this.runner.run(agent.task, [], // Start fresh for subagent
-            model);
+            // Apply context window cap: limit parentHistory to most recent 20 turns (40 messages max)
+            // This prevents context window overflow when passing parent conversation to subagent
+            const cappedHistory = parentHistory.slice(-40).map((msg) => ({
+                role: msg.role || (msg._getType?.() === 'human' ? 'user' : 'assistant'),
+                content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            }));
+            // Run the agent with parent conversation context
+            const result = await this.runner.run(agent.task, cappedHistory, model);
             // Complete the subagent
             registry.complete(agent.agentId, result.response);
             (0, session_lifecycle_events_1.sessionCompleted)(agent.sessionKey, {

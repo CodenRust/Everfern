@@ -347,7 +347,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAll: () => ipcRenderer.invoke('providers:get-all'),
     getModels: (providerType: string) => ipcRenderer.invoke('providers:get-models', providerType),
   },
+
+  // ── Tool Settings ──────────────────────────────────────────────────
+  toolSettings: {
+    get: () => ipcRenderer.invoke('tool-settings:get'),
+    set: (config: ToolSettingsConfig) => ipcRenderer.invoke('tool-settings:set', config),
+    openDebugBrowser: () => ipcRenderer.invoke('debug:open-browser'),
+  },
+
+  // ── Chat Title ─────────────────────────────────────────────────────
+  chat: {
+    generateTitle: (conversationId: string, firstMessage: string) =>
+      ipcRenderer.invoke('chat:generate-title', conversationId, firstMessage),
+  },
 });
+
+// ── Tool Settings Types ────────────────────────────────────────────
+
+export interface ToolConfig {
+  mode: 'local' | 'api';
+  headless: boolean;
+  apiKey: string;
+}
+
+export interface ToolSettingsConfig {
+  webSearch: ToolConfig;
+  webCrawl: ToolConfig;
+}
 
 // ── Type Export (for renderer use) ────────────────────────────────
 
@@ -521,5 +547,12 @@ export type ElectronAPI = {
   providers: {
     getAll: () => Promise<ProviderMeta[]>;
     getModels: (providerType: string) => Promise<FlatModelEntry[]>;
+  };
+  toolSettings: {
+    get: () => Promise<ToolSettingsConfig>;
+    set: (config: ToolSettingsConfig) => Promise<{ success: boolean }>;
+  };
+  chat: {
+    generateTitle: (conversationId: string, firstMessage: string) => Promise<{ queued: boolean }>;
   };
 };

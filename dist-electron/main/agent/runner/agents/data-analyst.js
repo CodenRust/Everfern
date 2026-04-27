@@ -153,7 +153,15 @@ CRITICAL RULES:
                 progressStreamer.emitProgress(`Data Analysis completed`, percentage);
             }
             progressStreamer.emitStepComplete('Data Analysis', duration);
-            return result;
+            const scrubbedContent = result.messages?.[0]?.content || '';
+            const isComplete = scrubbedContent.includes('MISSION_COMPLETE') ||
+                scrubbedContent.includes('ANALYSIS_FINISHED') ||
+                (result.pendingToolCalls?.length === 0 && scrubbedContent.length > 50);
+            return {
+                ...result,
+                returningFromSpecialist: 'data_analyst',
+                dataAnalysisComplete: isComplete
+            };
         }
         catch (error) {
             // Emit error event (Requirement 1.4)

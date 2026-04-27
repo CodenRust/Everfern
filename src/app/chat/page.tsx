@@ -142,6 +142,8 @@ export default function ChatPage() {
     const [randomGreeting, setRandomGreeting] = useState("");
     const [currentSites, setCurrentSites] = useState<any[]>([]);
     const [settingsMotionBlur, setSettingsMotionBlur] = useState(true);
+    const [activeTaskIds, setActiveTaskIds] = useState<string[]>([]);
+    const [notification, setNotification] = useState<{ id: string; title: string } | null>(null);
 
     const loadingMessages = ["marinating...", "schlepping...", "concocting...", "honking..."];
     const greetingMessages = [
@@ -208,6 +210,94 @@ export default function ChatPage() {
     // Sub-agent progress state - stores progress events grouped by toolCallId
     const [subAgentProgress, setSubAgentProgress] = useState<Map<string, SubAgentProgressEvent[]>>(new Map());
 
+    useEffect(() => {
+        const handleProgress = (_: any, data: any) => {
+            const { conversationId } = data;
+            if (conversationId && conversationId !== activeConversationId) {
+                setActiveTaskIds(prev => prev.includes(conversationId) ? prev : [...prev, conversationId]);
+            }
+        };
+
+        const handleComplete = (_: any, data: any) => {
+            const { conversationId } = data;
+            if (conversationId) {
+                setActiveTaskIds(prev => prev.filter(id => id !== conversationId));
+                if (conversationId !== activeConversationId) {
+                    // Find title from history or use default
+                    const convTitle = history.find(h => h.id === conversationId)?.title || "Chat task";
+                    setNotification({ id: conversationId, title: convTitle });
+                    // Auto-hide toast after 8 seconds
+                    setTimeout(() => setNotification(prev => prev?.id === conversationId ? null : prev), 8000);
+                }
+            }
+        };
+
+        const api = (window as any).electronAPI;
+        if (api?.on) {
+            api.on('agent-progress', handleProgress);
+            api.on('agent-complete', handleComplete);
+            return () => {
+                api.off?.('agent-progress', handleProgress);
+                api.off?.('agent-complete', handleComplete);
+            };
+        }
+    }, [activeConversationId, history]);
+
+    const CompletionToast = () => (
+        <AnimatePresence>
+            {notification && (
+                <motion.div
+                    initial={{ opacity: 0, y: -20, x: 20 }}
+                    animate={{ opacity: 1, y: 0, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    onClick={() => {
+                        handleSelectConversation(notification.id);
+                        setNotification(null);
+                    }}
+                    style={{
+                        position: 'fixed',
+                        top: 24,
+                        right: 24,
+                        zIndex: 9999,
+                        width: 320,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e8e6d9',
+                        borderRadius: 16,
+                        padding: '16px 20px',
+                        boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 14,
+                    }}
+                >
+                    <div style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        backgroundColor: '#f0fdf4',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#10b981',
+                        flexShrink: 0
+                    }}>
+                        <CheckCircleIcon width={24} height={24} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#111111', marginBottom: 2 }}>Task Complete</div>
+                        <div style={{ fontSize: 12, color: '#8a8886', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {notification.title} is ready
+                        </div>
+                    </div>
+                    <div style={{ color: '#8a8886' }}>
+                        <ChevronRightIcon width={16} height={16} />
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+
     // ── Persistence ─────────────────────────────────────────────────────────────
     useEffect(() => {
         // Restore from session storage on mount
@@ -250,6 +340,7 @@ export default function ChatPage() {
         question: string;
         options: Array<{ label: string; value: string; isRecommended?: boolean }>;
         multiSelect: boolean;
+        previewMarkdown?: string;
     }>>([]);
     const activeUserQuestionRef = useRef(false);
 
@@ -360,6 +451,7 @@ export default function ChatPage() {
 
 
     const liveToolCallsRef = useRef<ToolCallDisplay[]>([]);
+    const activeConversationIdRef = useRef<string | null>(null);
     const streamingToolCallsRef = useRef<LiveToolCall[]>([]);
     const streamingContentRef = useRef("");
     const pendingNarrativeRef = useRef<string>("");
@@ -853,7 +945,8 @@ export default function ChatPage() {
                             const normalized = data.questions.map((q: any) => ({
                                 question: q.question,
                                 options: normalizeOpts(q.options),
-                                multiSelect: q.multiSelect || false
+                                multiSelect: q.multiSelect || false,
+                                previewMarkdown: data.preview || undefined,
                             }));
                             setActiveUserQuestions(normalized);
                             console.log(`[Frontend] Set ${normalized.length} questions`);
@@ -861,7 +954,8 @@ export default function ChatPage() {
                             setActiveUserQuestions([{
                                 question: typeof data.question === 'string' ? data.question : data.question.question,
                                 options: normalizeOpts(data.options),
-                                multiSelect: data.multiSelect || false
+                                multiSelect: data.multiSelect || false,
+                                previewMarkdown: data.preview || undefined,
                             }]);
                         } else {
                             console.error('[Frontend] ❌ No valid question data found in tool_call');
@@ -1213,8 +1307,15 @@ export default function ChatPage() {
 
     const saveConversation = useCallback(async (msgs: Message[]) => {
         if (msgs.length === 0) return;
-        const id = activeConversationId || crypto.randomUUID();
-        if (!activeConversationId) setActiveConversationId(id);
+        // Use the ref for synchronous reads — avoids duplicate IDs when called
+        // multiple times before React flushes the state update.
+        const isNewConversation = !activeConversationIdRef.current;
+        let id = activeConversationIdRef.current;
+        if (!id) {
+            id = crypto.randomUUID();
+            activeConversationIdRef.current = id;
+            setActiveConversationId(id);
+        }
         const conversation = {
             id,
             title: msgs[0].content.slice(0, 60) + (msgs[0].content.length > 60 ? "..." : ""),
@@ -1232,6 +1333,14 @@ export default function ChatPage() {
             updatedAt: new Date().toISOString()
         };
         if ((window as any).electronAPI?.history?.save) await (window as any).electronAPI.history.save(conversation);
+
+        // Non-blocking: generate a smart title from the first user message
+        if (isNewConversation) {
+            const firstUserMsg = msgs.find(m => m.role === 'user');
+            if (firstUserMsg && typeof firstUserMsg.content === 'string') {
+                (window as any).electronAPI?.chat?.generateTitle?.(id, firstUserMsg.content);
+            }
+        }
     }, [activeConversationId, config?.provider]);
 
     const handlePlayVoiceResponse = useCallback(async (text: string) => {
@@ -1417,7 +1526,8 @@ export default function ChatPage() {
                                 return {
                                     question: q.question,
                                     options: normalizeOpts(q.options),
-                                    multiSelect: q.multiSelect || false
+                                    multiSelect: q.multiSelect || false,
+                                    previewMarkdown: data.preview || undefined,
                                 };
                             });
                             console.log('[Frontend] Normalized questions:', normalized);
@@ -1431,7 +1541,8 @@ export default function ChatPage() {
                             const normalized = [{
                                 question: typeof data.question === 'string' ? data.question : data.question.question,
                                 options: normalizeOpts(data.options),
-                                multiSelect: data.multiSelect || false
+                                multiSelect: data.multiSelect || false,
+                                previewMarkdown: data.preview || undefined,
                             }];
                             console.log('[Frontend] Normalized single question:', normalized);
                             setActiveUserQuestions(normalized);
@@ -1510,7 +1621,6 @@ export default function ChatPage() {
                     }
                     if (record.result?.success) {
                         if (record.toolName === 'read_file') { setContextItems(prev => { const exists = prev.some(i => i.label === record.result.data?.name || i.label === record.args.path); if (!exists) return [...prev, { id: crypto.randomUUID(), type: 'file', label: record.result.data?.name || record.args.path }]; return prev; }); }
-                        else if (record.toolName === 'web_search') { setContextItems(prev => [...prev, { id: crypto.randomUUID(), type: 'web', label: record.args.query }]); }
                         else if (record.toolName === 'computer_use') { setContextItems(prev => { const action = record.args.action || 'computer_use'; const target = record.args.query ? ` "${record.args.query}"` : ''; return [...prev.filter(i => i.type !== 'app'), { id: crypto.randomUUID(), type: 'app', label: `Computer Use: ${action}${target}`, base64Image: record.result?.base64Image, appName: record.result?.appName, appLogo: record.result?.appLogo }]; }); }
                     }
                     const key = record.toolCallId || (record.toolName + '_running');
@@ -1997,14 +2107,47 @@ export default function ChatPage() {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
     }, [handleSend]);
 
-    const handleNewChat = () => { setMessages([]); setInputValue(""); setAttachments([]); setActiveConversationId(null); setCurrentPlan(null); setContextItems([]); setExecutionPlan(null); setIsExecutionPlanPaneOpen(false); };
+    const handleNewChat = () => { 
+        setMessages([]); 
+        setInputValue(""); 
+        setAttachments([]); 
+        activeConversationIdRef.current = null; 
+        setActiveConversationId(null); 
+        setCurrentPlan(null); 
+        setContextItems([]); 
+        setExecutionPlan(null); 
+        setIsExecutionPlanPaneOpen(false); 
+        // Clear live states
+        setStreamingContent("");
+        setStreamingThought("");
+        setLiveToolCalls([]);
+        setStreamingToolCalls([]);
+        setSubAgentProgress(new Map());
+        setCurrentPhase('thinking');
+        setCurrentNode(null);
+        setActivePlanSteps(null);
+        setActivePlanTitle(null);
+    };
 
     const handleSelectConversation = async (id: string) => {
         try {
             if ((window as any).electronAPI?.history?.load) {
                 const conv = await (window as any).electronAPI.history.load(id);
                 if (conv?.messages) {
+                    // Clear live states before loading new conversation
+                    setStreamingContent("");
+                    setStreamingThought("");
+                    setLiveToolCalls([]);
+                    setStreamingToolCalls([]);
+                    setSubAgentProgress(new Map());
+                    setCurrentPhase('thinking');
+                    setCurrentNode(null);
+                    setActivePlanSteps(null);
+                    setActivePlanTitle(null);
+
+                    activeConversationIdRef.current = id;
                     setActiveConversationId(id);
+
                     setMessages(conv.messages.map((m: any) => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, thinkingDuration: m.thinkingDuration, toolCalls: m.toolCalls, attachments: m.attachments || [], timestamp: new Date(conv.updatedAt) })));
                     setCurrentPlan(null);
                     setContextItems([]);
@@ -2544,7 +2687,20 @@ export default function ChatPage() {
                     voiceDeepgramKey={voiceDeepgramKey}
                     voiceElevenlabsKey={voiceElevenlabsKey}
                 />
-                <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} activeConversationId={activeConversationId} onSelectConversation={handleSelectConversation} onNewChat={handleNewChat} onSettingsClick={() => setShowSettings(true)} onArtifactsClick={() => setShowArtifacts(true)} onCustomizeClick={() => setShowDirectoryModal(true)} onIntegrationClick={() => setShowIntegrationSettings(true)} />
+            <Sidebar
+                isOpen={sidebarOpen}
+                onToggle={() => setSidebarOpen(!sidebarOpen)}
+                activeConversationId={activeConversationId}
+                activeTaskIds={activeTaskIds}
+                onSelectConversation={handleSelectConversation}
+                onNewChat={handleNewChat}
+                onSettingsClick={() => setShowSettings(true)}
+                onArtifactsClick={() => setShowArtifacts(true)}
+                onCustomizeClick={() => setShowDirectoryModal(true)}
+                onIntegrationClick={() => setShowIntegrationSettings(true)}
+            />
+
+            <CompletionToast />
 
                 <motion.div
                     initial={false}
@@ -2675,6 +2831,7 @@ export default function ChatPage() {
                                                     <UserQuestionForm
                                                         questions={activeUserQuestions}
                                                         onSubmit={handleQuestionSubmit}
+                                                        previewMarkdown={activeUserQuestions[0]?.previewMarkdown}
                                                     />
                                                 )}
 
@@ -2799,6 +2956,7 @@ export default function ChatPage() {
                                                     ) : (
                                                         <>
                                                             <AgentTimeline
+                                                                key={`timeline-${msg.id}`}
                                                                 toolCalls={msg.toolCalls?.filter(tc => tc.toolName !== 'write' && tc.toolName !== 'write_to_file' && tc.toolName !== 'write_file') || []}
                                                                 thought={msg.thought}
                                                                 isLive={false}
@@ -2909,6 +3067,7 @@ export default function ChatPage() {
                                             </div>
                                             <div style={{ width: "100%" }}>
                                                 <AgentTimeline
+                                                    key={activeConversationId || 'new'}
                                                     toolCalls={liveToolCalls}
                                                     thought={streamingThought}
                                                     isLive={true}
@@ -3251,6 +3410,7 @@ export default function ChatPage() {
                                                     <UserQuestionForm
                                                         questions={activeUserQuestions}
                                                         onSubmit={handleQuestionSubmit}
+                                                        previewMarkdown={activeUserQuestions[0]?.previewMarkdown}
                                                     />
                                                 </div>
                                             )}
@@ -3319,6 +3479,15 @@ export default function ChatPage() {
                                                         </div>
                                                         <div style={{ display: 'flex', gap: 4 }}>
                                                             <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></div>
+                                                            <button
+                                                                onClick={() => { setContextItems([]); setCurrentPlan(null); }}
+                                                                title="Close active context"
+                                                                style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
+                                                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fee2e2'; e.currentTarget.style.borderColor = '#fca5a5'; }}
+                                                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#ffffff'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
+                                                            >
+                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                                            </button>
                                                         </div>
                                                     </div>
 

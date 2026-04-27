@@ -51,12 +51,12 @@ export function resolveToolDisplay(toolName: string, args?: Record<string, unkno
       const cmdStr = args?.command || args?.CommandLine || args?.commandLine || '';
       const cmd = typeof cmdStr === 'string' ? cmdStr.trim() : '';
       const label = cmd ? resolveTerminalLabel(cmd) : 'Running command';
-      
+
       // Enhanced logging for debugging
       console.log(`[ToolDisplay] run_command - cmdStr:`, cmdStr);
       console.log(`[ToolDisplay] run_command - cmd:`, cmd);
       console.log(`[ToolDisplay] run_command - label:`, label);
-      
+
       if (cmd && cmd.startsWith('ls')) {
         return {
           icon: React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", fill: "none", viewBox: "0 0 24 24", strokeWidth: 1.5, stroke: "currentColor", width: 16, height: 16 },
@@ -111,7 +111,10 @@ export function resolveToolDisplay(toolName: string, args?: Record<string, unkno
           React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" })
         ),
         label: path ? `${isEdit ? 'Editing' : 'Writing'} ${basename(path)}` : `${isEdit ? 'Editing' : 'Writing'} file`,
-        color: '#f59e0b'
+        color: '#f59e0b',
+        // Enhanced file operation display
+        useEnhancedCard: true,
+        operation: isEdit ? 'edit' : 'create'
       };
     }
 
@@ -150,28 +153,28 @@ export function resolveToolDisplay(toolName: string, args?: Record<string, unkno
 
     case 'create_artifact': {
       const title = typeof args?.title === 'string' ? args.title.trim() : '';
-      return { 
-        icon: React.createElement(PencilSquareIcon, { width: 16, height: 16 }), 
-        label: title ? `Building: ${truncate(title, 60)}` : 'Building artifact', 
-        color: '#f59e0b' 
+      return {
+        icon: React.createElement(PencilSquareIcon, { width: 16, height: 16 }),
+        label: title ? `Building: ${truncate(title, 60)}` : 'Building artifact',
+        color: '#f59e0b'
       };
     }
 
     case 'create_site': {
       const name = typeof args?.name === 'string' ? args.name.trim() : '';
-      return { 
-        icon: React.createElement(Square3Stack3DIcon, { width: 16, height: 16 }), 
-        label: name ? `Creating site: ${truncate(name, 60)}` : 'Creating site', 
-        color: '#06b6d4' 
+      return {
+        icon: React.createElement(Square3Stack3DIcon, { width: 16, height: 16 }),
+        label: name ? `Creating site: ${truncate(name, 60)}` : 'Creating site',
+        color: '#06b6d4'
       };
     }
 
     case 'visualize': {
       const title = typeof args?.title === 'string' ? args.title.trim() : '';
-      return { 
-        icon: React.createElement(PresentationChartBarIcon, { width: 16, height: 16 }), 
-        label: title ? `Visualizing: ${truncate(title, 60)}` : 'Generating visual', 
-        color: '#8b5cf6' 
+      return {
+        icon: React.createElement(PresentationChartBarIcon, { width: 16, height: 16 }),
+        label: title ? `Visualizing: ${truncate(title, 60)}` : 'Generating visual',
+        color: '#8b5cf6'
       };
     }
 

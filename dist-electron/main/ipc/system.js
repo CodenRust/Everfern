@@ -218,13 +218,8 @@ function registerSystemHandlers() {
                 fs.rmSync(everfernDir, { recursive: true, force: true });
             }
             fs.mkdirSync(everfernDir, { recursive: true });
-            // Also wipe the SQLite database (chat history lives here, not in .everfern)
-            const userDataPath = electron_1.app.getPath('userData');
-            const dbDir = path.join(userDataPath, 'memory');
-            if (fs.existsSync(dbDir)) {
-                fs.rmSync(dbDir, { recursive: true, force: true });
-            }
-            console.log('[IPC] system:wipe-account: .everfern and SQLite DB wiped');
+            // Also wipe the SQLite database (now lives inside .everfern/sql/, covered by the wipe above)
+            console.log('[IPC] system:wipe-account: .everfern (including sql databases) wiped');
             return { success: true };
         }
         catch (err) {

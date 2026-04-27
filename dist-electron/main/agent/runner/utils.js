@@ -52,7 +52,7 @@ function generateContextualVerifyMessage(intent, phase) {
         fix: 'view_file() to read error → write()/edit() to fix → run_command() to test',
         analyze: 'write(report.html) using React/papaparse/recharts to visualize the data → present_files()',
         task: 'run_command() or write() — pick the correct tool and EXECUTE NOW',
-        research: 'web_search() with your query → web_fetch() for full content → compile answer',
+        research: 'web_search() with your query → browser_use() for full content → compile answer',
         automate: 'write(script.py) → run_command() to test → schedule or present',
         question: 'Answer directly. Use memory_search() or web_search() only if you need live data.',
         conversation: 'Respond naturally. No tools needed.',
@@ -81,7 +81,7 @@ function generateContextualCompletionMessage(intent) {
         fix: `view_file() → edit()/write() the fix → run_command() to test → confirm fixed`,
         analyze: `write(report.html to {{SITE_PATH}}) using React/papaparse/recharts → present_files()`,
         task: `Execute the task with run_command() or write() — then verify completion`,
-        research: `web_search() → web_fetch() for top results → compile findings`,
+        research: `web_search() → browser_use() for top results → compile findings`,
         automate: `write(script) → test with run_command() → schedule or deliver`,
         default: `Call the appropriate tool: write, run_command, web_search, edit, or present_files`
     };
@@ -133,9 +133,9 @@ function getContextualSuggestions(intent, failedTool) {
         ],
         research: [
             `- Try a shorter, more specific search query (1-4 words).`,
-            `- If web_fetch fails, try the cached/mobile version of the URL.`,
+            `- If browser_use fails, try the cached/mobile version of the URL.`,
             `- Search for the specific fact rather than the general topic.`,
-            `- Try web_fetch on a different URL from the search results.`
+            `- Try browser_use on a different URL from the search results.`
         ],
         default: [
             `- Read the full error message carefully.`,

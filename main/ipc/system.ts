@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell, Notification, app } from 'electron';
+import { ipcMain, dialog, shell, Notification } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -204,14 +204,8 @@ export function registerSystemHandlers() {
       }
       fs.mkdirSync(everfernDir, { recursive: true });
 
-      // Also wipe the SQLite database (chat history lives here, not in .everfern)
-      const userDataPath = app.getPath('userData');
-      const dbDir = path.join(userDataPath, 'memory');
-      if (fs.existsSync(dbDir)) {
-        fs.rmSync(dbDir, { recursive: true, force: true });
-      }
-
-      console.log('[IPC] system:wipe-account: .everfern and SQLite DB wiped');
+      // Also wipe the SQLite database (now lives inside .everfern/sql/, covered by the wipe above)
+      console.log('[IPC] system:wipe-account: .everfern (including sql databases) wiped');
       return { success: true };
     } catch (err: any) {
       console.error('[IPC] system:wipe-account error:', err);

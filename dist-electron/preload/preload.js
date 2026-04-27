@@ -298,4 +298,14 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         getAll: () => electron_1.ipcRenderer.invoke('providers:get-all'),
         getModels: (providerType) => electron_1.ipcRenderer.invoke('providers:get-models', providerType),
     },
+    // ── Tool Settings ──────────────────────────────────────────────────
+    toolSettings: {
+        get: () => electron_1.ipcRenderer.invoke('tool-settings:get'),
+        set: (config) => electron_1.ipcRenderer.invoke('tool-settings:set', config),
+        openDebugBrowser: () => electron_1.ipcRenderer.invoke('debug:open-browser'),
+    },
+    // ── Chat Title ─────────────────────────────────────────────────────
+    chat: {
+        generateTitle: (conversationId, firstMessage) => electron_1.ipcRenderer.invoke('chat:generate-title', conversationId, firstMessage),
+    },
 });

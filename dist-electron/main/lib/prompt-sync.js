@@ -49,7 +49,26 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
-const PROMPTS_SOURCE_DIR = path.join(__dirname, '../agent/prompts');
+const PROMPTS_SOURCE_DIR = (() => {
+    // Try several candidates for the prompts source directory
+    const candidates = [
+        // 1. Production (dist-electron/main/lib -> dist-electron/main/agent/prompts)
+        path.join(__dirname, '../agent/prompts'),
+        // 2. Development (apps/desktop/main/lib -> apps/desktop/main/agent/prompts)
+        path.join(__dirname, '../../main/agent/prompts'),
+        // 3. Absolute project root fallback
+        path.join(process.cwd(), 'main/agent/prompts'),
+        path.join(process.cwd(), 'apps/desktop/main/agent/prompts'),
+    ];
+    for (const cand of candidates) {
+        if (fs.existsSync(cand)) {
+            console.log(`[PromptSync] 📍 Found prompt source: ${cand}`);
+            return cand;
+        }
+    }
+    console.error(`[PromptSync] ❌ CRITICAL: Could not find prompt source directory! Checked: ${candidates.join(', ')}`);
+    return candidates[0]; // Return default and hope for the best
+})();
 const PROMPTS_TARGET_DIR = path.join(os.homedir(), '.everfern', 'prompts');
 /**
  * Calculate MD5 hash of file content
@@ -165,6 +184,16 @@ function loadPrompt(filename) {
         if (syncInfo.needsUpdate) {
             const success = syncPromptFile(filename);
             if (!success) {
+                // Sync failed — try reading directly from source as fallback
+                try {
+                    const sourcePath = path.join(PROMPTS_SOURCE_DIR, filename);
+                    if (fs.existsSync(sourcePath)) {
+                        const content = fs.readFileSync(sourcePath, 'utf-8');
+                        console.log(`[PromptSync] 📖 Loaded prompt from source (sync failed): ${filename} (${content.length} chars)`);
+                        return content;
+                    }
+                }
+                catch (_) { /* ignore */ }
                 return null;
             }
         }
@@ -176,6 +205,16 @@ function loadPrompt(filename) {
     }
     catch (error) {
         console.error(`[PromptSync] Failed to load prompt ${filename}:`, error);
+        // Last-resort fallback: try reading directly from source directory
+        try {
+            const sourcePath = path.join(PROMPTS_SOURCE_DIR, filename);
+            if (fs.existsSync(sourcePath)) {
+                const content = fs.readFileSync(sourcePath, 'utf-8');
+                console.log(`[PromptSync] 📖 Loaded prompt from source fallback: ${filename} (${content.length} chars)`);
+                return content;
+            }
+        }
+        catch (_) { /* ignore */ }
         return null;
     }
 }

@@ -29,7 +29,7 @@ export function analyzeToolDependencies(
     tools: Array<{ name: string; args: Record<string, unknown>; id: string }>
 ): ToolAnalysis[] {
     const fileWriteTools = new Set(['write', 'write_file', 'edit', 'delete', 'bash', 'run_command', 'apply_patch', 'executePwsh']);
-    const readOnlyTools = new Set(['read', 'read_file', 'web_search', 'web_fetch', 'memory_search', 'list_directory']);
+    const readOnlyTools = new Set(['read', 'read_file', 'web_search', 'memory_search', 'list_directory']);
     
     return tools.map(tool => {
         const isWrite = fileWriteTools.has(tool.name);

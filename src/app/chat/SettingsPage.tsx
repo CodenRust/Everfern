@@ -14,7 +14,9 @@ import {
     ArrowDownOnSquareIcon,
     ChevronRightIcon,
     ServerIcon,
+    WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
+import { ToolSettingsSection } from './components/ToolSettingsSection';
 import Image from 'next/image';
 import { Loader } from '@/components/ui/animated-loading-svg-text-shimmer';
 
@@ -28,6 +30,7 @@ const navSections = [
     { id: 'vision', label: 'Vision Grounding', icon: GlobeAltIcon },
     { id: 'skills', label: 'Custom Skills', icon: () => <span style={{ fontSize: 14, fontWeight: 700 }}>🧩</span> },
     { id: 'tools', label: 'Registered Tools', icon: ServerIcon },
+    { id: 'tool-settings', label: 'Tool Settings', icon: WrenchScrewdriverIcon },
     { id: 'privacy', label: 'Privacy & Data', icon: ShieldCheckIcon },
 ];
 
@@ -456,18 +459,18 @@ export default function SettingsPage({
                     return (
                         <div
                             key={id}
-                            onClick={() => { 
+                            onClick={() => {
                                 if (disabled) return;
-                                setSettingsEngine(id as 'online' | 'local' | 'everfern'); 
-                                if (id !== 'online') { setSettingsProvider(null); setSettingsApiKey(''); } 
+                                setSettingsEngine(id as 'online' | 'local' | 'everfern');
+                                if (id !== 'online') { setSettingsProvider(null); setSettingsApiKey(''); }
                             }}
-                            style={{ 
-                                position: 'relative', 
-                                cursor: disabled ? 'not-allowed' : 'pointer', 
-                                padding: 20, 
-                                borderRadius: 16, 
-                                backgroundColor: sel ? '#f4f4f4' : '#ffffff', 
-                                border: `1.5px solid ${sel ? '#111111' : '#e8e6d9'}`, 
+                            style={{
+                                position: 'relative',
+                                cursor: disabled ? 'not-allowed' : 'pointer',
+                                padding: 20,
+                                borderRadius: 16,
+                                backgroundColor: sel ? '#f4f4f4' : '#ffffff',
+                                border: `1.5px solid ${sel ? '#111111' : '#e8e6d9'}`,
                                 transition: 'all 0.2s',
                                 opacity: disabled ? 0.6 : 1
                             }}
@@ -985,8 +988,15 @@ export default function SettingsPage({
             <div>
                 <SectionTitle>Registered Tools</SectionTitle>
                 <SectionSubtitle>View all available tools registered with the autonomous agent.</SectionSubtitle>
-                
+
                 <RegisteredToolsList />
+            </div>
+        ),
+        'tool-settings': (
+            <div>
+                <SectionTitle>Tool Settings</SectionTitle>
+                <SectionSubtitle>Configure how Web Search and Website Crawl tools operate.</SectionSubtitle>
+                <ToolSettingsSection />
             </div>
         ),
         privacy: PrivacySection(),

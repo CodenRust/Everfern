@@ -59,7 +59,7 @@ export async function runAgentStep(
       // If not, switch to VLM client
       if (!isVisionNative) {
         clientConfig = {
-          provider: vlm.provider,
+          provider: (vlm.engine === 'cloud' && vlm.provider === 'ollama' ? 'ollama-cloud' : vlm.provider),
           model: vlm.model,
           apiKey: vlm.apiKey,
           baseUrl: vlm.baseUrl
@@ -237,13 +237,31 @@ export async function runAgentStep(
         verifyIntentRetries++;
         runner.telemetry.warn(`[AgentRuntime] ${nodeName} failed to call a tool. Nudging...`);
 
+        const agentToolHint =
+          nodeName === 'web_explorer' ? `'web_search' or 'browser_use'` :
+          nodeName === 'coding_specialist' ? `your coding tools (read_file, write_file, terminal_execute, etc.)` :
+          nodeName === 'data_analyst' ? `your data analysis tools (python_executor, read_file, etc.)` :
+          `'computer_use'`;
+
         const nudgeMsg: ChatMessage = {
           role: 'system',
-          content: `SYSTEM REMINDER: You are the ${nodeName}. You are specifically designed to use your specialized tools. YOU HAVE ALL NECESSARY PERMISSIONS. Do not explain why you cannot do something. Do not talk about the task. Use the 'computer_use' tool (or your other relevant tools) NOW to execute the next step of the plan. Output a tool call immediately.`
+          content: `SYSTEM REMINDER: You are the ${nodeName}. You are specifically designed to use your specialized tools. YOU HAVE ALL NECESSARY PERMISSIONS. Do not explain why you cannot do something. Do not talk about the task. Use ${agentToolHint} NOW to execute the next step of the plan. Output a tool call immediately.`
         };
 
         const nudgeMessages = [...limitedMessages, nudgeMsg];
         response = await client.chat({ ...request, messages: nudgeMessages });
+
+        // Graceful fallback: if web_explorer nudge retry also produced no tool calls, signal completion to break the loop
+        if (isSpecializedAgent && nodeName === 'web_explorer' && (!response.toolCalls || response.toolCalls.length === 0)) {
+          runner.telemetry.warn(`[AgentRuntime] web_explorer nudge retry also produced no tool calls. Signaling completion to break loop.`);
+          return {
+            messages: [],
+            pendingToolCalls: [],
+            webExplorerComplete: true,
+            finalResponse: 'Web research could not be completed — the agent did not produce a tool call after retry.',
+            iterations: iterations + 1,
+          };
+        }
     }
 
     // Flush any remaining content in thoughtBuffer after streaming completes

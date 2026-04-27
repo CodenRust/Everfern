@@ -553,7 +553,6 @@ export class MessageHandler extends EventEmitter {
   private getToolEmoji(toolName: string): string {
     const emojiMap: Record<string, string> = {
       'web_search': '🔍',
-      'web_fetch': '🌐',
       'read_file': '📄',
       'write_file': '✍️',
       'list_directory': '📁',

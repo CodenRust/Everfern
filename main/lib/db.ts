@@ -1,8 +1,8 @@
 import sqlite3 from 'sqlite3';
 import * as sqliteVec from 'sqlite-vec';
-import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 let instance: sqlite3.Database | null = null;
 let currentVectorDims: number | null = null;
@@ -79,8 +79,7 @@ function continueWithSetup(db: sqlite3.Database, resolve: (db: sqlite3.Database)
 export async function initMemoryDb(): Promise<sqlite3.Database> {
   if (instance) return instance;
 
-  const userDataPath = app.getPath('userData');
-  const dbDir = path.join(userDataPath, 'memory');
+  const dbDir = path.join(os.homedir(), '.everfern', 'sql');
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }

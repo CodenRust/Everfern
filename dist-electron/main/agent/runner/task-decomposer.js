@@ -1,16 +1,19 @@
 "use strict";
 /**
- * EverFern Desktop — NEXUS Task Decomposer v2
+ * EverFern Desktop — NEXUS Task Decomposer v3
  *
  * Intelligently decomposes complex tasks into dependency-aware, parallelizable subtasks.
- * Uses a multi-signal analysis system to determine task complexity and optimal execution strategy.
+ * Task type classification is performed by the AI model when a client is available,
+ * with a lightweight regex fallback for synchronous / test contexts.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeTask = analyzeTask;
+exports.analyzeTaskWithAI = analyzeTaskWithAI;
 exports.decomposeTask = decomposeTask;
+exports.decomposeTaskWithAI = decomposeTaskWithAI;
 exports.generatePlanText = generatePlanText;
 exports.getAGIHints = getAGIHints;
-// ── Task Pattern Signals ──────────────────────────────────────────────────
+// ── Parallelization Signals (kept — these are structural, not semantic) ────
 const PARALLEL_SIGNALS = [
     /\b(multiple|several|each|all|every|batch)\b/i,
     /\b(files?|images?|documents?|records?|items?|entries?)\b.{0,20}\b(analyze|process|convert|read|check)\b/i,
@@ -22,19 +25,76 @@ const SEQUENTIAL_SIGNALS = [
     /\b(depends? on|requires?|needs?|must.*before)\b/i,
     /\b(build|compile|deploy)\b.{0,20}\b(after|once|when)\b/i,
 ];
-const TASK_TYPE_SIGNALS = {
+// ── Regex fallback (used when no AI client is available) ──────────────────
+const TASK_TYPE_SIGNALS_FALLBACK = {
     coding: /\b(function|class|method|api|endpoint|component|module|library|algorithm|implement|refactor|write code)\b/i,
     build: /\b(create|build|make|scaffold|new project|new app|generate|setup|initialize|bootstrap)\b/i,
     fix: /\b(fix|debug|repair|error|bug|broken|failing|crash|not work|issue|exception|traceback)\b/i,
     analyze: /\b(analyze|analyse|csv|xlsx|data|dataset|chart|graph|plot|dashboard|insights|statistics|metrics|trends)\b/i,
-    automate: /\b(automate|schedule|cron|batch|pipeline|workflow|recurring|monitor|watch|trigger|open|launch|start|click|type|press|scroll|gui|desktop|screen|mouse|keyboard|app|application|spotify|discord|chrome|browser|window)\b/i,
+    automate: /\b(automate|schedule|cron|batch|pipeline|workflow|recurring|monitor|watch|trigger|open|launch|start|click|type|press|scroll|gui|desktop|screen|mouse|keyboard)\b/i,
     research: /\b(research|search|find|look up|investigate|what is|how does|explain|compare|review)\b/i,
     task: /\b(run|execute|install|configure|move|copy|delete|download|upload|deploy|publish)\b/i,
 };
+function classifyTaskTypeSync(text) {
+    let taskType = 'task';
+    let highestScore = 0;
+    for (const [type, pattern] of Object.entries(TASK_TYPE_SIGNALS_FALLBACK)) {
+        const matches = text.match(new RegExp(pattern.source, 'gi')) || [];
+        if (matches.length > highestScore) {
+            highestScore = matches.length;
+            taskType = type;
+        }
+    }
+    return taskType;
+}
+// ── AI-based task type classification ────────────────────────────────────
+const VALID_TASK_TYPES = [
+    'coding', 'research', 'build', 'fix', 'analyze', 'automate', 'task', 'conversation'
+];
+async function classifyTaskTypeWithAI(userInput, client) {
+    const prompt = `Classify the following user request into exactly one task type.
+
+USER REQUEST: "${userInput.slice(0, 500)}"
+
+Task types:
+- "coding"       — writing, editing, or refactoring code (functions, classes, APIs, components)
+- "research"     — searching the web, looking up information, investigating topics, answering questions
+- "build"        — creating a new project, app, or scaffold from scratch
+- "fix"          — debugging, repairing errors, fixing bugs or crashes
+- "analyze"      — processing data, generating charts, CSV/Excel analysis, dashboards
+- "automate"     — GUI automation, clicking UI elements, desktop app interaction, screen control
+- "task"         — running commands, installing packages, file operations, deployments
+- "conversation" — casual chat, greetings, opinions, no action required
+
+Rules:
+- "automate" is ONLY for tasks that require physically clicking/interacting with a desktop GUI or native app screen.
+- "research" covers any web search, information lookup, or question answering — even if the query mentions product names like Discord, Spotify, Chrome.
+- Respond with JSON only: {"taskType": "<one of the types above>"}`;
+    try {
+        const response = await client.chat({
+            messages: [{ role: 'user', content: prompt }],
+            responseFormat: 'json',
+            temperature: 0,
+            maxTokens: 30,
+        });
+        let content = typeof response.content === 'string'
+            ? response.content
+            : JSON.stringify(response.content);
+        content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const parsed = JSON.parse(content);
+        if (VALID_TASK_TYPES.includes(parsed.taskType)) {
+            return parsed.taskType;
+        }
+    }
+    catch (err) {
+        console.warn('[TaskDecomposer] AI classification failed, using regex fallback:', err instanceof Error ? err.message : String(err));
+    }
+    return classifyTaskTypeSync(userInput.toLowerCase());
+}
 // ── Tool Dependency Map ───────────────────────────────────────────────────
 const TOOL_DEPENDENCY_MAP = {
     web_search: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 2000 },
-    web_fetch: { dependsOn: ['web_search'], complexity: 'low', canParallelize: true, avgDurationMs: 3000 },
+    browser_use: { dependsOn: ['web_search'], complexity: 'medium', canParallelize: true, avgDurationMs: 15000 },
     view_file: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 500 },
     read: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 500 },
     memory_search: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 1000 },
@@ -47,51 +107,31 @@ const TOOL_DEPENDENCY_MAP = {
     todo_write: { dependsOn: [], complexity: 'low', canParallelize: false, avgDurationMs: 200 },
     present_files: { dependsOn: ['write'], complexity: 'low', canParallelize: false, avgDurationMs: 300 },
 };
-// ── Analysis ──────────────────────────────────────────────────────────────
-/**
- * Analyze task complexity, type, and parallelization potential.
- */
-function analyzeTask(userInput) {
+// ── Shared structural analysis (no AI needed) ─────────────────────────────
+function analyzeStructure(userInput) {
     const text = userInput.toLowerCase();
-    // Detect task type by highest signal match count
-    let taskType = 'task';
-    let highestTypeScore = 0;
-    for (const [type, pattern] of Object.entries(TASK_TYPE_SIGNALS)) {
-        const matches = text.match(new RegExp(pattern.source, 'gi')) || [];
-        if (matches.length > highestTypeScore) {
-            highestTypeScore = matches.length;
-            taskType = type;
-        }
-    }
-    // Parallel vs sequential scoring
     let parallelScore = 0;
     let sequentialScore = 0;
-    for (const pattern of PARALLEL_SIGNALS) {
-        if (pattern.test(text))
+    for (const p of PARALLEL_SIGNALS)
+        if (p.test(text))
             parallelScore++;
-    }
-    for (const pattern of SEQUENTIAL_SIGNALS) {
-        if (pattern.test(text))
+    for (const p of SEQUENTIAL_SIGNALS)
+        if (p.test(text))
             sequentialScore++;
-    }
-    // Count distinct action verbs
     const actionVerbs = (text.match(/\b(analyze?|research|find|search|create?|generate|build|make|edit|modify|update|delete|run|execute|download|install|read|fetch|compare|test|verify|check|process|convert)\b/gi) || []);
     const uniqueActions = new Set(actionVerbs.map(v => v.toLowerCase())).size;
-    // Complexity heuristic
     const wordCount = text.split(/\s+/).length;
     const complexity = (wordCount > 80 || uniqueActions > 5) ? 'complex' :
         (wordCount > 25 || uniqueActions > 2) ? 'moderate' : 'simple';
     const canParallelize = parallelScore > sequentialScore && uniqueActions >= 2;
     const suggestedApproach = canParallelize && uniqueActions > 3 ? 'hybrid' :
         canParallelize ? 'parallel' : 'sequential';
-    // Feature flags (calculated on non-data lines to avoid false positives from pasted CSV/JSON data)
     const nonDataText = text.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
     const requiresExternalData = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(nonDataText);
     const requiresFileOps = /\b(file|folder|directory|path|write|read|create|edit|save|csv|xlsx|pdf|docx)\b/i.test(nonDataText);
     const requiresCommandExecution = /\b(run|execute|install|pip|npm|python|node|bash|shell|command|compile|build)\b/i.test(nonDataText);
     return {
         complexity,
-        taskType,
         canParallelize,
         suggestedApproach,
         estimatedSteps: Math.max(2, Math.min(uniqueActions + 1, 12)),
@@ -100,12 +140,32 @@ function analyzeTask(userInput) {
         requiresCommandExecution,
     };
 }
-// ── Decomposition ─────────────────────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────────────────────
 /**
- * Decompose a complex task into dependency-aware, parallelizable steps.
+ * Synchronous task analysis using regex signals.
+ * Use this in tests or contexts where no AI client is available.
  */
-function decomposeTask(userInput, availableTools) {
-    const analysis = analyzeTask(userInput);
+function analyzeTask(userInput) {
+    return {
+        taskType: classifyTaskTypeSync(userInput.toLowerCase()),
+        ...analyzeStructure(userInput),
+    };
+}
+/**
+ * AI-powered task analysis. Uses the model to classify task type and falls
+ * back to regex if the model call fails or no client is provided.
+ */
+async function analyzeTaskWithAI(userInput, client) {
+    const taskType = client
+        ? await classifyTaskTypeWithAI(userInput, client)
+        : classifyTaskTypeSync(userInput.toLowerCase());
+    return {
+        taskType,
+        ...analyzeStructure(userInput),
+    };
+}
+// ── Decomposition ─────────────────────────────────────────────────────────
+function buildSteps(userInput, analysis) {
     const steps = [];
     let stepId = 1;
     const mk = (desc, tool, dependsOn, canParallelize, complexity, priority = 'normal', parallelGroup, agentPrompt) => ({
@@ -119,21 +179,20 @@ function decomposeTask(userInput, availableTools) {
         parallelGroup,
         agentPrompt,
     });
-    // Extract concrete targets from user text, but ignore lines that look like CSV data (>= 2 commas)
     const nonDataLines = userInput.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
     const urls = (nonDataLines.match(/https?:\/\/[^\s"',]+/g) || []);
     const filePaths = (nonDataLines.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
     const topics = (nonDataLines.match(/"([^"]+)"|'([^']+)'/g) || []).map(s => s.replace(/['"]/g, ''));
-    // ── Phase 0: Skill reading ────────────────────────────────────────────
+    // Phase 0: Skill reading
     if (['analyze', 'coding', 'build'].includes(analysis.taskType)) {
         steps.push(mk('Read relevant skill file(s)', 'skill', [], false, 'low', 'critical'));
     }
-    // ── Phase 1: Parallel data gathering ─────────────────────────────────
+    // Phase 1: Parallel data gathering
     const gatherIds = [];
     if (analysis.requiresExternalData) {
         if (urls.length > 0) {
             for (const url of urls.slice(0, 3)) {
-                const s = mk(`Fetch: ${url.slice(0, 60)}`, 'web_fetch', [], true, 'low', 'normal', 1);
+                const s = mk(`Browse and extract: ${url.slice(0, 60)}`, 'browser_use', [], true, 'medium', 'normal', 1);
                 steps.push(s);
                 gatherIds.push(s.id);
             }
@@ -158,12 +217,12 @@ function decomposeTask(userInput, availableTools) {
             gatherIds.push(s.id);
         }
     }
-    // ── Phase 2: Planning / discovery ────────────────────────────────────
+    // Phase 2: Planning / discovery
     if (analysis.complexity !== 'simple') {
         steps.push(mk('Create execution plan', 'execution_plan', gatherIds, false, 'low', 'critical'));
         steps.push(mk('Create and run discovery/validation script', 'run_command', gatherIds, false, 'medium', 'critical'));
     }
-    // ── Phase 3: Core execution (task-type-specific) ──────────────────────
+    // Phase 3: Core execution
     const execDeps = steps.filter(s => s.priority === 'critical').map(s => s.id);
     switch (analysis.taskType) {
         case 'analyze':
@@ -183,7 +242,6 @@ function decomposeTask(userInput, availableTools) {
             steps.push(mk('Verify fix', 'run_command', [`step_${stepId - 1}`], false, 'high', 'critical'));
             break;
         case 'research':
-            // Phase 1 already covers gathering; add synthesis
             steps.push(mk('Compile and summarize findings', undefined, gatherIds.length > 0 ? gatherIds : execDeps, false, 'low'));
             break;
         case 'automate':
@@ -197,18 +255,18 @@ function decomposeTask(userInput, availableTools) {
                 steps.push(mk('Write / update file(s)', 'write', execDeps, false, 'medium'));
             }
     }
-    // ── Final: Present deliverables ───────────────────────────────────────
+    // Final: Present deliverables
     const lastExecIds = steps
         .filter(s => s.tool === 'run_command' || s.tool === 'write')
         .map(s => s.id);
     if (lastExecIds.length > 0) {
         steps.push(mk('Present deliverables to user', 'present_files', lastExecIds.slice(-2), false, 'low', 'critical'));
     }
-    // Filter any accidentally empty steps
-    const validSteps = steps.filter(s => s.description.trim().length > 0);
-    // Compute unique parallel groups
+    return steps.filter(s => s.description.trim().length > 0);
+}
+function assembleDecomposedTask(userInput, analysis) {
+    const validSteps = buildSteps(userInput, analysis);
     const groups = new Set(validSteps.filter(s => s.parallelGroup !== undefined).map(s => s.parallelGroup));
-    // Estimate total wall-clock duration (sequential sum as worst-case)
     const estimatedDurationMs = validSteps.reduce((acc, s) => {
         const toolInfo = s.tool ? TOOL_DEPENDENCY_MAP[s.tool] : null;
         return acc + (toolInfo?.avgDurationMs ?? 2000);
@@ -224,10 +282,23 @@ function decomposeTask(userInput, availableTools) {
         estimatedDurationMs,
     };
 }
-// ── Plan Text Generator ───────────────────────────────────────────────────
 /**
- * Generate a professional execution plan from decomposed steps.
+ * Synchronous decomposition (regex-based task type classification).
+ * Kept for backward compatibility with callers that cannot go async.
  */
+function decomposeTask(userInput, availableTools) {
+    const analysis = analyzeTask(userInput);
+    return assembleDecomposedTask(userInput, analysis);
+}
+/**
+ * AI-powered decomposition. Uses the model to classify task type before
+ * building the execution plan. Falls back to regex if the client is absent.
+ */
+async function decomposeTaskWithAI(userInput, availableTools, client) {
+    const analysis = await analyzeTaskWithAI(userInput, client);
+    return assembleDecomposedTask(userInput, analysis);
+}
+// ── Plan Text Generator ───────────────────────────────────────────────────
 function generatePlanText(decomposed) {
     const lines = [];
     const duration = (decomposed.estimatedDurationMs || 0) < 60_000
@@ -246,7 +317,6 @@ function generatePlanText(decomposed) {
     lines.push('');
     lines.push('## Steps');
     lines.push('');
-    // Group steps by parallel group (number) vs sequential (keyed by step id)
     const grouped = new Map();
     for (const step of decomposed.steps) {
         const key = step.parallelGroup !== undefined
@@ -279,9 +349,6 @@ function generatePlanText(decomposed) {
     }
     return lines.join('\n');
 }
-/**
- * AGI: Get task decomposition hints for the system prompt.
- */
 function getAGIHints(userInput) {
     const analysis = analyzeTask(userInput);
     const hints = [];

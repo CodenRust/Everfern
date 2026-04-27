@@ -1,6 +1,10 @@
 import { AgentTool, ToolResult } from '../../runner/types';
 import { CommandRegistry } from './registry';
 import * as os from 'os';
+import * as path from 'path';
+
+/** Default working directory for agent commands — ~/.everfern (cross-platform) */
+const AGENT_DEFAULT_CWD = path.join(os.homedir(), '.everfern');
 
 /**
  * Enhanced Terminal Tool
@@ -13,7 +17,7 @@ export const terminalTool: AgentTool = {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'The command to execute' },
-      cwd: { type: 'string', description: 'Working directory (defaults to home)' },
+      cwd: { type: 'string', description: 'Working directory (defaults to ~/.everfern)' },
       id: { type: 'string', description: 'Optional unique ID for this command session' }
     },
     required: ['command']
@@ -21,11 +25,11 @@ export const terminalTool: AgentTool = {
   execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
     const registry = CommandRegistry.getInstance();
     const command = args.command as string;
-    const cwd = (args.cwd as string) || os.homedir();
+    const cwd = (args.cwd as string) || AGENT_DEFAULT_CWD;
     const id = (args.id as string) || `term_${Date.now()}`;
 
     onUpdate?.(`Terminal [${id}]: Executing "${command}"...`);
-    
+
     const info = await registry.execute(id, command, cwd);
 
     if (info.status === 'completed') {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MarkdownRenderer } from './MarkdownComponents';
+import { CodingPlanCard } from './CodingPlanCard';
 
 // Add CSS animation for spinner
 const spinnerStyle = `
@@ -340,6 +341,7 @@ const HitlApprovalForm = ({
 const UserQuestionForm = ({
     questions,
     onSubmit,
+    previewMarkdown,
 }: {
     questions: Array<{
         question: string;
@@ -347,6 +349,7 @@ const UserQuestionForm = ({
         multiSelect: boolean;
     }>;
     onSubmit: (answers: Record<string, string[]>, attachedFiles?: Array<{ name: string; content?: string; base64?: string; mimeType?: string }>) => void;
+    previewMarkdown?: string;
 }) => {
     const [currentIndex, setCurrentIndex] = React.useState(0);
     const [answers, setAnswers] = React.useState<Record<string, string[]>>({});
@@ -552,6 +555,11 @@ const UserQuestionForm = ({
                         transition: 'width 0.2s ease',
                     }} />
                 </div>
+            )}
+
+            {/* Coding plan preview — shown when the agent presents a plan for approval */}
+            {previewMarkdown && (
+                <CodingPlanCard previewMarkdown={previewMarkdown} />
             )}
 
             {/* Question content */}

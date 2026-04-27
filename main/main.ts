@@ -67,6 +67,7 @@ import { shell } from 'electron';
 import { syncBuiltInSkills, mergeCustomSkills, getCustomSkillsPath, listCustomSkills, saveCustomSkill, deleteCustomSkill } from './lib/skills-sync';
 import { CommandRegistry } from './agent/tools/terminal/registry';
 import { initializePromptSync, watchPrompts } from './lib/prompt-sync';
+import { ensurePlaywrightChromium } from './lib/playwright-setup';
 
 // ── GPU / Cache Startup Fixes (must run before app.whenReady) ───────────────
 // Disable GPU shader disk cache — prevents "Access is denied (0x5)" on Windows
@@ -475,12 +476,20 @@ import { VoiceOverlayManager } from './voice-overlay';
 
 let voiceOverlayManager: VoiceOverlayManager;
 
+import { bridgeServer } from './lib/extension-server';
+
 app.whenReady().then(async () => {
   console.log('[App] App ready, starting initialization...');
+
+  // Start the extension bridge server (localhost:4001)
+  bridgeServer.start();
 
   // ── Initialize Prompt Synchronization System ──────────────────────
   console.log('[Startup] 🔄 Initializing prompt synchronization...');
   initializePromptSync();
+
+  // ── Ensure Playwright Chromium is installed (non-blocking) ─────────
+  ensurePlaywrightChromium();
 
   // Watch for prompt changes in development mode
   if (process.env.NODE_ENV === 'development') {

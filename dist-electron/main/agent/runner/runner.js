@@ -182,6 +182,25 @@ class AgentRunner {
                     });
                 }
                 try {
+                    // Load parent conversation history
+                    let parentHistory = [];
+                    try {
+                        const chatHistoryStore = new history_1.ChatHistoryStore();
+                        const fullConversation = await chatHistoryStore.load(this.currentConversationId || 'default');
+                        if (fullConversation && fullConversation.messages.length > 0) {
+                            // Reconstruct full history including tool calls
+                            // Use empty string as currentUserInput since we're not adding a new message
+                            const reconstructed = reconstructFullHistory(fullConversation.messages, '');
+                            // Apply context window cap: limit to most recent 20 turns (40 messages max)
+                            parentHistory = reconstructed.slice(-40);
+                            console.log(`[SubagentSpawn] Loaded ${parentHistory.length} messages from parent conversation`);
+                        }
+                    }
+                    catch (historyErr) {
+                        // If history loading fails, fall back to empty array (current behavior)
+                        console.warn('[SubagentSpawn] Failed to load parent history, continuing with empty history:', historyErr);
+                        parentHistory = [];
+                    }
                     const { getSubagentSpawner } = await Promise.resolve().then(() => __importStar(require('./subagent-spawn')));
                     const spawner = getSubagentSpawner();
                     spawner.setRunner({
@@ -191,7 +210,13 @@ class AgentRunner {
                             const clonedHistory = [...h];
                             let lastResponse = '';
                             let toolCalls = [];
-                            const stream = subRunner.runStream(t, clonedHistory, m, `sub:${agentId}`);
+                            const RESEARCH_PATTERN = /compile.*list|top \d+|find the best|comprehensive list|compare|best.*bots|best.*tools|best.*products/i;
+                            const parentIsResearch = this.currentIntent === 'research';
+                            const taskIsResearch = RESEARCH_PATTERN.test(t);
+                            const enrichedTask = (parentIsResearch || taskIsResearch)
+                                ? `[RESEARCH TASK - USE WEB SEARCH]\n${t}`
+                                : t;
+                            const stream = subRunner.runStream(enrichedTask, clonedHistory, m, `sub:${agentId}`);
                             for await (const event of stream) {
                                 if (event.type === 'done')
                                     break;
@@ -277,7 +302,8 @@ class AgentRunner {
                         parentSessionId: this.currentConversationId || 'default',
                         task,
                         model: this.client.model,
-                        maxDepth
+                        maxDepth,
+                        parentHistory
                     });
                     const children = await spawner.waitForCompletion(this.currentConversationId || 'default', 300000);
                     const myChild = children.find(c => c.agentId === spawnedAgent.agentId);

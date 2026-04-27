@@ -252,12 +252,19 @@ export const learningMemoryManager = new LearningMemoryManager();
  */
 export function reflectAndRemember(
   history: ChatMessage[],
-  userInput: string,
+  userInput: string | unknown,
   response: string,
   client: AIClient
 ): void {
+  // Coerce userInput to string early — it may be ContentPart[] when attachments are present
+  const safeInput = typeof userInput === 'string'
+    ? userInput
+    : Array.isArray(userInput)
+      ? (userInput as any[]).map((p: any) => (typeof p === 'string' ? p : p?.text ?? '')).join(' ')
+      : String(userInput ?? '');
+
   // Skip reflection entirely if the interaction wasn't successful
-  if (!isSuccessfulInteraction(userInput, response)) {
+  if (!isSuccessfulInteraction(safeInput, response)) {
     console.log('[Memory] ⏭️ Skipping reflection — no meaningful work was done or errors occurred');
     return;
   }
@@ -282,7 +289,7 @@ NEVER store any of these — they are session-specific and will cause confusion 
 If nothing from the ✅ categories was learned, respond with "NO_NEW_MEMORY".
 
 Interaction:
-User: "${userInput.substring(0, 500)}"
+User: "${safeInput.substring(0, 500)}"
 Assistant: "${response.substring(0, 800)}..."
 
 Respond with ONLY new memory entries in Markdown bullet format, or "NO_NEW_MEMORY".`;

@@ -36,6 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.terminalStatusTool = exports.terminalTool = void 0;
 const registry_1 = require("./registry");
 const os = __importStar(require("os"));
+const path = __importStar(require("path"));
+/** Default working directory for agent commands — ~/.everfern (cross-platform) */
+const AGENT_DEFAULT_CWD = path.join(os.homedir(), '.everfern');
 /**
  * Enhanced Terminal Tool
  * Provides persistent command execution with status tracking.
@@ -47,7 +50,7 @@ exports.terminalTool = {
         type: 'object',
         properties: {
             command: { type: 'string', description: 'The command to execute' },
-            cwd: { type: 'string', description: 'Working directory (defaults to home)' },
+            cwd: { type: 'string', description: 'Working directory (defaults to ~/.everfern)' },
             id: { type: 'string', description: 'Optional unique ID for this command session' }
         },
         required: ['command']
@@ -55,7 +58,7 @@ exports.terminalTool = {
     execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const registry = registry_1.CommandRegistry.getInstance();
         const command = args.command;
-        const cwd = args.cwd || os.homedir();
+        const cwd = args.cwd || AGENT_DEFAULT_CWD;
         const id = args.id || `term_${Date.now()}`;
         onUpdate?.(`Terminal [${id}]: Executing "${command}"...`);
         const info = await registry.execute(id, command, cwd);

@@ -67,4 +67,16 @@ exports.GraphState = langgraph_1.Annotation.Root({
     missionTimeline: (0, langgraph_1.Annotation)(),
     missionSteps: (0, langgraph_1.Annotation)(),
     currentStepId: (0, langgraph_1.Annotation)(),
+    // Specialized Agent State
+    webExplorerComplete: (0, langgraph_1.Annotation)(),
+    webExplorerSelfLoopCount: (0, langgraph_1.Annotation)(),
+    codingComplete: (0, langgraph_1.Annotation)(),
+    dataAnalysisComplete: (0, langgraph_1.Annotation)(),
+    computerUseComplete: (0, langgraph_1.Annotation)(),
+    deepResearchComplete: (0, langgraph_1.Annotation)(),
+    // Subagent State
+    subagentSpawned: (0, langgraph_1.Annotation)(),
+    // Bugfixes: Routing state persistence
+    brainToolsInFlight: (0, langgraph_1.Annotation)(),
+    returningFromSpecialist: (0, langgraph_1.Annotation)(),
 });

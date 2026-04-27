@@ -1,10 +1,10 @@
 /**
  * EverFern Desktop — Chat Vector Store
- * 
+ *
  * Stores chat messages in SQLite for semantic search.
  * Uses text-based keyword matching (no vector embeddings).
- * Messages are stored in ~/.everfern/vectors/chat.sqlite
- * 
+ * Messages are stored in ~/.everfern/sql/chat.sqlite
+ *
  * Has a write queue to prevent concurrent write errors.
  */
 
@@ -33,7 +33,7 @@ export interface SearchResult {
   similarity: number;
 }
 
-const VECTORS_DIR = path.join(os.homedir(), '.everfern', 'vectors');
+const VECTORS_DIR = path.join(os.homedir(), '.everfern', 'sql');
 const DEBUG = false;
 
 function log(...args: any[]): void {
@@ -58,7 +58,7 @@ function queueWrite(fn: () => void): void {
 
 function processQueue(): void {
   if (isWriteInProgress || writeQueue.length === 0 || !instance) return;
-  
+
   isWriteInProgress = true;
   const next = writeQueue.shift();
   if (next) {
@@ -69,7 +69,7 @@ function processQueue(): void {
     }
   }
   isWriteInProgress = false;
-  
+
   // Process next in queue
   if (writeQueue.length > 0) {
     setTimeout(processQueue, 10);
@@ -149,7 +149,7 @@ export async function embedAndStoreMessage(
 
   try {
     const db = await getChatVectorDb();
-    
+
     // Use synchronous write in queue to prevent concurrent writes
     return new Promise((res, rej) => {
       queueWrite(() => {
@@ -191,11 +191,11 @@ export async function searchChatVectors(
 
   try {
     const db = await getChatVectorDb();
-    
+
     const queryLower = query.toLowerCase();
-    
+
     let sql = `
-      SELECT 
+      SELECT
         cm.id, cm.chat_id as chatId, cm.role, cm.content, cm.created_at as createdAt
       FROM chat_messages cm
     `;
@@ -259,7 +259,7 @@ export async function getChatVectors(chatId: string): Promise<VectorMessage[]> {
 
   try {
     const db = await getChatVectorDb();
-    
+
     return new Promise<VectorMessage[]>((res, rej) => {
       db.all(
         `SELECT id, chat_id as chatId, role, content, created_at as createdAt FROM chat_messages WHERE chat_id = ? ORDER BY created_at`,
@@ -286,7 +286,7 @@ export async function deleteChatVectors(chatId: string): Promise<void> {
 
   try {
     const db = await getChatVectorDb();
-    
+
     return new Promise((res, rej) => {
       queueWrite(() => {
         db.run(`DELETE FROM chat_messages WHERE chat_id = ?`, [chatId], (e) => {
@@ -309,7 +309,7 @@ export async function deleteChatVectors(chatId: string): Promise<void> {
 
 export async function closeChatVectorDb(): Promise<void> {
   log('closeChatVectorDb');
-  
+
   if (instance) {
     return new Promise((res, rej) => {
       instance!.close((e) => {
@@ -327,16 +327,16 @@ export async function closeChatVectorDb(): Promise<void> {
   }
 }
 
-export async function getVectorStats(): Promise<{ 
-  messageCount: number; 
-  dimensionCount: number | null; 
+export async function getVectorStats(): Promise<{
+  messageCount: number;
+  dimensionCount: number | null;
   storageSize: number;
   initialized: boolean;
   error: string | null;
 }> {
   ensureDir();
   const dbPath = path.join(VECTORS_DIR, 'chat.sqlite');
-  
+
   let storageSize = 0;
   if (fs.existsSync(dbPath)) {
     const stats = fs.statSync(dbPath);
@@ -354,8 +354,8 @@ export async function getVectorStats(): Promise<{
     });
   }
 
-  return { 
-    messageCount, 
+  return {
+    messageCount,
     dimensionCount: null,
     storageSize,
     initialized: isInitialized,

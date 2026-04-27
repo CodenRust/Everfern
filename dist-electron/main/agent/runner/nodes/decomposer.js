@@ -51,23 +51,23 @@ const createDecomposerNode = (runner, eventQueue, missionTracker, shouldAbort) =
         integrator.startNode('decomposer', 'Intelligently decomposing task into execution steps');
         try {
             runner.telemetry.transition('decomposer');
-            eventQueue?.push({ type: 'thought', content: '🧠 Decomposer: Analyzing task structure using fast heuristics...' });
+            eventQueue?.push({ type: 'thought', content: '🧠 Decomposer: Analyzing task structure using AI classification...' });
             const lastUserMsg = state.messages.filter(m => {
                 const msg = m;
                 return msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human';
             }).pop();
             const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : '';
             const startTime = Date.now();
-            // Use the fast heuristic (manual/signal-based) decomposition to bypass the slow LLM
-            const { decomposeTask } = await Promise.resolve().then(() => __importStar(require('../task-decomposer')));
+            // Use AI-powered decomposition when a client is available, regex fallback otherwise
+            const { decomposeTaskWithAI } = await Promise.resolve().then(() => __importStar(require('../task-decomposer')));
             const toolDefs = runner._buildToolDefinitions?.() || [];
             const toolNames = toolDefs.map((t) => t.name);
-            const decomposed = decomposeTask(content, toolNames || []);
+            const decomposed = await decomposeTaskWithAI(content, toolNames || [], runner.client ?? undefined);
             // Ensure totalSteps and unique ID are set
             decomposed.totalSteps = decomposed.steps.length;
             decomposed.id = `task_${Date.now()}`;
             const duration = Date.now() - startTime;
-            runner.telemetry.info(`[Decomposer] Task split into ${decomposed.totalSteps} steps in ${duration}ms (${decomposed.executionMode}) by fast heuristic`);
+            runner.telemetry.info(`[Decomposer] Task split into ${decomposed.totalSteps} steps in ${duration}ms (${decomposed.executionMode}) via AI classification`);
             eventQueue?.push({
                 type: 'task_analyzed',
                 analysis: {
