@@ -232,6 +232,31 @@ class SubagentSpawner {
         return spawned;
     }
 
+    async waitForAgent(
+        agentId: string,
+        timeoutMs: number
+    ): Promise<SubagentEntry | undefined> {
+        const registry = getSubagentRegistry();
+        const startTime = Date.now();
+
+        while (true) {
+            const entry = registry.get(agentId);
+            if (!entry) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                continue;
+            }
+
+            if (entry.status === 'completed' || entry.status === 'failed' || entry.status === 'aborted') {
+                return entry;
+            }
+
+            if (Date.now() - startTime > timeoutMs) {
+                throw new Error(`Timeout waiting for agent ${agentId} (${timeoutMs}ms)`);
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+
     async waitForCompletion(
         parentSessionId: string,
         timeoutMs?: number,

@@ -167,6 +167,24 @@ class SubagentSpawner {
         }
         return spawned;
     }
+    async waitForAgent(agentId, timeoutMs) {
+        const registry = (0, subagent_registry_1.getSubagentRegistry)();
+        const startTime = Date.now();
+        while (true) {
+            const entry = registry.get(agentId);
+            if (!entry) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                continue;
+            }
+            if (entry.status === 'completed' || entry.status === 'failed' || entry.status === 'aborted') {
+                return entry;
+            }
+            if (Date.now() - startTime > timeoutMs) {
+                throw new Error(`Timeout waiting for agent ${agentId} (${timeoutMs}ms)`);
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
     async waitForCompletion(parentSessionId, timeoutMs, agentType) {
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
         const effectiveTimeout = timeoutMs ?? exports.AGENT_TIMEOUTS[agentType ?? 'generic'];

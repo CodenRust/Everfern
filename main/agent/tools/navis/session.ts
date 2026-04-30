@@ -5,9 +5,14 @@
  * No chrome extension — pure Playwright automation.
  */
 
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { chromium as pwChromium, Browser, BrowserContext, Page } from 'playwright';
+import { addExtra } from 'playwright-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { OVERLAY_SCRIPT } from './overlay';
 import { NavisLogger } from './logger';
+
+const chromium = addExtra(pwChromium);
+chromium.use(StealthPlugin());
 
 export interface SessionConfig {
   headless?: boolean;
@@ -28,7 +33,6 @@ export class BrowserSession {
   private activePage: Page | null = null;
   private logger: NavisLogger | null = null;
 
-  /** Public accessor for BrowserContext — used by action executor */
   getContext(): BrowserContext {
     if (!this.context) throw new Error('Browser not initialized. Call launch() first.');
     return this.context;
@@ -48,16 +52,55 @@ export class BrowserSession {
     const { headless = false, startUrl, logger } = config;
     this.logger = logger || null;
 
+    const realUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
     try {
       this.browser = await chromium.launch({
         headless,
-        args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+        args: [
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-infobars',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-default-apps',
+          '--no-first-run',
+          '--disable-translate',
+          '--disable-features=ChromeWhatsNewUI',
+          '--disable-background-networking',
+          '--disable-sync',
+          '--metrics-recording-only',
+          '--disable-component-update',
+          '--safebrowsing-disable-auto-update',
+          '--disable-hang-monitor',
+          '--disable-popup-blocking',
+          '--disable-prompt-on-repost',
+          '--disable-domain-reliability',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--lang=en-US',
+        ],
+        env: {
+          ...process.env,
+        },
       });
 
       this.context = await this.browser.newContext({
-        viewport: { width: 1280, height: 720 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        viewport: { width: 1920, height: 1080 },
+        userAgent: realUA,
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+        permissions: ['geolocation'],
+        geolocation: { longitude: -73.935242, latitude: 40.730610 },
+        colorScheme: 'light',
+        hasTouch: false,
+        isMobile: false,
+        deviceScaleFactor: 1,
+        javaScriptEnabled: true,
       });
+
+      await this.context.addInitScript(() => {
+        delete (window as any).navigator.webdriver;
+      });
+
     } catch (err) {
       if (this.browser) {
         await this.browser.close().catch(() => {});
@@ -67,29 +110,36 @@ export class BrowserSession {
     }
 
     await this.openTab(startUrl || 'about:blank');
-    this.logger?.browserLaunch(`headless=${headless}, 1280x720`);
+    this.logger?.browserLaunch(`headless=${headless}, 1920x1080, real Chrome`);
   }
 
   async openTab(url?: string): Promise<Page> {
     if (!this.context) throw new Error('Browser not initialized.');
-    
+
     const newPage = await this.context.newPage();
-    
+
+    await newPage.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      (window as any).chrome = { runtime: {} };
+    }).catch(() => {});
+
     await newPage.addInitScript(OVERLAY_SCRIPT, { runOnReload: true }).catch(() => {});
-    
+
     if (url && url !== 'about:blank') {
       await newPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     }
-    
+
     this.activePage = newPage;
     return newPage;
   }
 
   async closeTab(page: Page): Promise<void> {
     if (!this.context) return;
-    
+
     await page.close().catch(() => {});
-    
+
     const remaining = this.context.pages();
     if (remaining.length > 0) {
       this.activePage = remaining[remaining.length - 1];
@@ -98,10 +148,10 @@ export class BrowserSession {
 
   async getTabs(): Promise<TabInfo[]> {
     if (!this.context) return [];
-    
+
     const pages = this.context.pages();
     const tabs: TabInfo[] = [];
-    
+
     for (let i = 0; i < pages.length; i++) {
       const p = pages[i];
       let title = '';
@@ -117,17 +167,32 @@ export class BrowserSession {
         isActive: p === this.activePage,
       });
     }
-    
+
     return tabs;
   }
 
-  async switchToTab(index: number): Promise<void> {
+  async switchToTab(indexOrTitle: number | string): Promise<void> {
     const pages = this.allPages;
-    if (index < 0 || index >= pages.length) {
-      throw new Error(`Tab index ${index} out of range. Available tabs: 0-${pages.length - 1}`);
+
+    if (typeof indexOrTitle === 'number') {
+      if (indexOrTitle < 0 || indexOrTitle >= pages.length) {
+        throw new Error(`Tab index ${indexOrTitle} out of range. Available tabs: 0-${pages.length - 1}`);
+      }
+      this.activePage = pages[indexOrTitle];
+    } else {
+      const page = pages.find(p => {
+        try {
+          return p.title().then(t => t.toLowerCase().includes(indexOrTitle.toLowerCase()));
+        } catch {
+          return false;
+        }
+      });
+      if (!page) {
+        throw new Error(`No tab found matching "${indexOrTitle}". Available: ${pages.map((p, i) => `#${i}: ${p.url()}`).join(', ')}`);
+      }
+      this.activePage = page;
     }
-    
-    this.activePage = pages[index];
+
     await this.activePage.bringToFront();
   }
 
@@ -142,9 +207,8 @@ export class BrowserSession {
         this.browser = null;
       }
     } catch {
-      // Best-effort cleanup
     }
-    
+
     this.activePage = null;
   }
 

@@ -1252,13 +1252,15 @@ const TimelineBranchItem = ({
     isLast,
     onToggleCollapse,
     onShowTooltip,
-    onHideTooltip
+    onHideTooltip,
+    onViewTimeline,
 }: {
     branch: TimelineBranch;
     isLast: boolean;
     onToggleCollapse: (branchId: string) => void;
     onShowTooltip: (event: React.MouseEvent, branch: TimelineBranch) => void;
     onHideTooltip: () => void;
+    onViewTimeline?: (branchId: string) => void;
 }) => {
     const [screenshotExpanded, setScreenshotExpanded] = useState(false);
     const isRunning = branch.status === 'running';
@@ -1468,6 +1470,36 @@ const TimelineBranchItem = ({
                         }}>
                             {branch.events.length} event{branch.events.length !== 1 ? 's' : ''}
                         </span>
+
+                        {onViewTimeline && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onViewTimeline(branch.id); }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = `${agentColor}15`;
+                                    e.currentTarget.style.color = agentColor;
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = `${agentColor}08`;
+                                    e.currentTarget.style.color = `${agentColor}90`;
+                                }}
+                                style={{
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                    color: `${agentColor}90`,
+                                    fontFamily: "'Figtree', system-ui, sans-serif",
+                                    backgroundColor: `${agentColor}08`,
+                                    border: `1px solid ${agentColor}20`,
+                                    borderRadius: 6,
+                                    padding: '2px 8px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease-out',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.03em',
+                                }}
+                            >
+                                View Timeline
+                            </button>
+                        )}
 
                         {/* Collapse/expand chevron */}
                         <motion.svg
@@ -1978,12 +2010,187 @@ const ToolRow = ({
     );
 };
 
+// Sub-Agent Timeline View - full-screen dedicated timeline for a single sub-agent branch
+const SubAgentTimelineView = ({
+    branch,
+    onBack,
+}: {
+    branch: TimelineBranch;
+    onBack: () => void;
+}) => {
+    const getAgentTypeColor = (agentType: string) => {
+        const colors = {
+            'web-explorer': '#3b82f6',
+            'navis': '#6366f1',
+            'browser-use': '#8b5cf6',
+            'computer-use': '#06b6d4',
+            'research': '#10b981',
+            'coding-specialist': '#f59e0b',
+            'data-analyst': '#ef4444'
+        };
+        return colors[agentType as keyof typeof colors] || '#6b7280';
+    };
+
+    const getAgentTypeIcon = (agentType: string) => {
+        const icons = {
+            'web-explorer': '🌐',
+            'navis': '🧭',
+            'browser-use': '🖥️',
+            'computer-use': '💻',
+            'research': '🔍',
+            'coding-specialist': '👨‍💻',
+            'data-analyst': '📊'
+        };
+        return icons[agentType as keyof typeof icons] || '🤖';
+    };
+
+    const agentColor = getAgentTypeColor(branch.agentType);
+    const agentIcon = getAgentTypeIcon(branch.agentType);
+    const statusColor = branch.status === 'running' ? agentColor :
+                       branch.status === 'completed' ? '#22c55e' :
+                       branch.status === 'failed' ? '#ef4444' :
+                       branch.status === 'aborted' ? '#f59e0b' : '#6b7280';
+
+    const formatTime = (timestamp: string) => {
+        try {
+            return new Date(timestamp).toLocaleTimeString();
+        } catch {
+            return timestamp;
+        }
+    };
+
+    const getDuration = () => {
+        if (!branch.endTime) return 'Running...';
+        try {
+            const start = new Date(branch.startTime).getTime();
+            const end = new Date(branch.endTime).getTime();
+            return formatDuration(end - start);
+        } catch {
+            return 'Unknown';
+        }
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+            style={{
+                fontFamily: "'Figtree', system-ui, sans-serif",
+            }}
+        >
+            {/* Header */}
+            <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 16px",
+                marginBottom: 16,
+                backgroundColor: "#faf9f7",
+                borderRadius: 12,
+                border: `1px solid ${agentColor}20`,
+                borderLeft: `3px solid ${agentColor}`,
+            }}>
+                <button
+                    onClick={onBack}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#e8e6d9";
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "4px 8px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#6366f1",
+                        fontFamily: "'Figtree', system-ui, sans-serif",
+                        transition: "background-color 0.15s ease-out",
+                    }}
+                >
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                    Back
+                </button>
+
+                <div style={{ flex: 1 }} />
+
+                <span style={{ fontSize: 18 }}>{agentIcon}</span>
+
+                <div style={{ flex: 1 }}>
+                    <div style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: agentColor,
+                        textTransform: "capitalize",
+                        letterSpacing: "0.02em"
+                    }}>
+                        {branch.agentType.replace('-', ' ')} Subagent
+                    </div>
+                    {branch.taskDescription && (
+                        <div style={{
+                            fontSize: 11,
+                            color: "#6b7280",
+                            marginTop: 2,
+                            lineHeight: 1.4
+                        }}>
+                            {branch.taskDescription}
+                        </div>
+                    )}
+                </div>
+
+                <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    fontSize: 10,
+                    color: "#8a8886",
+                    fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                    <span>{formatTime(branch.startTime)}</span>
+                    <span>{getDuration()}</span>
+                    <span style={{
+                        fontWeight: 600,
+                        color: statusColor,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        fontFamily: "'Figtree', system-ui, sans-serif"
+                    }}>
+                        {branch.status}
+                    </span>
+                </div>
+            </div>
+
+            {/* Timeline events */}
+            <div style={{ paddingLeft: 0 }}>
+                {branch.events.map((event, idx) => (
+                    <SubAgentProgressItem
+                        key={`${event.toolCallId}-${event.timestamp}-${idx}`}
+                        event={event}
+                        isLast={idx === branch.events.length - 1}
+                    />
+                ))}
+            </div>
+        </motion.div>
+    );
+};
+
 export const AgentTimeline = ({
     toolCalls, thought, isLive, currentNode, planSteps, planTitle, subAgentProgress, timelineBranches,
 }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
     const [collapsed, setCollapsed] = useState(false);
     const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
+    const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(null);
     const [tooltipState, setTooltipState] = useState<{
         visible: boolean;
         branch: TimelineBranch | null;
@@ -2285,81 +2492,89 @@ export const AgentTimeline = ({
                         transition={{ duration: 0.2, ease: "easeInOut" }}
                         style={{ overflow: "hidden" }}
                     >
-                        <div style={{ paddingLeft: 0 }}>
-                            {timelineItems.map((item, idx) => {
-                                const isLast = idx === timelineItems.length - 1;
+                        {activeSubAgentId && buildTimelineBranches.has(activeSubAgentId) ? (
+                            <SubAgentTimelineView
+                                branch={buildTimelineBranches.get(activeSubAgentId)!}
+                                onBack={() => setActiveSubAgentId(null)}
+                            />
+                        ) : (
+                            <div style={{ paddingLeft: 0 }}>
+                                {timelineItems.map((item, idx) => {
+                                    const isLast = idx === timelineItems.length - 1;
 
-                                if (item.type === "thought") {
-                                    return (
-                                        <ThoughtItem
-                                            key={item.data.id}
-                                            content={item.data.content}
-                                            isLive={item.data.isLive}
-                                            isLast={isLast}
-                                        />
-                                    );
-                                }
-
-                                if (item.type === "plan") {
-                                    return (
-                                        <PlanItem
-                                            key="plan"
-                                            steps={item.data.steps}
-                                            title={item.data.title}
-                                            isLast={isLast}
-                                        />
-                                    );
-                                }
-
-                                if (item.type === "tool") {
-                                    return (
-                                        <ToolRow
-                                            key={item.data.id || idx}
-                                            tc={item.data}
-                                            isExpanded={expandedToolId === item.data.id}
-                                            onToggle={() => toggleTool(item.data.id)}
-                                            isLast={isLast}
-                                        />
-                                    );
-                                }
-
-                                if (item.type === "subagent-progress") {
-                                    return (
-                                        <div
-                                            key={`progress-${item.data.toolCallId}-${item.data.timestamp}-${idx}`}
-                                            style={{
-                                                marginLeft: 20,
-                                                backgroundColor: "#faf9f7",
-                                                border: "1px solid #e8e6d9",
-                                                borderRadius: 8,
-                                                padding: 12,
-                                                marginBottom: 12,
-                                            }}
-                                        >
-                                            <SubAgentProgressItem
-                                                event={item.data}
+                                    if (item.type === "thought") {
+                                        return (
+                                            <ThoughtItem
+                                                key={item.data.id}
+                                                content={item.data.content}
+                                                isLive={item.data.isLive}
                                                 isLast={isLast}
                                             />
-                                        </div>
-                                    );
-                                }
+                                        );
+                                    }
 
-                                if (item.type === "timeline-branch") {
-                                    return (
-                                        <TimelineBranchItem
-                                            key={item.data.id}
-                                            branch={item.data}
-                                            isLast={isLast}
-                                            onToggleCollapse={toggleBranchCollapse}
-                                            onShowTooltip={showTooltip}
-                                            onHideTooltip={hideTooltip}
-                                        />
-                                    );
-                                }
+                                    if (item.type === "plan") {
+                                        return (
+                                            <PlanItem
+                                                key="plan"
+                                                steps={item.data.steps}
+                                                title={item.data.title}
+                                                isLast={isLast}
+                                            />
+                                        );
+                                    }
 
-                                return null;
-                            })}
-                        </div>
+                                    if (item.type === "tool") {
+                                        return (
+                                            <ToolRow
+                                                key={item.data.id || idx}
+                                                tc={item.data}
+                                                isExpanded={expandedToolId === item.data.id}
+                                                onToggle={() => toggleTool(item.data.id)}
+                                                isLast={isLast}
+                                            />
+                                        );
+                                    }
+
+                                    if (item.type === "subagent-progress") {
+                                        return (
+                                            <div
+                                                key={`progress-${item.data.toolCallId}-${item.data.timestamp}-${idx}`}
+                                                style={{
+                                                    marginLeft: 20,
+                                                    backgroundColor: "#faf9f7",
+                                                    border: "1px solid #e8e6d9",
+                                                    borderRadius: 8,
+                                                    padding: 12,
+                                                    marginBottom: 12,
+                                                }}
+                                            >
+                                                <SubAgentProgressItem
+                                                    event={item.data}
+                                                    isLast={isLast}
+                                                />
+                                            </div>
+                                        );
+                                    }
+
+                                    if (item.type === "timeline-branch") {
+                                        return (
+                                            <TimelineBranchItem
+                                                key={item.data.id}
+                                                branch={item.data}
+                                                isLast={isLast}
+                                                onToggleCollapse={toggleBranchCollapse}
+                                                onShowTooltip={showTooltip}
+                                                onHideTooltip={hideTooltip}
+                                                onViewTimeline={(branchId) => setActiveSubAgentId(branchId)}
+                                            />
+                                        );
+                                    }
+
+                                    return null;
+                                })}
+                            </div>
+                        )}
                     </motion.div>
                 )}
             </AnimatePresence>

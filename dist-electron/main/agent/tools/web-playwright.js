@@ -6,13 +6,35 @@ function loadPlaywright() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('playwright');
 }
+const ANTI_DETECTION_ARGS = [
+    '--disable-infobars',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-default-apps',
+    '--no-first-run',
+    '--disable-translate',
+    '--disable-features=ChromeWhatsNewUI',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--disable-component-update',
+    '--safebrowsing-disable-auto-update',
+    '--disable-hang-monitor',
+    '--disable-popup-blocking',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability',
+    '--lang=en-US',
+];
 /**
  * Launches Chromium, searches multiple engines (Brave, DuckDuckGo Lite) and returns results.
  * Implements randomized user agents and delays to avoid bot detection/captchas.
  */
 async function playwrightWebSearch(query, headless) {
     const { chromium } = loadPlaywright();
-    const browser = await chromium.launch({ headless }).catch((err) => {
+    const browser = await chromium.launch({
+        headless,
+        channel: 'chrome',
+        args: ANTI_DETECTION_ARGS,
+    }).catch((err) => {
         throw new Error(`Playwright failed to launch Chromium for web search: ${err.message}`);
     });
     const userAgents = [
@@ -31,8 +53,30 @@ async function playwrightWebSearch(query, headless) {
         try {
             console.log(`[PlaywrightSearch] Trying Brave Search for: ${query}`);
             const searchUrl = `https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web`;
-            await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 20000 });
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Detect Brave captcha/human verification
+            const captchaDetected = await page.evaluate(() => {
+                const title = document.title || '';
+                const bodyText = document.body?.innerText || '';
+                const captchaIndicators = [
+                    'Confirm you are human',
+                    "Confirm you're a human",
+                    'CAPTCHA',
+                    'captcha',
+                    'verify you are human',
+                    'security check',
+                    'challenge',
+                    'hCaptcha',
+                    'cf-challenge',
+                ];
+                return captchaIndicators.some(indicator => title.toLowerCase().includes(indicator.toLowerCase()) ||
+                    bodyText.toLowerCase().includes(indicator.toLowerCase()));
+            });
+            if (captchaDetected) {
+                console.log(`[PlaywrightSearch] Brave Search captcha detected, switching to DuckDuckGo...`);
+                throw new Error('Brave captcha detected');
+            }
             const results = await page.evaluate(() => {
                 const items = [];
                 // Brave Search organic web results
@@ -53,10 +97,16 @@ async function playwrightWebSearch(query, headless) {
             });
             if (results.length > 0)
                 return results;
-            console.log(`[PlaywrightSearch] Brave Search returned 0 results (possible captcha), falling back...`);
+            console.log(`[PlaywrightSearch] Brave Search returned 0 results, falling back...`);
         }
         catch (err) {
-            console.log(`[PlaywrightSearch] Brave Search failed: ${err instanceof Error ? err.message : String(err)}`);
+            const errMsg = err instanceof Error ? err.message : String(err);
+            if (errMsg.includes('captcha')) {
+                console.log(`[PlaywrightSearch] Brave captcha detected, immediately switching to DuckDuckGo...`);
+            }
+            else {
+                console.log(`[PlaywrightSearch] Brave Search failed: ${errMsg}`);
+            }
         }
         // 2. FALLBACK TO DUCKDUCKGO LITE (very bot-friendly, no JS needed)
         try {
@@ -107,7 +157,11 @@ async function playwrightWebSearch(query, headless) {
  */
 async function playwrightWebCrawl(url, headless) {
     const { chromium } = loadPlaywright();
-    const browser = await chromium.launch({ headless }).catch((err) => {
+    const browser = await chromium.launch({
+        headless,
+        channel: 'chrome',
+        args: ANTI_DETECTION_ARGS,
+    }).catch((err) => {
         throw new Error(`Playwright failed to launch Chromium for web crawl: ${err.message}`);
     });
     try {

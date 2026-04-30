@@ -1,6 +1,6 @@
 /**
  * Navis — Deep Bug Fix Verification Tests
- * Verifies that all 13 identified bugs have been fixed.
+ * Verifies that all identified bugs have been fixed.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -12,36 +12,34 @@ function read(file: string): string {
   return fs.readFileSync(path.join(NAVIS_DIR, file), 'utf-8');
 }
 
-describe('Fix 1: CSS escaping is used inside page.evaluate', () => {
-  it('escapeCss() is defined inside the evaluate callback', () => {
+describe('Fix 1: ariaSnapshot used for element capture', () => {
+  it('element-capture.ts uses page.ariaSnapshot({ mode: "ai" })', () => {
     const src = read('element-capture.ts');
-    const evalStart = src.indexOf('page.evaluate(({ maxEl');
-    const evalEnd = src.indexOf('}, { maxEl: maxElements');
-    expect(evalStart).toBeGreaterThan(-1);
-    expect(evalEnd).toBeGreaterThan(evalStart);
-    const evalBody = src.slice(evalStart, evalEnd);
-    expect(evalBody).toContain('function escapeCss(');
+    expect(src).toContain('ariaSnapshot');
+    expect(src).toContain("mode: 'ai'");
   });
 
-  it('getUniqueSelector() dead code is removed', () => {
+  it('element-capture.ts exports parseRefs helper', () => {
     const src = read('element-capture.ts');
-    const moduleBody = src.slice(0, src.indexOf('export async function captureInteractiveElements'));
-    expect(moduleBody).not.toContain('function getUniqueSelector(');
+    expect(src).toContain('export function parseRefs');
   });
 });
 
-describe('Fix 2: nth property is in CapturedElement interface', () => {
-  it('CapturedElement interface has nth property', () => {
-    const src = read('element-capture.ts');
-    const interfaceBlock = src.match(/export interface CapturedElement[\s\S]*?\n\}/);
-    expect(interfaceBlock).toBeDefined();
-    expect(interfaceBlock![0]).toContain('nth');
+describe('Fix 2: aria-ref based element targeting', () => {
+  it('actions.ts uses aria-ref locators instead of index-based selectors', () => {
+    const src = read('actions.ts');
+    expect(src).toContain('aria-ref=');
+    expect(src).toContain('page.locator');
   });
 
-  it('actions.ts no longer casts to any for nth', () => {
+  it('click_element action uses ref parameter', () => {
     const src = read('actions.ts');
-    // Still uses (el as any).nth but interface now has nth, so cast is acceptable
-    expect(src).toContain('nth');
+    expect(src).toContain('args: { ref: string }');
+  });
+
+  it('input_text action uses ref parameter', () => {
+    const src = read('actions.ts');
+    expect(src).toContain('args: { ref: string; text: string }');
   });
 });
 
@@ -121,10 +119,16 @@ describe('Fix 9: callAI checks error type before retrying', () => {
   });
 });
 
-describe('Fix 10: isDuplicate includes nth in dedup key', () => {
-  it('isDuplicate checks selector + nth + text', () => {
-    const src = read('element-capture.ts');
-    expect(src).toContain('e.selector === sel && e.nth === nth && e.text === text');
+describe('Fix 10: JSON schema uses ref instead of index', () => {
+  it('click_element schema uses ref property', () => {
+    const src = read('orchestrator.ts');
+    expect(src).toContain("ref: { type: 'string' }");
+  });
+
+  it('input_text schema uses ref property', () => {
+    const src = read('orchestrator.ts');
+    const inputTextMatch = src.match(/input_text[\s\S]*?ref[\s\S]*?text/);
+    expect(inputTextMatch).toBeDefined();
   });
 });
 

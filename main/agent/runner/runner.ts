@@ -333,12 +333,11 @@ export class AgentRunner {
             parentHistory
           });
 
-          const children = await spawner.waitForCompletion(this.currentConversationId || 'default', timeout, agentType as any);
-          const myChild = children.find(c => c.agentId === spawnedAgent.agentId);
-          if (myChild && myChild.result) {
-            return { success: true, output: `Sub-agent [${agentType}] (ID: ${spawnedAgent.agentId}):\n${myChild.result}` };
+          const child = await spawner.waitForAgent(spawnedAgent.agentId, timeout);
+          if (child && child.result) {
+            return { success: true, output: `Sub-agent [${agentType}] (ID: ${spawnedAgent.agentId}):\n${child.result}` };
           }
-          return { success: false, output: `Sub-agent failed: ${myChild?.error || 'Unknown error'}` };
+          return { success: false, output: `Sub-agent failed: ${child?.error || 'Unknown error'}` };
         } catch (err) {
           return { success: false, output: `Spawn failed: ${err}` };
         }

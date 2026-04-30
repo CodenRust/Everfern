@@ -7,12 +7,11 @@ function read(file: string): string {
   return fs.readFileSync(path.join(NAVIS_DIR, file), 'utf-8');
 }
 
-describe('Fix: .nth() used instead of .first() for click/input', () => {
-  it('actions.ts uses nth() to target correct element by index', () => {
+describe('Fix: aria-ref based element targeting', () => {
+  it('actions.ts uses aria-ref locator instead of nth/first', () => {
     const src = read('actions.ts');
-    expect(src).toContain('.nth(');
-    expect(src).toContain('.first()');
-    expect(src).toContain('nth > 0');
+    expect(src).toContain('aria-ref=');
+    expect(src).toContain('page.locator');
   });
 });
 
@@ -34,7 +33,6 @@ describe('Fix: wait before first capture', () => {
   it('orchestrator waits for page load before capturing elements', () => {
     const src = read('orchestrator.ts');
     expect(src).toContain('waitForLoadState');
-    expect(src).toContain('setTimeout');
   });
 });
 
@@ -53,12 +51,16 @@ describe('Fix: getTabs() fetches actual titles', () => {
   });
 });
 
-describe('Fix: CSS selector escaping', () => {
-  it('element-capture.ts escapes CSS special characters', () => {
+describe('Fix: ariaSnapshot for element capture', () => {
+  it('element-capture.ts uses page.ariaSnapshot', () => {
     const src = read('element-capture.ts');
-    expect(src).toContain('escapeCss');
-    expect(src).toContain('replace');
-    expect(src).toContain('\\\\');
+    expect(src).toContain('ariaSnapshot');
+    expect(src).toContain("mode: 'ai'");
+  });
+
+  it('element-capture.ts exports parseRefs helper', () => {
+    const src = read('element-capture.ts');
+    expect(src).toContain('export function parseRefs');
   });
 });
 
@@ -83,14 +85,6 @@ describe('Fix: open_tab switches to new tab', () => {
     const openTabFn = src.match(/async function executeOpenTab[\s\S]*?\n\}/);
     expect(openTabFn).toBeDefined();
     expect(openTabFn![0]).toContain('bringToFront()');
-  });
-});
-
-describe('Fix: unique selectors with nth-of-type', () => {
-  it('element-capture uses nth-of-type for duplicate selectors', () => {
-    const src = read('element-capture.ts');
-    expect(src).toContain(':nth-of-type(');
-    expect(src).toContain('selectorCounts');
   });
 });
 

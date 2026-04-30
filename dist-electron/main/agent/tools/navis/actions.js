@@ -7,15 +7,15 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeAction = executeAction;
-async function executeAction(actionName, args, page, session, elements, logger, step, maxSteps) {
+async function executeAction(actionName, args, page, session, logger, step, maxSteps) {
     try {
         switch (actionName) {
             case 'go_to_url':
                 return await executeGoToUrl(args, page, logger, step, maxSteps);
             case 'click_element':
-                return await executeClickElement(args, page, elements, session, logger, step, maxSteps);
+                return await executeClickElement(args, page, session, logger, step, maxSteps);
             case 'input_text':
-                return await executeInputText(args, page, elements, session, logger, step, maxSteps);
+                return await executeInputText(args, page, session, logger, step, maxSteps);
             case 'scroll_down':
                 return await executeScrollDown(page, logger, step, maxSteps);
             case 'scroll_up':
@@ -47,33 +47,34 @@ async function executeGoToUrl(args, page, logger, step, maxSteps) {
     await page.goto(args.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return { success: true, message: `Navigated to ${args.url}`, stateChanged: true };
 }
-async function executeClickElement(args, page, elements, session, logger, step, maxSteps) {
-    const el = elements.find((e) => e.index === args.index);
-    if (!el)
-        return { success: false, message: `Element index ${args.index} not found`, stateChanged: false };
-    if (!el.isInteractive)
-        return { success: false, message: `Element ${args.index} is not interactive`, stateChanged: false };
-    await session.highlightElement({ x: el.x, y: el.y, width: el.width, height: el.height });
-    const locator = page.locator(el.selector);
-    const nth = el.nth || 0;
-    await (nth > 0 ? locator.nth(nth) : locator.first()).click({ timeout: 5000 });
-    logger?.elementClick(step, maxSteps, el.text, el.selector, { x: el.x, y: el.y });
-    await session.setOverlayStatus(`Clicked "${truncate(el.text, 20)}"`);
-    return { success: true, message: `Clicked: ${el.text}`, stateChanged: true };
+async function executeClickElement(args, page, session, logger, step, maxSteps) {
+    if (!args.ref)
+        return { success: false, message: 'Missing ref parameter', stateChanged: false };
+    const locator = page.locator(`aria-ref=${args.ref}`);
+    const name = await locator.getAttribute('aria-label').catch(() => '') || await locator.textContent().catch(() => '') || args.ref;
+    const box = await locator.boundingBox().catch(() => null);
+    if (box)
+        await session.highlightElement(box);
+    await locator.click({ timeout: 5000 });
+    logger?.elementClick(step, maxSteps, truncate(String(name), 40), `aria-ref=${args.ref}`);
+    await session.setOverlayStatus(`Clicked "${truncate(String(name), 20)}"`);
+    return { success: true, message: `Clicked: ${name}`, stateChanged: true };
 }
-async function executeInputText(args, page, elements, session, logger, step, maxSteps) {
-    const el = elements.find((e) => e.index === args.index);
-    if (!el)
-        return { success: false, message: `Element index ${args.index} not found`, stateChanged: false };
-    await session.highlightElement({ x: el.x, y: el.y, width: el.width, height: el.height });
-    const locator = page.locator(el.selector);
-    const nth = el.nth || 0;
-    const target = nth > 0 ? locator.nth(nth) : locator.first();
-    await target.clear({ timeout: 5000 });
-    await target.pressSequentially(args.text, { delay: 10 });
-    logger?.elementInput(step, maxSteps, el.text, args.text);
+async function executeInputText(args, page, session, logger, step, maxSteps) {
+    if (!args.ref)
+        return { success: false, message: 'Missing ref parameter', stateChanged: false };
+    if (!args.text)
+        return { success: false, message: 'Missing text parameter', stateChanged: false };
+    const locator = page.locator(`aria-ref=${args.ref}`);
+    const name = await locator.getAttribute('aria-label').catch(() => '') || await locator.getAttribute('placeholder').catch(() => '') || args.ref;
+    const box = await locator.boundingBox().catch(() => null);
+    if (box)
+        await session.highlightElement(box);
+    await locator.clear({ timeout: 5000 });
+    await locator.pressSequentially(args.text, { delay: 2 });
+    logger?.elementInput(step, maxSteps, truncate(String(name), 30), args.text);
     await session.setOverlayStatus(`Typing "${truncate(args.text, 20)}"`);
-    return { success: true, message: `Entered text: ${el.text}`, stateChanged: false };
+    return { success: true, message: `Entered text: ${name}`, stateChanged: false };
 }
 async function executeScrollDown(page, logger, step, maxSteps) {
     await page.evaluate(() => window.scrollBy(0, window.innerHeight));
@@ -104,13 +105,17 @@ async function executeOpenTab(args, session, logger, step, maxSteps) {
     return { success: true, message: `Opened new tab${args.url ? ': ' + args.url : ''}`, stateChanged: true };
 }
 async function executeSwitchTab(args, session, logger, step, maxSteps) {
-    const pages = session.allPages;
-    if (args.index < 0 || args.index >= pages.length) {
-        return { success: false, message: `Tab index ${args.index} out of range`, stateChanged: false };
+    if (args.target) {
+        await session.switchToTab(args.target);
+        logger?.tabChange(step, maxSteps, `switched to tab matching "${args.target}"`);
+        return { success: true, message: `Switched to tab matching "${args.target}"`, stateChanged: true };
     }
-    await session.switchToTab(args.index);
-    logger?.tabChange(step, maxSteps, `switched to tab ${args.index}`);
-    return { success: true, message: `Switched to tab ${args.index}`, stateChanged: true };
+    if (args.index !== undefined) {
+        await session.switchToTab(args.index);
+        logger?.tabChange(step, maxSteps, `switched to tab ${args.index}`);
+        return { success: true, message: `Switched to tab ${args.index}`, stateChanged: true };
+    }
+    return { success: false, message: 'switch_tab requires index or target parameter', stateChanged: false };
 }
 async function executeCloseTab(page, session, logger, step, maxSteps) {
     if (session.allPages.length <= 1) {

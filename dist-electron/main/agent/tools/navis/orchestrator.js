@@ -35,14 +35,14 @@ exports.NAVIS_DECISION_SCHEMA = {
                 type: 'object',
                 oneOf: [
                     { properties: { go_to_url: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false } }, required: ['go_to_url'], additionalProperties: false },
-                    { properties: { click_element: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'], additionalProperties: false } }, required: ['click_element'], additionalProperties: false },
-                    { properties: { input_text: { type: 'object', properties: { index: { type: 'number' }, text: { type: 'string' } }, required: ['index', 'text'], additionalProperties: false } }, required: ['input_text'], additionalProperties: false },
+                    { properties: { click_element: { type: 'object', properties: { ref: { type: 'string' } }, required: ['ref'], additionalProperties: false } }, required: ['click_element'], additionalProperties: false },
+                    { properties: { input_text: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } }, required: ['ref', 'text'], additionalProperties: false } }, required: ['input_text'], additionalProperties: false },
                     { properties: { scroll_down: { type: 'object', additionalProperties: false } }, required: ['scroll_down'], additionalProperties: false },
                     { properties: { scroll_up: { type: 'object', additionalProperties: false } }, required: ['scroll_up'], additionalProperties: false },
                     { properties: { wait: { type: 'object', properties: { ms: { type: 'number' } }, additionalProperties: false } }, required: ['wait'], additionalProperties: false },
                     { properties: { extract_content: { type: 'object', properties: { goal: { type: 'string' } }, required: ['goal'], additionalProperties: false } }, required: ['extract_content'], additionalProperties: false },
                     { properties: { open_tab: { type: 'object', properties: { url: { type: 'string' } }, additionalProperties: false } }, required: ['open_tab'], additionalProperties: false },
-                    { properties: { switch_tab: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'], additionalProperties: false } }, required: ['switch_tab'], additionalProperties: false },
+                    { properties: { switch_tab: { type: 'object', properties: { index: { type: 'number' }, target: { type: 'string' } }, additionalProperties: false } }, required: ['switch_tab'], additionalProperties: false },
                     { properties: { close_tab: { type: 'object', additionalProperties: false } }, required: ['close_tab'], additionalProperties: false },
                     { properties: { done: { type: 'object', properties: { success: { type: 'boolean' }, text: { type: 'string' } }, required: ['success', 'text'], additionalProperties: false } }, required: ['done'], additionalProperties: false },
                 ],
@@ -102,7 +102,7 @@ class NavisOrchestrator {
         let steps = 0;
         let history = [];
         let lastResult = '';
-        let elements = [];
+        let snapshot = null;
         let lastUrl = '';
         try {
             while (steps < maxSteps) {
@@ -110,13 +110,16 @@ class NavisOrchestrator {
                 const page = this.session.page;
                 const url = page.url();
                 const title = await page.title().catch(() => 'Unknown');
-                const tabCount = (await this.session.getTabs()).length;
+                const tabs = await this.session.getTabs();
+                const tabsStr = tabs.length > 1
+                    ? tabs.map((t, i) => `  Tab ${i}: ${t.url} (${t.title})`).join('\n')
+                    : `1 tab open: ${url}`;
                 // Only re-capture if page changed or first step
-                if (url !== lastUrl || elements.length === 0) {
-                    elements = await (0, element_capture_1.captureInteractiveElements)(page);
+                if (url !== lastUrl || !snapshot) {
+                    snapshot = await (0, element_capture_1.captureInteractiveElements)(page);
                     lastUrl = url;
                 }
-                const elementsFormatted = (0, element_capture_1.formatElementsForPrompt)(elements);
+                const elementsFormatted = (0, element_capture_1.formatElementsForPrompt)(snapshot.raw);
                 // Compress history after 8 steps to keep context small
                 const historyStr = history.length > 8
                     ? `[${history.length - 8} earlier steps]...` + history.slice(-8).join('\n')
@@ -124,8 +127,8 @@ class NavisOrchestrator {
                 const inputContext = [
                     `Task: ${task}`,
                     `History: ${historyStr}`,
-                    `URL: ${url} (${title})`,
-                    `Tabs: ${tabCount}`,
+                    `Current Tab: #${tabs.findIndex(t => t.url === url)} — ${url} (${title})`,
+                    `Open Tabs (${tabs.length}):\n${tabsStr}`,
                     `Elements:`,
                     elementsFormatted,
                     lastResult ? `Last: ${lastResult}` : '',
@@ -134,7 +137,7 @@ class NavisOrchestrator {
                     .replace(/\{\{max_actions\}\}/g, String(maxActionsPerStep));
                 const nextPrompt = NEXT_STEP_PROMPT
                     .replace(/\{url_placeholder\}/g, ` (${url})`)
-                    .replace(/\{tabs_placeholder\}/g, ` (${tabCount})`)
+                    .replace(/\{tabs_placeholder\}/g, ` (${tabs.length} tabs open)`)
                     .replace(/\{results_placeholder\}/g, lastResult ? ` (${lastResult})` : ' (None)')
                     .replace(/\{content_above_placeholder\}/g, '')
                     .replace(/\{content_below_placeholder\}/g, '');
@@ -150,7 +153,7 @@ class NavisOrchestrator {
                 for (const actionObj of actions) {
                     const actionName = Object.keys(actionObj)[0];
                     const actionArgs = actionObj[actionName];
-                    const result = await (0, actions_1.executeAction)(actionName, actionArgs, this.session.page, this.session, elements, this.logger, steps, maxSteps);
+                    const result = await (0, actions_1.executeAction)(actionName, actionArgs, this.session.page, this.session, this.logger, steps, maxSteps);
                     lastResult = result.message;
                     if (actionName === 'done') {
                         this.logger.taskComplete(result.success, steps, lastResult);
@@ -170,7 +173,9 @@ class NavisOrchestrator {
                     if (currentUrl !== lastUrl) {
                         await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => { });
                     }
-                    await this.waitForNetworkQuiet(page, 150);
+                    else {
+                        await new Promise((r) => setTimeout(r, 100));
+                    }
                 }
                 this.logger.stepComplete(steps, maxSteps, lastResult);
                 history.push(`${decision.current_state?.next_goal} → ${lastResult}`);
@@ -187,17 +192,6 @@ class NavisOrchestrator {
         }
         finally {
             await this.session.close();
-        }
-    }
-    async waitForNetworkQuiet(page, minMs) {
-        const start = Date.now();
-        try {
-            await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => { });
-        }
-        catch { }
-        const elapsed = Date.now() - start;
-        if (elapsed < minMs) {
-            await new Promise((r) => setTimeout(r, minMs - elapsed));
         }
     }
     async callAI(systemPrompt, inputContext, nextStepPrompt) {

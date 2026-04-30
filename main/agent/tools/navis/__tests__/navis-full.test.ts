@@ -28,8 +28,9 @@ describe('Navis - JSON Schema', { timeout: 30000 }, () => {
     expect(actionNames).toContain('open_tab');
     expect(actionNames).toContain('switch_tab');
     expect(actionNames).toContain('close_tab');
+    expect(actionNames).toContain('solve_captcha');
     expect(actionNames).toContain('done');
-    expect(actionNames).toHaveLength(11);
+    expect(actionNames).toHaveLength(12);
   });
 });
 
@@ -81,23 +82,31 @@ describe('Navis - BrowserSession', () => {
 
 describe('Navis - ElementCapture', () => {
   it('should export capture functions', async () => {
-    const { captureInteractiveElements, formatElementsForPrompt } = await import('../element-capture');
+    const { captureInteractiveElements, formatElementsForPrompt, parseRefs } = await import('../element-capture');
     
     expect(captureInteractiveElements).toBeDefined();
     expect(formatElementsForPrompt).toBeDefined();
+    expect(parseRefs).toBeDefined();
   });
 
-  it('should format elements in NAVIS.md format', async () => {
+  it('should format aria snapshot as-is for prompt', async () => {
     const { formatElementsForPrompt } = await import('../element-capture');
     
-    const elements = [
-      { index: 0, tag: 'button', role: 'button', text: 'Submit', selector: 'button', visible: true, x: 0, y: 0, width: 100, height: 30, isInteractive: true },
-      { index: 1, tag: 'h1', role: '', text: 'Welcome', selector: 'h1', visible: true, x: 0, y: 0, width: 200, height: 40, isInteractive: false },
-    ];
+    const snapshot = '- button "Submit" [ref=e1]\n- textbox "Email" [ref=e2]\n- heading "Welcome" [level=1]';
+    const formatted = formatElementsForPrompt(snapshot);
+    expect(formatted).toBe(snapshot);
+  });
+
+  it('should parse refs from aria snapshot', async () => {
+    const { parseRefs } = await import('../element-capture');
     
-    const formatted = formatElementsForPrompt(elements as any);
-    expect(formatted).toContain('[0]<button>Submit</button>');
-    expect(formatted).toContain('[]<h1>Welcome</h1>');
+    const snapshot = '- button "Submit" [ref=e1]\n- textbox "Email" [ref=e2]\n- heading "Welcome" [level=1]';
+    const refs = parseRefs(snapshot);
+    
+    expect(refs.size).toBe(2);
+    expect(refs.get('e1')).toEqual({ role: 'button', name: 'Submit' });
+    expect(refs.get('e2')).toEqual({ role: 'textbox', name: 'Email' });
+    expect(refs.has('e1')).toBe(true);
   });
 });
 
@@ -115,7 +124,6 @@ describe('Navis - ActionExecutor', () => {
       {},
       null as any,
       null as any,
-      [],
     );
     
     expect(result.success).toBe(false);
