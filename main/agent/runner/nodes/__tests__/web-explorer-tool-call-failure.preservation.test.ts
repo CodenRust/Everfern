@@ -105,16 +105,16 @@ describe('Preservation — Other specialized agents nudge messages reference com
 
   /**
    * Property-based test: for all nodeName values in ['coding_specialist', 'data_analyst',
-   * 'computer_use_agent'], the nudge message must NOT contain 'web_search' or 'browser_use'
+   * 'computer_use_agent'], the nudge message must NOT contain 'web_search' or 'navis'
    * as the primary tool hint (those are web_explorer-specific tools).
    *
    * On unfixed code: the nudge message is a single hardcoded string with 'computer_use'
-   * and does NOT contain 'web_search' or 'browser_use' — this PASSES.
-   * After fix: the nudge for these agents must still not reference web_search/browser_use.
+   * and does NOT contain 'web_search' or 'navis' — this PASSES.
+   * After fix: the nudge for these agents must still not reference web_search/navis.
    *
    * **Validates: Requirements 3.4**
    */
-  it('property: nudge section does not exclusively reference web_search/browser_use for all agents', () => {
+  it('property: nudge section does not exclusively reference web_search/navis for all agents', () => {
     const source = fs.readFileSync(AGENT_RUNTIME_PATH, 'utf-8');
 
     const agentNames = ['coding_specialist', 'data_analyst', 'computer_use_agent'] as const;
@@ -124,7 +124,7 @@ describe('Preservation — Other specialized agents nudge messages reference com
         fc.constantFrom(...agentNames),
         (nodeName) => {
           // The nudge section should contain computer_use (for these agents)
-          // and should NOT be exclusively about web_search/browser_use
+          // and should NOT be exclusively about web_search/navis
           const nudgeSection = source.match(
             /isSpecializedAgent[\s\S]{0,3000}nudgeMsg[\s\S]{0,1000}/
           );
@@ -137,7 +137,7 @@ describe('Preservation — Other specialized agents nudge messages reference com
             // computer_use must still be referenced (for computer_use_agent and as default)
             expect(nudgeSectionText).toContain('computer_use');
 
-            // The nudge section must not be ONLY about web_search/browser_use
+            // The nudge section must not be ONLY about web_search/navis
             // (i.e., computer_use must still appear for non-web_explorer agents)
             const hasComputerUse = nudgeSectionText.includes('computer_use');
             expect(hasComputerUse).toBe(true);
@@ -214,7 +214,7 @@ describe('Preservation — Successful tool call path returns pendingToolCalls fr
 
     // The main return statement (not the early-return fallback) must use response.toolCalls
     // This ensures successful tool call paths are unaffected
-    const toolCallNames = ['web_search', 'browser_use', 'web_fetch', 'computer_use', 'read_file', 'write_file'] as const;
+    const toolCallNames = ['web_search', 'navis', 'web_fetch', 'computer_use', 'read_file', 'write_file'] as const;
 
     fc.assert(
       fc.property(
@@ -408,21 +408,21 @@ describe('Preservation — workflowPhase === browse with 2+ results attempts sub
 
   /**
    * Observation: The browse phase has a fallback path that returns a hardcoded
-   * browser_use call when subagent spawning fails or searchResults.length <= 1.
+   * navis call when subagent spawning fails or searchResults.length <= 1.
    * This fallback must remain unchanged.
    *
    * **Validates: Requirements 3.2**
    */
-  it('should have a browser_use fallback in the browse phase', () => {
+  it('should have a navis fallback in the browse phase', () => {
     const source = fs.readFileSync(WEB_EXPLORER_PATH, 'utf-8');
 
     // The browse block must exist
     const browseIdx = source.indexOf("if (workflowPhase === 'browse')");
     expect(browseIdx).toBeGreaterThan(-1);
 
-    // The browser_use fallback return must exist after the browse block
+    // The navis fallback return must exist after the browse block
     // (it's the last return inside the browse block)
-    const browserUseFallbackIdx = source.indexOf("name: 'browser_use'", browseIdx);
+    const browserUseFallbackIdx = source.indexOf("name: 'navis'", browseIdx);
     expect(browserUseFallbackIdx).toBeGreaterThan(browseIdx);
 
     // The fallback must set pendingToolCalls
@@ -543,7 +543,7 @@ describe('Preservation — Graph edge routing logic is preserved for non-bug inp
       return 'web_explorer';
     }
 
-    const toolNames = ['web_search', 'browser_use', 'web_fetch', 'computer_use', 'read_file'] as const;
+    const toolNames = ['web_search', 'navis', 'web_fetch', 'computer_use', 'read_file'] as const;
 
     fc.assert(
       fc.property(

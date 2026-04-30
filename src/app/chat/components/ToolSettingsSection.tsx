@@ -21,11 +21,13 @@ interface ToolConfig {
 interface ToolSettingsConfig {
     webSearch: ToolConfig;
     webCrawl: ToolConfig;
+    browserUse: ToolConfig;
 }
 
 const DEFAULT_TOOL_SETTINGS: ToolSettingsConfig = {
     webSearch: { mode: 'local', headless: true, apiKey: '' },
     webCrawl: { mode: 'local', headless: true, apiKey: '' },
+    browserUse: { mode: 'local', headless: false, apiKey: '' },
 };
 
 // ── Shared sub-components (matching SettingsPage style) ───────────────────────
@@ -211,7 +213,15 @@ export function ToolSettingsSection() {
             try {
                 const stored = await (window as any).electronAPI?.toolSettings?.get?.();
                 if (stored) {
-                    setConfig(stored);
+                    // Merge with defaults to ensure all keys (like browserUse) exist
+                    const merged = {
+                        ...DEFAULT_TOOL_SETTINGS,
+                        ...stored,
+                        webSearch: { ...DEFAULT_TOOL_SETTINGS.webSearch, ...(stored.webSearch || {}) },
+                        webCrawl: { ...DEFAULT_TOOL_SETTINGS.webCrawl, ...(stored.webCrawl || {}) },
+                        browserUse: { ...DEFAULT_TOOL_SETTINGS.browserUse, ...(stored.browserUse || {}) },
+                    };
+                    setConfig(merged);
                 }
             } catch (e) {
                 console.error('[ToolSettingsSection] Failed to load config:', e);
@@ -262,6 +272,13 @@ export function ToolSettingsSection() {
                 apiLabel="Firecrawl API Key"
                 config={config.webCrawl}
                 onChange={toolConfig => handleChange('webCrawl', toolConfig)}
+            />
+            <ToolConfigPanel
+                title="Browser Research"
+                icon={<WrenchScrewdriverIcon width={18} height={18} />}
+                apiLabel="N/A"
+                config={config.browserUse}
+                onChange={toolConfig => handleChange('browserUse', toolConfig)}
             />
 
             <div style={{ padding: '12px 16px', backgroundColor: '#f9f9f8', border: '1px solid #e8e6d9', borderRadius: 12 }}>

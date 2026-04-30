@@ -47,6 +47,7 @@ const history_1 = require("../../store/history");
 const graph_1 = require("./graph");
 const skills_loader_1 = require("./skills-loader");
 const tools_manager_1 = require("./tools_manager");
+const prompt_sync_1 = require("../../lib/prompt-sync");
 const telemetry_logger_1 = require("../helpers/telemetry-logger");
 const state_manager_1 = require("./state-manager");
 const abort_manager_1 = require("./abort-manager");
@@ -150,24 +151,40 @@ class AgentRunner {
         });
     }
     createSpawnAgentTool() {
+        const AGENT_TYPE_PROMPTS = {
+            'coding-specialist': 'coding-specialist.md',
+            'web-explorer': 'web-explorer.md',
+            'data-analyst': 'data-analyst.md',
+            'computer-use': 'computer-use.md',
+        };
+        const AGENT_TYPE_TIMEOUT = {
+            'web-explorer': 300000,
+            'coding-specialist': 180000,
+            'computer-use': 180000,
+            'data-analyst': 180000,
+            'generic': 120000,
+        };
         return {
             name: 'spawn_agent',
-            description: 'AGI: Launch parallel sub-agents for complex tasks. Use for: multiple files to process, research on multiple topics, independent operations that can run simultaneously.',
+            description: 'Launch a specialized sub-agent for parallel/independent tasks. Use agent_type to pick the right specialist. Keep nesting to 2 levels max.',
             parameters: {
                 type: 'object',
                 properties: {
-                    task: { type: 'string', description: 'The self-contained task for the sub-agent to accomplish.' },
-                    agent_id: { type: 'string', description: 'Resume an existing agent by ID (optional).' },
+                    task: { type: 'string', description: 'Self-contained task for the sub-agent to accomplish.' },
+                    agent_type: { type: 'string', description: 'Type of specialist agent. Options: generic, coding-specialist, web-explorer, data-analyst, computer-use.', enum: ['generic', 'coding-specialist', 'web-explorer', 'data-analyst', 'computer-use'] },
+                    context: { type: 'string', description: 'Additional background information or constraints for the task.' },
                     max_depth: { type: 'number', description: 'Maximum spawn depth (default: 2, max: 3)' }
                 },
                 required: ['task']
             },
             execute: async (args, onUpdate, emitEvent, toolCallId) => {
                 const task = args.task;
-                const agentId = args.agent_id || crypto.randomUUID();
+                const agentType = args.agent_type || 'generic';
+                const context = args.context || '';
                 const maxDepth = Math.min(args.max_depth || 2, 3);
-                onUpdate?.(`AGI: Spawning sub-agent for: ${task.substring(0, 50)}...`);
-                // Start sub-agent timeline on frontend
+                const agentId = crypto.randomUUID();
+                const timeout = AGENT_TYPE_TIMEOUT[agentType] ?? 120000;
+                onUpdate?.(`Spawning ${agentType} sub-agent for: ${task.substring(0, 60)}...`);
                 if (emitEvent && toolCallId) {
                     emitEvent({
                         type: 'subagent-progress',
@@ -177,45 +194,41 @@ class AgentRunner {
                             type: 'step',
                             toolCallId,
                             timestamp: new Date().toISOString(),
-                            content: `Specialized Agent spawned: ${task.substring(0, 60)}...`
+                            content: `${agentType} agent spawned: ${task.substring(0, 80)}...`
                         }
                     });
                 }
                 try {
-                    // Load parent conversation history
                     let parentHistory = [];
                     try {
                         const chatHistoryStore = new history_1.ChatHistoryStore();
                         const fullConversation = await chatHistoryStore.load(this.currentConversationId || 'default');
                         if (fullConversation && fullConversation.messages.length > 0) {
-                            // Reconstruct full history including tool calls
-                            // Use empty string as currentUserInput since we're not adding a new message
                             const reconstructed = reconstructFullHistory(fullConversation.messages, '');
-                            // Apply context window cap: limit to most recent 20 turns (40 messages max)
                             parentHistory = reconstructed.slice(-40);
-                            console.log(`[SubagentSpawn] Loaded ${parentHistory.length} messages from parent conversation`);
+                            console.log(`[SubagentSpawn] Loaded ${parentHistory.length} messages from parent`);
                         }
                     }
                     catch (historyErr) {
-                        // If history loading fails, fall back to empty array (current behavior)
-                        console.warn('[SubagentSpawn] Failed to load parent history, continuing with empty history:', historyErr);
+                        console.warn('[SubagentSpawn] Failed to load parent history:', historyErr);
                         parentHistory = [];
+                    }
+                    let systemPrompt;
+                    const promptFile = AGENT_TYPE_PROMPTS[agentType];
+                    if (promptFile) {
+                        systemPrompt = (0, prompt_sync_1.loadPrompt)(promptFile) || undefined;
                     }
                     const { getSubagentSpawner } = await Promise.resolve().then(() => __importStar(require('./subagent-spawn')));
                     const spawner = getSubagentSpawner();
                     spawner.setRunner({
-                        run: async (t, h, m) => {
+                        run: async (t, h, m, subSystemPrompt) => {
                             const subRunner = new AgentRunner(this.client, this.config);
                             subRunner.skills = this.skills;
                             const clonedHistory = [...h];
                             let lastResponse = '';
                             let toolCalls = [];
-                            const RESEARCH_PATTERN = /compile.*list|top \d+|find the best|comprehensive list|compare|best.*bots|best.*tools|best.*products/i;
-                            const parentIsResearch = this.currentIntent === 'research';
-                            const taskIsResearch = RESEARCH_PATTERN.test(t);
-                            const enrichedTask = (parentIsResearch || taskIsResearch)
-                                ? `[RESEARCH TASK - USE WEB SEARCH]\n${t}`
-                                : t;
+                            const effectivePrompt = subSystemPrompt || systemPrompt;
+                            const enrichedTask = effectivePrompt ? `${effectivePrompt}\n\n---\n\nTASK: ${t}` : t;
                             const stream = subRunner.runStream(enrichedTask, clonedHistory, m, `sub:${agentId}`);
                             for await (const event of stream) {
                                 if (event.type === 'done')
@@ -266,15 +279,15 @@ class AgentRunner {
                                 }
                                 if (event.type === 'thought') {
                                     if (event.content.includes('\n'))
-                                        onUpdate?.(`[Sub-Agent] 🤔 ${event.content.trim().split('\n').pop()}`);
+                                        onUpdate?.(`[Sub-Agent] ${event.content.trim().split('\n').pop()}`);
                                 }
                                 if (event.type === 'tool_start')
-                                    onUpdate?.(`[Sub-Agent] 🛠️ Starting tool: ${event.toolName}`);
+                                    onUpdate?.(`[Sub-Agent] Tool: ${event.toolName}`);
                                 if (event.type === 'tool_update')
-                                    onUpdate?.(`[Sub-Agent] ⏳ Running ${event.toolName}...`);
+                                    onUpdate?.(`[Sub-Agent] Running ${event.toolName}...`);
                                 if (event.type === 'tool_call') {
                                     toolCalls.push(event.toolCall);
-                                    onUpdate?.(`[Sub-Agent] ✅ Finished tool: ${event.toolCall.toolName}`);
+                                    onUpdate?.(`[Sub-Agent] Done: ${event.toolCall.toolName}`);
                                 }
                             }
                             if (emitEvent && toolCallId) {
@@ -301,14 +314,16 @@ class AgentRunner {
                     const spawnedAgent = await spawner.spawn({
                         parentSessionId: this.currentConversationId || 'default',
                         task,
+                        agentType: agentType,
+                        context,
                         model: this.client.model,
                         maxDepth,
                         parentHistory
                     });
-                    const children = await spawner.waitForCompletion(this.currentConversationId || 'default', 300000);
+                    const children = await spawner.waitForCompletion(this.currentConversationId || 'default', timeout, agentType);
                     const myChild = children.find(c => c.agentId === spawnedAgent.agentId);
                     if (myChild && myChild.result) {
-                        return { success: true, output: `Sub-agent (ID: ${spawnedAgent.agentId}) result:\n${myChild.result}` };
+                        return { success: true, output: `Sub-agent [${agentType}] (ID: ${spawnedAgent.agentId}):\n${myChild.result}` };
                     }
                     return { success: false, output: `Sub-agent failed: ${myChild?.error || 'Unknown error'}` };
                 }

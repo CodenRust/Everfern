@@ -20,6 +20,7 @@ import { getSkillsPath } from '../../lib/skills-sync';
 import { lookupCache, saveCache } from '../../lib/cache';
 import { globalSessionManager } from '../../acp/control-plane/manager.core';
 import { getBaseTools } from './tools_manager';
+import { loadPrompt } from '../../lib/prompt-sync';
 import { TelemetryLogger } from '../helpers/telemetry-logger';
 import { stateManager } from './state-manager';
 import { globalAbortManager, AbortError } from './abort-manager';
@@ -150,25 +151,44 @@ export class AgentRunner {
   }
 
   private createSpawnAgentTool(): AgentTool {
+    const AGENT_TYPE_PROMPTS: Record<string, string> = {
+      'coding-specialist': 'coding-specialist.md',
+      'web-explorer': 'web-explorer.md',
+      'data-analyst': 'data-analyst.md',
+      'computer-use': 'computer-use.md',
+    };
+
+    const AGENT_TYPE_TIMEOUT: Record<string, number> = {
+      'web-explorer': 300000,
+      'coding-specialist': 180000,
+      'computer-use': 180000,
+      'data-analyst': 180000,
+      'generic': 120000,
+    };
+
     return {
       name: 'spawn_agent',
-      description: 'AGI: Launch parallel sub-agents for complex tasks. Use for: multiple files to process, research on multiple topics, independent operations that can run simultaneously.',
+      description: 'Launch a specialized sub-agent for parallel/independent tasks. Use agent_type to pick the right specialist. Keep nesting to 2 levels max.',
       parameters: {
         type: 'object',
         properties: {
-          task: { type: 'string', description: 'The self-contained task for the sub-agent to accomplish.' },
-          agent_id: { type: 'string', description: 'Resume an existing agent by ID (optional).' },
+          task: { type: 'string', description: 'Self-contained task for the sub-agent to accomplish.' },
+          agent_type: { type: 'string', description: 'Type of specialist agent. Options: generic, coding-specialist, web-explorer, data-analyst, computer-use.', enum: ['generic', 'coding-specialist', 'web-explorer', 'data-analyst', 'computer-use'] },
+          context: { type: 'string', description: 'Additional background information or constraints for the task.' },
           max_depth: { type: 'number', description: 'Maximum spawn depth (default: 2, max: 3)' }
         },
         required: ['task']
       },
       execute: async (args, onUpdate, emitEvent, toolCallId) => {
         const task = args.task as string;
-        const agentId = args.agent_id as string || crypto.randomUUID();
+        const agentType = (args.agent_type as string) || 'generic';
+        const context = (args.context as string) || '';
         const maxDepth = Math.min((args.max_depth as number) || 2, 3);
-        onUpdate?.(`AGI: Spawning sub-agent for: ${task.substring(0, 50)}...`);
+        const agentId = crypto.randomUUID();
+        const timeout = AGENT_TYPE_TIMEOUT[agentType] ?? 120000;
 
-        // Start sub-agent timeline on frontend
+        onUpdate?.(`Spawning ${agentType} sub-agent for: ${task.substring(0, 60)}...`);
+
         if (emitEvent && toolCallId) {
             emitEvent({
                 type: 'subagent-progress',
@@ -178,49 +198,46 @@ export class AgentRunner {
                     type: 'step',
                     toolCallId,
                     timestamp: new Date().toISOString(),
-                    content: `Specialized Agent spawned: ${task.substring(0, 60)}...`
+                    content: `${agentType} agent spawned: ${task.substring(0, 80)}...`
                 }
             });
         }
 
         try {
-          // Load parent conversation history
           let parentHistory: Array<{ role: string; content: string | any[] }> = [];
           try {
             const chatHistoryStore = new ChatHistoryStore();
             const fullConversation = await chatHistoryStore.load(this.currentConversationId || 'default');
 
             if (fullConversation && fullConversation.messages.length > 0) {
-              // Reconstruct full history including tool calls
-              // Use empty string as currentUserInput since we're not adding a new message
               const reconstructed = reconstructFullHistory(fullConversation.messages, '');
-
-              // Apply context window cap: limit to most recent 20 turns (40 messages max)
               parentHistory = reconstructed.slice(-40);
-
-              console.log(`[SubagentSpawn] Loaded ${parentHistory.length} messages from parent conversation`);
+              console.log(`[SubagentSpawn] Loaded ${parentHistory.length} messages from parent`);
             }
           } catch (historyErr) {
-            // If history loading fails, fall back to empty array (current behavior)
-            console.warn('[SubagentSpawn] Failed to load parent history, continuing with empty history:', historyErr);
+            console.warn('[SubagentSpawn] Failed to load parent history:', historyErr);
             parentHistory = [];
+          }
+
+          let systemPrompt: string | undefined;
+          const promptFile = AGENT_TYPE_PROMPTS[agentType];
+          if (promptFile) {
+            systemPrompt = loadPrompt(promptFile) || undefined;
           }
 
           const { getSubagentSpawner } = await import('./subagent-spawn');
           const spawner = getSubagentSpawner();
           spawner.setRunner({
-            run: async (t, h, m) => {
+            run: async (t, h, m, subSystemPrompt) => {
               const subRunner = new AgentRunner(this.client, this.config);
               subRunner.skills = this.skills;
               const clonedHistory = [...h] as any[];
               let lastResponse = '';
               let toolCalls: any[] = [];
-              const RESEARCH_PATTERN = /compile.*list|top \d+|find the best|comprehensive list|compare|best.*bots|best.*tools|best.*products/i;
-              const parentIsResearch = (this as any).currentIntent === 'research';
-              const taskIsResearch = RESEARCH_PATTERN.test(t);
-              const enrichedTask = (parentIsResearch || taskIsResearch)
-                ? `[RESEARCH TASK - USE WEB SEARCH]\n${t}`
-                : t;
+
+              const effectivePrompt = subSystemPrompt || systemPrompt;
+              const enrichedTask = effectivePrompt ? `${effectivePrompt}\n\n---\n\nTASK: ${t}` : t;
+
               const stream = subRunner.runStream(enrichedTask, clonedHistory, m, `sub:${agentId}`);
 
               for await (const event of stream) {
@@ -273,13 +290,13 @@ export class AgentRunner {
                   }
 
                   if (event.type === 'thought') {
-                      if (event.content.includes('\n')) onUpdate?.(`[Sub-Agent] 🤔 ${event.content.trim().split('\n').pop()}`);
+                      if (event.content.includes('\n')) onUpdate?.(`[Sub-Agent] ${event.content.trim().split('\n').pop()}`);
                   }
-                  if (event.type === 'tool_start') onUpdate?.(`[Sub-Agent] 🛠️ Starting tool: ${event.toolName}`);
-                  if (event.type === 'tool_update') onUpdate?.(`[Sub-Agent] ⏳ Running ${event.toolName}...`);
+                  if (event.type === 'tool_start') onUpdate?.(`[Sub-Agent] Tool: ${event.toolName}`);
+                  if (event.type === 'tool_update') onUpdate?.(`[Sub-Agent] Running ${event.toolName}...`);
                   if (event.type === 'tool_call') {
                       toolCalls.push(event.toolCall);
-                      onUpdate?.(`[Sub-Agent] ✅ Finished tool: ${event.toolCall.toolName}`);
+                      onUpdate?.(`[Sub-Agent] Done: ${event.toolCall.toolName}`);
                   }
               }
 
@@ -305,17 +322,21 @@ export class AgentRunner {
               };
             }
           });
+
           const spawnedAgent = await spawner.spawn({
             parentSessionId: this.currentConversationId || 'default',
             task,
+            agentType: agentType as any,
+            context,
             model: this.client.model,
             maxDepth,
             parentHistory
           });
-          const children = await spawner.waitForCompletion(this.currentConversationId || 'default', 300000);
+
+          const children = await spawner.waitForCompletion(this.currentConversationId || 'default', timeout, agentType as any);
           const myChild = children.find(c => c.agentId === spawnedAgent.agentId);
           if (myChild && myChild.result) {
-            return { success: true, output: `Sub-agent (ID: ${spawnedAgent.agentId}) result:\n${myChild.result}` };
+            return { success: true, output: `Sub-agent [${agentType}] (ID: ${spawnedAgent.agentId}):\n${myChild.result}` };
           }
           return { success: false, output: `Sub-agent failed: ${myChild?.error || 'Unknown error'}` };
         } catch (err) {

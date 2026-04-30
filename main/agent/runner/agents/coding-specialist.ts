@@ -283,7 +283,7 @@ export const createCodingSpecialistNode = (
     const taskAnalysis = analyzeTask(userInput);
     const shouldDelegate = taskAnalysis.complexity === 'complex' || taskAnalysis.estimatedSteps > 5;
 
-    const executionHint = `\n\n## CURRENT PHASE: EXECUTION\nThe user has approved the plan. Now implement it:\n1. Read .everfern/plan/tasks.md\n2. Execute each task in order\n3. Call getDiagnostics after every file write\n4. Fix errors before moving to the next task\n${shouldDelegate ? '5. Use spawn_agent for complex independent subtasks\n' : ''}DO NOT re-present the plan or ask for approval again.
+    const executionHint = `\n\n## CURRENT PHASE: EXECUTION\nThe user has approved the plan. Now implement it:\n1. Read .everfern/plan/tasks.md\n2. Execute each task in order\n3. Call getDiagnostics after every file write\n4. Fix errors before moving to the next task\n${shouldDelegate ? '5. Use spawn_agent with agent_type="coding-specialist" for complex independent subtasks\n' : ''}DO NOT re-present the plan or ask for approval again.
 When all tasks in tasks.md are completed successfully, output 'MISSION_COMPLETE' to signal the end of implementation.`;
 
     const systemPrompt = (loadPrompt('coding-specialist.md') || '') + planContext + executionHint;

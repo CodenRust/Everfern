@@ -121,7 +121,7 @@ const createDeepResearchNode = (runner, eventQueue, missionTracker, toolDefs) =>
                 eventQueue?.push({ type: 'thought', content: '⚠️ Deep Research: No content retrieved, falling back to standard web explorer.' });
                 // Fall back to standard web explorer behaviour
                 const systemPrompt = `You are the EverFern Web Explorer performing deep research.
-The automated deep-crawl returned no results. Use web_search and browser_use tools directly to research: "${query}"
+The automated deep-crawl returned no results. Use web_search and navis tools directly to research: "${query}"
 Synthesize findings into a comprehensive answer with source citations.`;
                 return (0, agent_runtime_1.runAgentStep)(state, { runner, toolDefs: tools, eventQueue, nodeName: 'deep_research', systemPromptOverride: systemPrompt })
                     .then(res => ({ ...res, returningFromSpecialist: 'deep_research' }));

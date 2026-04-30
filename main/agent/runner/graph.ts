@@ -401,7 +401,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
                 case 'route_computer_use':
                     return 'computer_use_agent';
                 case 'route_web_explorer':
-                    // Always use web_explorer for web research tasks to ensure browser_use is used
+                    // Always use web_explorer for web research tasks to ensure navis is used
                     return 'web_explorer';
                 case 'complete_task':
                 case 'continue_brain':

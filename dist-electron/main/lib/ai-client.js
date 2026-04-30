@@ -712,7 +712,20 @@ class AIClient {
             body['tool_choice'] = 'auto';
         }
         if (req.responseFormat === 'json' && (this.config.provider === 'openai' || this.config.provider === 'deepseek')) {
-            body['response_format'] = { type: 'json_object' };
+            // OpenAI: use json_schema if provided for structured output, fallback to json_object
+            if (req.jsonSchema && this.config.provider === 'openai') {
+                body['response_format'] = {
+                    type: 'json_schema',
+                    json_schema: {
+                        name: req.jsonSchema.$name || 'response',
+                        schema: req.jsonSchema,
+                        strict: true
+                    }
+                };
+            }
+            else {
+                body['response_format'] = { type: 'json_object' };
+            }
         }
         // Nvidia: use nvext.guided_json for reliable structured output
         if (req.responseFormat === 'json' && this.config.provider === 'nvidia') {
@@ -947,7 +960,22 @@ class AIClient {
         }
         // Handle JSON response formats in stream
         if (req.responseFormat === 'json') {
-            if (this.config.provider === 'openai' || this.config.provider === 'deepseek') {
+            if (this.config.provider === 'openai') {
+                if (req.jsonSchema) {
+                    streamBody['response_format'] = {
+                        type: 'json_schema',
+                        json_schema: {
+                            name: req.jsonSchema.$name || 'response',
+                            schema: req.jsonSchema,
+                            strict: true
+                        }
+                    };
+                }
+                else {
+                    streamBody['response_format'] = { type: 'json_object' };
+                }
+            }
+            else if (this.config.provider === 'deepseek') {
                 streamBody['response_format'] = { type: 'json_object' };
             }
             else if (this.config.provider === 'nvidia') {
@@ -1418,9 +1446,22 @@ class AIClient {
     }
     async _ollamaChat(req) {
         const isStreaming = !!req.onStreamChunk;
+        const messages = this._mapOllamaMessages(req.messages);
+        // Ollama doesn't support JSON schema natively — append schema hint to system prompt
+        if (req.jsonSchema) {
+            const schemaHint = `\n\nIMPORTANT: You MUST respond with a JSON object that matches this schema:\n${JSON.stringify(req.jsonSchema, null, 2)}\n\nReturn ONLY valid JSON matching this schema. No extra text, no markdown fences.`;
+            // Inject schema hint into the system message
+            const systemIdx = messages.findIndex((m) => m.role === 'system');
+            if (systemIdx !== -1) {
+                messages[systemIdx].content += schemaHint;
+            }
+            else {
+                messages.unshift({ role: 'system', content: schemaHint });
+            }
+        }
         const body = {
             model: req.model ?? this.config.model,
-            messages: this._mapOllamaMessages(req.messages),
+            messages,
             stream: isStreaming,
             options: { temperature: req.temperature ?? this.config.temperature },
         };

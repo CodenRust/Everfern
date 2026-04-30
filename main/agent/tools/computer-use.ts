@@ -137,7 +137,7 @@ export interface SubAgentProgressEvent {
     /** Parent agent/tool call ID that spawned this subagent */
     parentId?: string;
     /** Agent type for visual styling */
-    agentType?: 'web-explorer' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
+    agentType?: 'web-explorer' | 'navis' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
     /** Branch level in hierarchy (0 = root, 1 = first level subagent, etc.) */
     branchLevel?: number;
     /** Visual position hint for UI rendering */

@@ -32,7 +32,6 @@ exports.plannerTool = {
     description: 'MANDATORY: Create a step-by-step plan BEFORE any computer_use action. ' +
         'Break the user\'s goal into clear, ordered sub-goals. ' +
         'Each step should be a single verifiable action. ' +
-        'After creating the plan, immediately execute Step 1. ' +
         'Use update_plan_step to mark steps as in_progress or done as you go. ' +
         'You may revise the plan mid-task if the situation changes.',
     parameters: {
@@ -67,7 +66,7 @@ exports.plannerTool = {
                 '',
                 ...existingPlan.steps.map((s, i) => `${i + 1}. ${s.status === 'done' ? '✅' : '☐'} ${s.description} (Step ID: \`${s.id}\`)`),
                 '',
-                '**A plan already exists. Do NOT create another plan. Proceed with executing the next pending step immediately.**',
+                '**A plan already exists. Do NOT create another plan.**',
             ].join('\n');
             return {
                 success: true,
@@ -92,7 +91,7 @@ exports.plannerTool = {
             '',
             ...steps.map((s, i) => `${i + 1}. ☐ ${s.description} (Step ID: \`${s.id}\`)`),
             '',
-            '**Next Step**: The plan is registered. Do not wait for the user. Immediately perform the first step (e.g. `computer_use(action="screenshot")`).',
+            '**Next Step**: The plan is registered. You may proceed with the first step after ensuring the plan is correct or wait for user approval.',
         ].join('\n');
         return {
             success: true,
@@ -148,8 +147,7 @@ exports.executionPlanTool = {
     description: 'Present a high-fidelity execution plan to the user in a dedicated markdown-rendered pane. ' +
         'Use this for complex, multi-step tasks to provide a clear overview and progress roadmap. ' +
         'The "content" field MUST be in valid Markdown format. ' +
-        'IMPORTANT: NEVER create more than ONE execution plan per task/chat. If an execution plan already exists or was already approved, DO NOT call this tool again. ' +
-        'Instead, just proceed with executing the steps or use update_plan_step if using the standard planner.',
+        'IMPORTANT: NEVER create more than ONE execution plan per task/chat. If an execution plan already exists or was already approved, DO NOT call this tool again.',
     parameters: {
         type: 'object',
         properties: {
@@ -177,7 +175,7 @@ exports.executionPlanTool = {
         if (globalContext.size > 0) {
             return {
                 success: false,
-                output: 'An execution plan was already created for this session. DO NOT create another one. Proceed with executing the existing plan immediately.',
+                output: 'An execution plan was already created for this session. DO NOT create another one.',
                 error: 'Duplicate execution plan creation blocked.'
             };
         }

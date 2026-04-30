@@ -40,6 +40,15 @@ const os = __importStar(require("os"));
 exports.DEFAULT_TOOL_SETTINGS = {
     webSearch: { mode: 'local', headless: true, apiKey: '' },
     webCrawl: { mode: 'local', headless: true, apiKey: '' },
+    browserUse: {
+        mode: 'local',
+        headless: false,
+        apiKey: '',
+        useVision: false,
+        useThinking: true,
+        maxActionsPerStep: 1,
+        maxFailures: 10
+    },
 };
 const SETTINGS_FILE_PATH = path.join(os.homedir(), '.everfern', 'tool-settings.json');
 class ToolSettingsStore {
@@ -53,7 +62,17 @@ class ToolSettingsStore {
         }
         try {
             const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf-8');
-            return JSON.parse(raw);
+            const loaded = JSON.parse(raw);
+            // Deep merge with defaults to ensure all keys (like browserUse) exist
+            const config = {
+                ...exports.DEFAULT_TOOL_SETTINGS,
+                ...loaded,
+                // Ensure sub-objects are also merged if they exist
+                webSearch: { ...exports.DEFAULT_TOOL_SETTINGS.webSearch, ...(loaded.webSearch || {}) },
+                webCrawl: { ...exports.DEFAULT_TOOL_SETTINGS.webCrawl, ...(loaded.webCrawl || {}) },
+                browserUse: { ...exports.DEFAULT_TOOL_SETTINGS.browserUse, ...(loaded.browserUse || {}) },
+            };
+            return config;
         }
         catch (err) {
             console.warn('[ToolSettings] ⚠️ Malformed tool-settings.json — resetting to defaults:', err);

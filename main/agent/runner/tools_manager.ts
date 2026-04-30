@@ -18,7 +18,7 @@ import { createArtifactTool, createSiteTool } from '../tools/create-artifact';
 import { editArtifactTool } from '../tools/edit-artifact';
 import { visualizeTool } from '../tools/visualize';
 import { mcpRegistry } from '../tools/mcp';
-import { createBrowserUseTool } from '../tools/browser-use';
+import { createNavisTool } from '../tools/navis/navis';
 import { AIClient } from '../../lib/ai-client';
 import * as os from 'os';
 
@@ -77,7 +77,7 @@ export const getBaseTools = (runner: any): AgentTool[] => {
     skillTool,
     presentFilesTool,
     websiteCrawlTool,
-    ...(runner.client ? [createBrowserUseTool(runner.client, (runner as any).groundingEngine)] : []),
+    ...(runner.client ? [createNavisTool(runner.client)] : []),
     createWorkspaceRequestTool(config.requestPermission),
     allowFileDeleteTool,
     searchMcpRegistryTool,

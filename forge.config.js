@@ -10,6 +10,7 @@ module.exports = {
         '**/node_modules/@jitsi/robotjs/**/*',
         '**/node_modules/screenshot-desktop/**/*',
         '**/node_modules/sharp/**/*',
+        '**/main/agent/tools/python-bridge/**/*',
       ],
     },
   },

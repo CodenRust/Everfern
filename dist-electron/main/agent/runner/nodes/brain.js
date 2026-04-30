@@ -129,8 +129,8 @@ Available routing options:
 CRITICAL ROUTING RULES:
 1. If the task involves searching the web, finding information, researching topics, looking up news, finding tools/bots/products → ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for web research.
 2. "route_computer_use" is ONLY for tasks that require clicking on desktop GUI elements, interacting with native apps, or automating screen interactions. It is NOT for web browsing or research.
-3. If web_search AND browser_use tools were already called successfully and returned comprehensive results, THEN consider "complete_task".
-4. Do NOT re-route to web_explorer if both web_search and browser_use have already completed successfully.
+3. If web_search AND navis tools were already called successfully and returned comprehensive results, THEN consider "complete_task".
+4. Do NOT re-route to web_explorer if both web_search and navis have already completed successfully.
 5. NEVER run web_search yourself and then claim the task is complete — the web_explorer must fetch the actual page content from the URLs found.
 6. For ANY web research task (searching, finding information online, looking up websites), use "route_web_explorer" NOT "route_computer_use".
 
@@ -229,7 +229,7 @@ const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbo
         }
         const allTools = toolDefs || runner._buildToolDefinitions();
         // Filter out web research tools from brain - these should only be available to web_explorer
-        const WEB_RESEARCH_TOOLS = new Set(['web_search', 'remote_web_search', 'browser_use', 'browser_use', 'website_crawl']);
+        const WEB_RESEARCH_TOOLS = new Set(['web_search', 'remote_web_search', 'navis', 'website_crawl']);
         const tools = allTools.filter((tool) => !WEB_RESEARCH_TOOLS.has(tool.name));
         // Debug logging
         console.log(`[Brain] Current intent: ${state.currentIntent}`);

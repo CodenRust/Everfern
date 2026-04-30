@@ -17,7 +17,7 @@ export const websiteCrawlTool: AgentTool = {
   description:
     'Deep-crawl a website using FernCrawl (EverFern\'s AI-native crawler). ' +
     'Renders JavaScript, removes noise, converts to clean Markdown, and uses an LLM to understand the page content. ' +
-    'Unlike browser_use (single page, raw text), this tool produces structured AI-ready output. ' +
+    'Unlike navis (single page, raw text), this tool produces structured AI-ready output. ' +
     'Set deep=true to follow internal links and crawl multiple pages.',
   parameters: {
     type: 'object',
@@ -127,7 +127,7 @@ export const websiteCrawlTool: AgentTool = {
     }
 
     // Fallback: existing pipeline
-    onUpdate?.('FernCrawl unavailable — falling back to browser_use pipeline...');
+    onUpdate?.('FernCrawl unavailable — falling back to navis pipeline...');
     const config = toolSettingsStore.get().webCrawl;
 
     if (config.mode === 'local') {

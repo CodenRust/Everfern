@@ -39,12 +39,19 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SubagentSpawner = void 0;
+exports.SubagentSpawner = exports.AGENT_TIMEOUTS = void 0;
 exports.getSubagentSpawner = getSubagentSpawner;
 const crypto = __importStar(require("crypto"));
 const subagent_registry_1 = require("./subagent-registry");
 const agent_events_1 = require("../infra/agent-events");
 const session_lifecycle_events_1 = require("../sessions/session-lifecycle-events");
+exports.AGENT_TIMEOUTS = {
+    'web-explorer': 300000,
+    'coding-specialist': 180000,
+    'computer-use': 180000,
+    'data-analyst': 180000,
+    'generic': 120000,
+};
 class SubagentSpawner {
     runner;
     maxGlobalDepth = 3;
@@ -52,13 +59,12 @@ class SubagentSpawner {
         this.runner = runner;
     }
     async spawn(options) {
-        const { parentSessionId, task, model, mode = 'run', workspaceDir, maxDepth = 3, parentHistory = [] } = options;
+        const { parentSessionId, task, agentType = 'generic', systemPrompt, context, model, mode = 'run', workspaceDir, maxDepth = 3, parentHistory = [] } = options;
         if (!this.runner) {
             console.warn('[SubagentSpawner] No runner configured. Spawning failed.');
             throw new Error('SubagentSpawner: No runner configured');
         }
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
-        // Check depth limit
         const parentEntry = registry.getBySessionKey(parentSessionId);
         const currentDepth = (parentEntry?.currentDepth || 0) + 1;
         if (currentDepth > this.maxGlobalDepth) {
@@ -69,40 +75,40 @@ class SubagentSpawner {
         }
         const agentId = (0, subagent_registry_1.generateAgentId)();
         const sessionKey = `agent:${agentId}:${crypto.randomUUID().substring(0, 8)}`;
-        // Register the subagent
+        const enrichedTask = context ? `[CONTEXT: ${context}]\n\n${task}` : task;
         const entry = registry.register({
             agentId,
             parentSessionId,
             sessionKey,
-            task,
+            task: enrichedTask,
+            agentType,
             mode,
             status: 'pending',
             workspaceDir,
             maxDepth,
             currentDepth
         });
-        // Set up events
         const events = (0, agent_events_1.getAgentEvents)(sessionKey);
         events.setSessionKey(sessionKey);
-        // Emit spawn event
         (0, agent_events_1.emitLifecycle)(parentSessionId, 'agent_spawned', {
             agentId,
             sessionKey,
-            task: task.substring(0, 100)
+            agentType,
+            task: enrichedTask.substring(0, 100)
         });
-        console.log(`[SubagentSpawner] Spawned ${agentId} for parent ${parentSessionId} (depth: ${currentDepth})`);
+        console.log(`[SubagentSpawner] Spawned ${agentId} (${agentType}) for parent ${parentSessionId} (depth: ${currentDepth})`);
         const spawnedAgent = {
             agentId,
             sessionKey,
-            task,
+            task: enrichedTask,
+            agentType,
             status: 'pending',
             abort: () => registry.abort(agentId)
         };
-        // Start the agent
-        this.runSubagent(spawnedAgent, model, parentHistory);
+        this.runSubagent(spawnedAgent, model, systemPrompt, parentHistory);
         return spawnedAgent;
     }
-    async runSubagent(agent, model, parentHistory = []) {
+    async runSubagent(agent, model, systemPrompt, parentHistory = []) {
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
         registry.update(agent.agentId, { status: 'running' });
         agent.status = 'running';
@@ -112,18 +118,15 @@ class SubagentSpawner {
         });
         (0, agent_events_1.emitTool)(agent.sessionKey, 'agent_start', {
             agentId: agent.agentId,
+            agentType: agent.agentType,
             task: agent.task
         });
         try {
-            // Apply context window cap: limit parentHistory to most recent 20 turns (40 messages max)
-            // This prevents context window overflow when passing parent conversation to subagent
             const cappedHistory = parentHistory.slice(-40).map((msg) => ({
                 role: msg.role || (msg._getType?.() === 'human' ? 'user' : 'assistant'),
                 content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
             }));
-            // Run the agent with parent conversation context
-            const result = await this.runner.run(agent.task, cappedHistory, model);
-            // Complete the subagent
+            const result = await this.runner.run(agent.task, cappedHistory, model, systemPrompt);
             registry.complete(agent.agentId, result.response);
             (0, session_lifecycle_events_1.sessionCompleted)(agent.sessionKey, {
                 responseLength: result.response.length,
@@ -164,12 +167,13 @@ class SubagentSpawner {
         }
         return spawned;
     }
-    async waitForCompletion(parentSessionId, timeoutMs = 60000) {
+    async waitForCompletion(parentSessionId, timeoutMs, agentType) {
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
+        const effectiveTimeout = timeoutMs ?? exports.AGENT_TIMEOUTS[agentType ?? 'generic'];
         const startTime = Date.now();
         while (registry.hasPendingChildren(parentSessionId)) {
-            if (Date.now() - startTime > timeoutMs) {
-                throw new Error(`Timeout waiting for subagents (${timeoutMs}ms)`);
+            if (Date.now() - startTime > effectiveTimeout) {
+                throw new Error(`Timeout waiting for subagents (${effectiveTimeout}ms)`);
             }
             await new Promise(resolve => setTimeout(resolve, 100));
         }

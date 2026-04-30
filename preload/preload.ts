@@ -373,6 +373,7 @@ export interface ToolConfig {
 export interface ToolSettingsConfig {
   webSearch: ToolConfig;
   webCrawl: ToolConfig;
+  browserUse: ToolConfig;
 }
 
 // ── Type Export (for renderer use) ────────────────────────────────

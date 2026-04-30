@@ -6,16 +6,30 @@ export interface ToolConfig {
   mode: 'local' | 'api';
   headless: boolean;
   apiKey: string;
+  useVision?: boolean;
+  useThinking?: boolean;
+  maxActionsPerStep?: number;
+  maxFailures?: number;
 }
 
 export interface ToolSettingsConfig {
   webSearch: ToolConfig;
   webCrawl: ToolConfig;
+  browserUse: ToolConfig;
 }
 
 export const DEFAULT_TOOL_SETTINGS: ToolSettingsConfig = {
   webSearch: { mode: 'local', headless: true, apiKey: '' },
   webCrawl:  { mode: 'local', headless: true, apiKey: '' },
+  browserUse: { 
+    mode: 'local', 
+    headless: false, 
+    apiKey: '',
+    useVision: false,
+    useThinking: true,
+    maxActionsPerStep: 1,
+    maxFailures: 10
+  },
 };
 
 const SETTINGS_FILE_PATH = path.join(os.homedir(), '.everfern', 'tool-settings.json');
@@ -34,7 +48,19 @@ export class ToolSettingsStore {
 
     try {
       const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf-8');
-      return JSON.parse(raw) as ToolSettingsConfig;
+      const loaded = JSON.parse(raw);
+      
+      // Deep merge with defaults to ensure all keys (like browserUse) exist
+      const config = {
+        ...DEFAULT_TOOL_SETTINGS,
+        ...loaded,
+        // Ensure sub-objects are also merged if they exist
+        webSearch: { ...DEFAULT_TOOL_SETTINGS.webSearch, ...(loaded.webSearch || {}) },
+        webCrawl: { ...DEFAULT_TOOL_SETTINGS.webCrawl, ...(loaded.webCrawl || {}) },
+        browserUse: { ...DEFAULT_TOOL_SETTINGS.browserUse, ...(loaded.browserUse || {}) },
+      };
+
+      return config as ToolSettingsConfig;
     } catch (err) {
       console.warn('[ToolSettings] ⚠️ Malformed tool-settings.json — resetting to defaults:', err);
       this.writeFile(DEFAULT_TOOL_SETTINGS);

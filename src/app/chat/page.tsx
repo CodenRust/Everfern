@@ -181,6 +181,7 @@ export default function ChatPage() {
     const [currentPlan, setCurrentPlan] = useState<any | null>(null);
     const [executionPlan, setExecutionPlan] = useState<{ title?: string; content: string } | null>(null);
     const [isExecutionPlanPaneOpen, setIsExecutionPlanPaneOpen] = useState<boolean>(true);
+    const [isProjectTasksPaneOpen, setIsProjectTasksPaneOpen] = useState<boolean>(false);
     const [reportPane, setReportPane] = useState<{ label: string; path: string } | null>(null);
     const [contextItems, setContextItems] = useState<{ id: string; type: 'file' | 'web' | 'app'; label: string; base64Image?: string; appName?: string; appLogo?: string }[]>([]);
     const [isValidatingModel, setIsValidatingModel] = useState(false);
@@ -1036,6 +1037,8 @@ export default function ChatPage() {
             acpApi.onMissionStepUpdate(({ step, timeline }: { step: any; timeline: MissionTimelineType }) => {
                 console.log('[Mission] Step update received:', step?.name, step?.status);
                 setMissionTimeline(timeline);
+                setIsProjectTasksPaneOpen(true);
+                setIsExecutionPlanPaneOpen(false);
 
                 // Update current node based on the latest step
                 if (step && step.name) {
@@ -1046,6 +1049,8 @@ export default function ChatPage() {
             acpApi.onMissionPhaseChange(({ phase, timeline }: { phase: string; timeline: MissionTimelineType }) => {
                 console.log('[Mission] Phase change received:', phase);
                 setMissionTimeline(timeline);
+                setIsProjectTasksPaneOpen(true);
+                setIsExecutionPlanPaneOpen(false);
                 setCurrentPhase(phase as any);
             });
 
@@ -2720,6 +2725,14 @@ export default function ChatPage() {
                                     View Plan
                                 </button>
                             )}
+                            {missionTimeline && !isProjectTasksPaneOpen && (
+                                <button onClick={() => {
+                                    setIsProjectTasksPaneOpen(true);
+                                }} style={{ fontSize: 12, fontWeight: 600, color: "#201e24", backgroundColor: "rgba(0,0,0,0.04)", padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                    Project Tasks
+                                </button>
+                            )}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, WebkitAppRegion: "no-drag" } as any}>
                             <button type="button" style={{ position: "relative", background: "transparent", border: "none", color: "#73716e", cursor: "pointer", display: "flex", alignItems: "center", padding: 4 }} onMouseEnter={e => e.currentTarget.style.color = "#111111"} onMouseLeave={e => e.currentTarget.style.color = "#73716e"}>
@@ -3156,25 +3169,6 @@ export default function ChatPage() {
                                         </motion.div>
                                     )}
                                     <div ref={messagesEndRef} />
-
-                                    {/* Mission Timeline Display */}
-                                    {missionTimeline && isLoading && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, y: -10 }}
-                                            transition={{ duration: 0.3 }}
-                                            className="mx-auto w-full max-w-2xl px-6 py-4"
-                                        >
-                                            <ErrorBoundary componentName="MissionTimeline">
-                                                <MissionTimelineComponent
-                                                    timeline={missionTimeline}
-                                                    isRunning={isLoading && !missionComplete}
-                                                    autoCollapse={true}
-                                                />
-                                            </ErrorBoundary>
-                                        </motion.div>
-                                    )}
                                 </div>
                             </div>
 
@@ -3458,7 +3452,7 @@ export default function ChatPage() {
 
                         {/* Right Sidebar */}
                         <AnimatePresence>
-                            {(currentPlan || contextItems.length > 0 || (executionPlan && isExecutionPlanPaneOpen)) && (
+                            {(currentPlan || contextItems.length > 0 || (executionPlan && isExecutionPlanPaneOpen) || (missionTimeline && isProjectTasksPaneOpen)) && (
                                 <motion.div key="right-sidebar"
                                     initial={{ width: 0, opacity: 0 }}
                                     animate={{ width: 420, opacity: 1 }}
@@ -3466,7 +3460,7 @@ export default function ChatPage() {
                                     style={{ borderLeft: "1px solid #e8e6d9", backgroundColor: "#f5f4f0", display: "flex", flexDirection: "column", overflow: "hidden" }}
                                 >
                                     <div style={{ width: 420, display: "flex", flexDirection: "column", padding: "24px 16px", overflowY: "auto", height: "100%" }}>
-                                        {((currentPlan || contextItems.length > 0) && !(executionPlan && isExecutionPlanPaneOpen)) && (
+                                        {((currentPlan || contextItems.length > 0) && !(executionPlan && isExecutionPlanPaneOpen) && !(missionTimeline && isProjectTasksPaneOpen)) && (
                                             <>
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
                                                     {/* Title Row */}
@@ -3607,6 +3601,45 @@ export default function ChatPage() {
                                                 </>
                                             );
                                         })()}
+
+                                        {missionTimeline && isProjectTasksPaneOpen && (
+                                            <>
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid #e5e7eb' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                        <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                            {isLoading ? (
+                                                                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <circle cx="12" cy="12" r="10" stroke="#bbf7d0" strokeWidth="4"></circle>
+                                                                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="#22c55e" stroke="none"></path>
+                                                                </svg>
+                                                            ) : (
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                                                </svg>
+                                                            )}
+                                                        </div>
+                                                        <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Project Tasks</span>
+                                                    </div>
+                                                    <button type="button" onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        setIsProjectTasksPaneOpen(false);
+                                                    }} style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.1)'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.05)'; }} title="Close pane">
+                                                        <XMarkIcon width={16} height={16} color="#6b7280" />
+                                                    </button>
+                                                </div>
+                                                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                                                    <ErrorBoundary componentName="MissionTimelineSidebar">
+                                                        <MissionTimelineComponent
+                                                            timeline={missionTimeline}
+                                                            isRunning={isLoading && !missionComplete}
+                                                            autoCollapse={false}
+                                                        />
+                                                    </ErrorBoundary>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </motion.div>
                             )}

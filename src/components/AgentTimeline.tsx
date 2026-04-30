@@ -43,7 +43,7 @@ import type { SubAgentProgressEvent } from "@/app/chat/types";
 interface TimelineBranch {
     id: string;
     parentId: string;
-    agentType: 'web-explorer' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
+    agentType: 'web-explorer' | 'navis' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
     events: SubAgentProgressEvent[];
     status: 'running' | 'completed' | 'failed' | 'aborted';
     startTime: string;
@@ -1270,6 +1270,7 @@ const TimelineBranchItem = ({
     const getAgentTypeColor = (agentType: string) => {
         const colors = {
             'web-explorer': '#3b82f6',
+            'navis': '#6366f1',
             'browser-use': '#8b5cf6',
             'computer-use': '#06b6d4',
             'research': '#10b981',
@@ -1289,6 +1290,7 @@ const TimelineBranchItem = ({
     const getAgentTypeIcon = (agentType: string) => {
         const icons = {
             'web-explorer': '🌐',
+            'navis': '🧭',
             'browser-use': '🖥️',
             'computer-use': '💻',
             'research': '🔍',

@@ -146,7 +146,7 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
       parentSessionId: 'root',
       sessionKey: 'agent:parent:session',
       task: 'parent task',
-      mode: 'run',
+        agentType: 'generic',      mode: 'run',
       status: 'running',
       maxDepth: 3,
       currentDepth: 0
@@ -157,7 +157,7 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
       parentSessionId: 'agent:parent:session',
       sessionKey: 'agent:child1:session',
       task: 'child1 task',
-      mode: 'run',
+        agentType: 'generic',      mode: 'run',
       status: 'running',
       maxDepth: 3,
       currentDepth: 1
@@ -168,7 +168,7 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
       parentSessionId: 'agent:child1:session',
       sessionKey: 'agent:child2:session',
       task: 'child2 task',
-      mode: 'run',
+        agentType: 'generic',      mode: 'run',
       status: 'running',
       maxDepth: 3,
       currentDepth: 2
@@ -179,7 +179,7 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
       parentSessionId: 'agent:child2:session',
       sessionKey: 'agent:child3:session',
       task: 'child3 task',
-      mode: 'run',
+        agentType: 'generic',      mode: 'run',
       status: 'running',
       maxDepth: 3,
       currentDepth: 3
@@ -222,6 +222,7 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
               parentSessionId: parentSessionKey,
               sessionKey,
               task: `task at depth ${depth}`,
+              agentType: 'generic',
               mode: 'run',
               status: 'running',
               maxDepth: 3,

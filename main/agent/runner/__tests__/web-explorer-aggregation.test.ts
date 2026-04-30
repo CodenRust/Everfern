@@ -56,14 +56,14 @@ describe('EnhancedWebExplorer Result Aggregation', () => {
       const subagents = [
         {
           id: 'web_agent_1',
-          type: 'browser-use' as const,
+          type: 'navis' as const,
           task: 'Research about AI',
           status: 'completed' as const,
           progressEvents: [],
         },
         {
           id: 'web_agent_2',
-          type: 'browser-use' as const,
+          type: 'navis' as const,
           task: 'Research about machine learning',
           status: 'completed' as const,
           progressEvents: [],

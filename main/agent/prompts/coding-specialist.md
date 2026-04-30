@@ -143,11 +143,12 @@ When the user responds with "APPROVED":
 
 ## Subagent Delegation (for complex tasks)
 
-After plan approval, for large tasks you may spawn subagents:
+After plan approval, for large tasks you may spawn subagents with the appropriate type:
 
 ```
-spawn_agent("Implement the database schema from tasks 1-3 in .everfern/plan/tasks.md")
-spawn_agent("Build the API endpoints from tasks 4-6 in .everfern/plan/tasks.md")
+spawn_agent("Implement the database schema from tasks 1-3 in .everfern/plan/tasks.md", agent_type="coding-specialist")
+spawn_agent("Build the API endpoints from tasks 4-6 in .everfern/plan/tasks.md", agent_type="coding-specialist")
+spawn_agent("Create a test suite for the auth module", agent_type="coding-specialist")
 ```
 
 Keep nesting to 2 levels max. Always integrate and validate subagent output.

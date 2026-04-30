@@ -5,176 +5,9 @@ import { runAgentStep } from '../services/agent-runtime';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 import { loadPrompt } from '../../../lib/prompt-sync';
-import { getSubagentSpawner, type SpawnOptions } from '../subagent-spawn';
+import { getSubagentSpawner, type SpawnOptions, AGENT_TIMEOUTS } from '../subagent-spawn';
 import { getSubagentRegistry } from '../subagent-registry';
-import { getSubagentResultAggregator } from '../subagent-result-aggregator';
 import { emitTool } from '../../infra/agent-events';
-
-/**
- * Configuration for Web Explorer subagent spawning
- */
-export interface WebExplorerConfig {
-  enableSubagentSpawning: boolean;
-  maxConcurrentSubagents: number;
-  subagentTimeout: number;
-}
-
-/**
- * Multi-Agent Web Explorer (Manager)
- *
- * Instead of performing research itself, this node acts as a MANAGER that:
- * 1. Analyzes search results to find the TOP candidates.
- * 2. Spawns parallel WORKER sub-agents to investigate each candidate.
- * 3. Aggregates findings into a high-quality comparison.
- */
-export class WebExplorerManager {
-  private config: WebExplorerConfig;
-  private spawner = getSubagentSpawner();
-  private registry = getSubagentRegistry();
-  private aggregator = getSubagentResultAggregator();
-
-  constructor(config: Partial<WebExplorerConfig> = {}) {
-    this.config = {
-      enableSubagentSpawning: config.enableSubagentSpawning ?? true,
-      maxConcurrentSubagents: config.maxConcurrentSubagents ?? 5,
-      subagentTimeout: config.subagentTimeout ?? 120000,
-    };
-  }
-
-  /**
-   * Identifies the best candidates from a search result string with quality scoring.
-   * Task-aware: scores URLs by relevance to the actual research goal, not just domain heuristics.
-   */
-  parseBestCandidates(searchContent: string, task?: string): Array<{ title: string, url: string, score: number }> {
-      const candidates: Array<{ title: string, url: string, score: number }> = [];
-      const urlRegex = /https?:\/\/[^\s"'<>)]+/g;
-      const matches = searchContent.match(urlRegex) || [];
-
-      // Filter out search engine URLs and low-quality domains
-      const SEARCH_ENGINES = ['google.com', 'bing.com', 'duckduckgo.com', 'brave.com', 'yahoo.com'];
-      const LOW_QUALITY = ['pinterest.com', 'facebook.com', 'twitter.com', 'instagram.com', 'tiktok.com'];
-
-      // URL patterns that indicate list/category pages — we want to drill THROUGH these, not stop at them
-      const LIST_PAGE_PATTERNS = ['/tag/', '/category/', '/list/', '/search/', '/tags/', '/topics/', '/browse/'];
-
-      const cleanUrls = [...new Set(matches)].filter(u =>
-          !SEARCH_ENGINES.some(se => u.includes(se)) &&
-          !LOW_QUALITY.some(lq => u.includes(lq))
-      );
-
-      const taskLower = (task || '').toLowerCase();
-      const taskWords = taskLower.split(/\s+/).filter(w => w.length > 3);
-
-      // Score URLs based on quality signals
-      for (const url of cleanUrls) {
-          const urlLower = url.toLowerCase();
-          let score = 50; // Base score
-
-          // Boost authoritative domains
-          if (url.includes('.edu')) score += 20;
-          if (url.includes('.org')) score += 15;
-          if (url.includes('.gov')) score += 25;
-          if (url.includes('github.com')) score += 15;
-          if (url.includes('stackoverflow.com')) score += 10;
-
-          // Boost documentation and official sites
-          if (url.includes('docs.') || url.includes('/docs/')) score += 15;
-          if (url.includes('wiki')) score += 10;
-          if (url.includes('official')) score += 10;
-
-          // Task-keyword match in URL — strong signal this is a specific relevant page
-          const urlKeywordMatches = taskWords.filter(w => urlLower.includes(w)).length;
-          score += urlKeywordMatches * 12;
-
-          // Penalize list/category pages — they're intermediate, not the final answer
-          const isListPage = LIST_PAGE_PATTERNS.some(p => urlLower.includes(p));
-          if (isListPage) score -= 20;
-
-          // Penalize potential spam indicators
-          if (url.includes('?') && url.split('?')[1].length > 50) score -= 10;
-          if (url.length > 150) score -= 5;
-
-          candidates.push({ title: 'Research Target', url, score });
-      }
-
-      // Sort by score (highest first) and take top candidates
-      candidates.sort((a, b) => b.score - a.score);
-      return candidates.slice(0, this.config.maxConcurrentSubagents);
-  }
-
-  /**
-   * Spawns worker agents with unique identities and strict goals
-   */
-  async spawnWorkers(parentSessionId: string, candidates: any[], runner: AgentRunner, eventQueue?: StreamEvent[]) {
-      const workerRoles = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo'];
-
-      eventQueue?.push({
-          type: 'thought',
-          content: `\n🚀 MANAGER: Dispatching ${candidates.length} specialist investigators to their targets...`
-      });
-
-      const spawnTasks = candidates.map(async (c, i) => {
-          const role = `Investigator ${workerRoles[i] || i + 1}`;
-          const task = `ROLE: ${role} — Deep Research Specialist
-TARGET URL: ${c.url}
-QUALITY SCORE: ${c.score ?? 'N/A'}
-
-MISSION: Conduct an exhaustive investigation of your assigned target. You are an independent specialist — do NOT investigate other URLs.
-
-MANDATORY STEPS:
-1. Visit the target URL using browser_use
-2. Read the FULL page content — do not skim
-3. Navigate to sub-pages if needed (product pages, pricing, docs)
-4. Extract ALL of the following if present:
-   - Core features and capabilities (be specific, not vague)
-   - Pricing tiers and exact costs
-   - Pros and cons based on actual content
-   - User reviews, ratings, or testimonials
-   - Technical requirements or limitations
-   - Last updated / publication date
-   - Author or organization credibility signals
-
-REPORTING FORMAT:
-Return a structured report with:
-## Source: [URL]
-## Credibility: [High/Medium/Low — explain why]
-## Key Findings:
-[Detailed bullet points with specific facts]
-## Pricing: [Exact details or "Not found"]
-## Pros: [Based on actual page content]
-## Cons: [Based on actual page content]
-## Notable Quotes: [Direct quotes from the page]
-## Recommendation Score: [1-10 with reasoning]
-
-STRICT RULES:
-- NEVER summarize based on URL alone — you MUST visit the page
-- NEVER fabricate information — only report what you actually read
-- If the page is inaccessible, report that clearly and try an alternative URL
-- Be specific: "supports 50+ integrations" not "supports many integrations"`;
-
-          const options: SpawnOptions = {
-              parentSessionId,
-              task,
-              model: runner.client.model,
-              mode: 'run',
-              maxDepth: 3
-          };
-
-          console.log(`[WebExplorer] Dispatching ${role} → ${c.url} (score: ${c.score ?? 'N/A'})`);
-          return this.spawner.spawn(options);
-      });
-
-      return Promise.all(spawnTasks);
-  }
-
-  async aggregateResults(parentSessionId: string, spawned: any[]) {
-      const ids = spawned.map(s => s.agentId || s.id);
-      return this.aggregator.aggregateResults(parentSessionId, ids, {
-          timeoutMs: this.config.subagentTimeout,
-          includeErrors: true
-      });
-  }
-}
 
 export const createWebExplorerNode = (
   runner: AgentRunner,
@@ -183,29 +16,27 @@ export const createWebExplorerNode = (
   toolDefs?: ToolDefinition[]
 ) => {
   const integrator = createMissionIntegrator(missionTracker);
-  const manager = new WebExplorerManager();
 
   return async (state: GraphStateType): Promise<Partial<GraphStateType>> => {
     const allTools = toolDefs || (runner as any)._buildToolDefinitions();
     const messages = state.messages || [];
 
-    // Track workflow progress
     const lastMsg = messages[messages.length - 1];
     const isSearchComplete = messages.some((m: any) => (m.role === 'tool' || m.type === 'tool') && m.name === 'web_search');
-    const hasWorkersSpawned = state.subagentSpawned && state.subagentSpawned.length > 0;
+    const hasSpawnedSubagents = state.subagentSpawned && state.subagentSpawned.length > 0;
 
     // PHASE 1: Initial Search
     if (!isSearchComplete) {
-        eventQueue?.push({ type: 'thought', content: '\n🌐 WEB EXPLORER: Initiating broad search to identify best sources...' });
+        eventQueue?.push({ type: 'thought', content: '\n🌐 WEB EXPLORER: Searching for authoritative sources...' });
         const result = await integrator.wrapNode('web_explorer', () => runAgentStep(state, {
             runner,
             toolDefs: allTools,
             eventQueue,
             nodeName: 'web_explorer',
             systemPromptOverride: (loadPrompt('web-explorer.md') || '') +
-                '\n\nPHASE: SEARCH. Use web_search to find the top 5-8 most relevant and authoritative sources. ' +
+                '\n\nPHASE: SEARCH. Use web_search to find the top 3-5 most relevant and authoritative sources. ' +
                 'Prefer official sites, documentation, established review platforms, and recent content. ' +
-                'Your search query should be specific and targeted.'
+                'Return a structured list of URLs with brief descriptions.'
         }), 'Web Explorer: Initial Search');
         return {
             ...result,
@@ -213,21 +44,19 @@ export const createWebExplorerNode = (
         };
     }
 
-    // PHASE 2: Spawn Workers (Parallel Deep-Dives)
-    if (isSearchComplete && !hasWorkersSpawned) {
+    // PHASE 2: Spawn 2 focused deep-dive sub-agents
+    if (isSearchComplete && !hasSpawnedSubagents) {
         const searchResult = messages.find((m: any) => (m.role === 'tool' || m.type === 'tool') && m.name === 'web_search');
         if (!searchResult) {
-            console.warn('[WebExplorer] Search complete but result not found in history.');
+            console.warn('[WebExplorer] Search complete but result not found.');
             return { webExplorerComplete: true, taskPhase: 'evaluating' as const, returningFromSpecialist: 'web_explorer' };
         }
 
         const searchContent = typeof searchResult.content === 'string' ? searchResult.content : JSON.stringify(searchResult.content);
-
-        // Extract the original user task for task-aware URL scoring
         const userTask = messages.find((m: any) => m.role === 'user')?.content || '';
         const taskText = typeof userTask === 'string' ? userTask : JSON.stringify(userTask);
 
-        const candidates = manager.parseBestCandidates(searchContent, taskText);
+        const candidates = extractTopCandidates(searchContent, taskText, 2);
         if (candidates.length === 0) {
             console.warn('[WebExplorer] No candidates found from search results.');
             return { webExplorerComplete: true, taskPhase: 'evaluating' as const, returningFromSpecialist: 'web_explorer' };
@@ -235,10 +64,27 @@ export const createWebExplorerNode = (
 
         eventQueue?.push({
             type: 'thought',
-            content: `\n🎯 WEB EXPLORER: Selected ${candidates.length} high-quality sources to investigate:\n${candidates.map((c, i) => `  ${i + 1}. ${c.url} (score: ${c.score})`).join('\n')}`
+            content: `\n🎯 WEB EXPLORER: Launching ${candidates.length} focused investigators:\n${candidates.map((c, i) => `  ${i + 1}. ${c.url}`).join('\n')}`
         });
 
-        const spawned = await manager.spawnWorkers(runner.currentConversationId || 'default', candidates, runner, eventQueue);
+        const spawner = getSubagentSpawner();
+        const spawned: any[] = [];
+
+        for (const candidate of candidates) {
+            const options: SpawnOptions = {
+                parentSessionId: runner.currentConversationId || 'default',
+                task: `Investigate this specific source for the research goal below.\n\nTARGET URL: ${candidate.url}\n\nMISSION:\n1. Visit the URL using navis\n2. Read the FULL page content\n3. Extract: features, pricing, pros/cons, technical details, publication date, credibility signals\n4. Return a structured report with specific facts and direct quotes`,
+                agentType: 'web-explorer',
+                context: `Research goal: ${taskText}`,
+                model: runner.client.model,
+                mode: 'run',
+                maxDepth: 2
+            };
+
+            console.log(`[WebExplorer] Dispatching investigator → ${candidate.url}`);
+            const agent = await spawner.spawn(options);
+            spawned.push(agent);
+        }
 
         return {
             subagentSpawned: spawned,
@@ -248,34 +94,50 @@ export const createWebExplorerNode = (
         };
     }
 
-    // PHASE 3: Wait and Aggregate
-    if (hasWorkersSpawned) {
-        eventQueue?.push({ type: 'thought', content: '\n📊 MANAGER: Gathering findings from parallel workers...' });
+    // PHASE 3: Wait and Synthesize
+    if (hasSpawnedSubagents) {
+        eventQueue?.push({ type: 'thought', content: '\n📊 WEB EXPLORER: Gathering findings from investigators...' });
 
-        const aggregation = await manager.aggregateResults(runner.currentConversationId || 'default', state.subagentSpawned);
+        const registry = getSubagentRegistry();
+        const ids = state.subagentSpawned.map((s: any) => s.agentId || s.id);
+        const timeout = AGENT_TIMEOUTS['web-explorer'];
+        const startTime = Date.now();
+        let completed = false;
 
-        if (aggregation.completedSubagents < state.subagentSpawned.length) {
-            // Not all done, continue waiting
-            return { webExplorerComplete: false, returningFromSpecialist: 'web_explorer' };
+        while (Date.now() - startTime < timeout) {
+            const children = registry.getChildren(runner.currentConversationId || 'default');
+            const allDone = ids.every((id: string) => {
+                const child = children.find(c => c.agentId === id);
+                return child && (child.status === 'completed' || child.status === 'failed' || child.status === 'aborted');
+            });
+            if (allDone) { completed = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
 
-        eventQueue?.push({ type: 'thought', content: '\n✅ MANAGER: All investigators finished. Synthesizing comprehensive research report...' });
+        const children = registry.getChildren(runner.currentConversationId || 'default');
+        const results: string[] = [];
+        const errors: string[] = [];
+
+        for (const id of ids) {
+            const child = children.find(c => c.agentId === id);
+            if (child?.status === 'completed' && child.result) {
+                results.push(`## Source Investigation\n\n${child.result}`);
+            } else if (child?.error) {
+                errors.push(`${id}: ${child.error}`);
+            }
+        }
+
+        eventQueue?.push({ type: 'thought', content: '\n✅ WEB EXPLORER: All investigators finished. Compiling synthesis...' });
+
+        const synthesisInput = results.join('\n\n---\n\n');
+        const errorSummary = errors.length > 0 ? `\n\nErrors:\n${errors.join('\n')}` : '';
 
         return {
             messages: [
                 ...state.messages,
                 {
                     role: 'assistant',
-                    content: `[RESEARCH AGGREGATION COMPLETE]
-
-The web explorer has finished its investigation. Here are the consolidated findings from ${state.subagentSpawned.length} parallel research agents:
-
-${aggregation.summary}
-
----
-Research Status: COMPLETE
-Sources Investigated: ${aggregation.completedSubagents}
-MISSION_COMPLETE`
+                    content: `[RESEARCH SYNTHESIS INPUT]\n\n${synthesisInput}${errorSummary}\n\n---\n\nSTATUS: COMPLETE\nSources investigated: ${results.length}/${ids.length}\nMISSION_COMPLETE`
                 } as any
             ],
             webExplorerComplete: true,
@@ -287,3 +149,43 @@ MISSION_COMPLETE`
     return { webExplorerComplete: true, returningFromSpecialist: 'web_explorer' };
   };
 };
+
+function extractTopCandidates(searchContent: string, task: string, maxCount: number): Array<{ url: string; score: number }> {
+    const candidates: Array<{ url: string; score: number }> = [];
+    const urlRegex = /https?:\/\/[^\s"'<>)]+/g;
+    const matches = searchContent.match(urlRegex) || [];
+
+    const SEARCH_ENGINES = ['google.com', 'bing.com', 'duckduckgo.com', 'brave.com', 'yahoo.com'];
+    const LOW_QUALITY = ['pinterest.com', 'facebook.com', 'twitter.com', 'instagram.com', 'tiktok.com'];
+
+    const cleanUrls = [...new Set(matches)].filter(u =>
+        !SEARCH_ENGINES.some(se => u.includes(se)) &&
+        !LOW_QUALITY.some(lq => u.includes(lq))
+    );
+
+    const taskLower = (task || '').toLowerCase();
+    const taskWords = taskLower.split(/\s+/).filter(w => w.length > 3);
+
+    for (const url of cleanUrls) {
+        const urlLower = url.toLowerCase();
+        let score = 50;
+
+        if (url.includes('.edu')) score += 20;
+        if (url.includes('.org')) score += 15;
+        if (url.includes('.gov')) score += 25;
+        if (url.includes('github.com')) score += 15;
+        if (url.includes('docs.') || url.includes('/docs/')) score += 15;
+        if (url.includes('wiki')) score += 10;
+
+        const urlKeywordMatches = taskWords.filter(w => urlLower.includes(w)).length;
+        score += urlKeywordMatches * 12;
+
+        if (url.includes('?') && url.split('?')[1].length > 50) score -= 10;
+        if (url.length > 150) score -= 5;
+
+        candidates.push({ url, score });
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.slice(0, maxCount);
+}

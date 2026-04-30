@@ -94,7 +94,7 @@ Rules:
 // ── Tool Dependency Map ───────────────────────────────────────────────────
 const TOOL_DEPENDENCY_MAP = {
     web_search: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 2000 },
-    browser_use: { dependsOn: ['web_search'], complexity: 'medium', canParallelize: true, avgDurationMs: 15000 },
+    navis: { dependsOn: ['web_search'], complexity: 'medium', canParallelize: true, avgDurationMs: 15000 },
     view_file: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 500 },
     read: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 500 },
     memory_search: { dependsOn: [], complexity: 'low', canParallelize: true, avgDurationMs: 1000 },
@@ -192,7 +192,7 @@ function buildSteps(userInput, analysis) {
     if (analysis.requiresExternalData) {
         if (urls.length > 0) {
             for (const url of urls.slice(0, 3)) {
-                const s = mk(`Browse and extract: ${url.slice(0, 60)}`, 'browser_use', [], true, 'medium', 'normal', 1);
+                const s = mk(`Browse and extract: ${url.slice(0, 60)}`, 'navis', [], true, 'medium', 'normal', 1);
                 steps.push(s);
                 gatherIds.push(s.id);
             }
@@ -357,7 +357,7 @@ function getAGIHints(userInput) {
         hints.push(`Approach: ${analysis.suggestedApproach} (${analysis.estimatedSteps} estimated steps)`);
     }
     if (analysis.complexity === 'complex') {
-        hints.push('COMPLEX: Consider using spawn_agent for subtasks.');
+        hints.push('COMPLEX: Break into independent subtasks that can be delegated to specialized agents.');
     }
     return hints.join(' ');
 }

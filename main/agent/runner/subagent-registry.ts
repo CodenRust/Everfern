@@ -10,11 +10,14 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 
+export type AgentType = 'generic' | 'coding-specialist' | 'web-explorer' | 'data-analyst' | 'computer-use';
+
 export interface SubagentEntry {
     agentId: string;
     parentSessionId: string;
     sessionKey: string;
     task: string;
+    agentType: AgentType;
     mode: 'run' | 'session';
     status: 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
     createdAt: number;

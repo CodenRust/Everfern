@@ -189,7 +189,7 @@ describe('Bug Condition — Path B: Nudge message references computer_use instea
 
     // Check for per-agent branching in the nudge section
     // The fix should introduce something like:
-    //   nodeName === 'web_explorer' ? "web_search, browser_use, or web_fetch" : ...
+    //   nodeName === 'web_explorer' ? "web_search, navis, or web_fetch" : ...
     const hasWebExplorerNudgeBranch =
       source.includes("web_explorer") &&
       (
@@ -209,11 +209,11 @@ describe('Bug Condition — Path B: Nudge message references computer_use instea
    * Test B2: The nudge message for web_explorer must reference web explorer tools
    *
    * On UNFIXED code: the nudge message only references 'computer_use' — FAILS
-   * After fix: the nudge message references 'web_search', 'browser_use', or 'web_fetch'
+   * After fix: the nudge message references 'web_search', 'navis', or 'web_fetch'
    *
    * **Validates: Requirements 1.3, 2.3**
    */
-  it('should reference web_search, browser_use, or web_fetch in the web_explorer nudge path', () => {
+  it('should reference web_search, navis, or web_fetch in the web_explorer nudge path', () => {
     const source = fs.readFileSync(AGENT_RUNTIME_PATH, 'utf-8');
 
     // Find the nudge message section (around the isSpecializedAgent block)
@@ -230,7 +230,7 @@ describe('Bug Condition — Path B: Nudge message references computer_use instea
       // (either in a ternary, if/else, or switch)
       const referencesWebExplorerTools =
         nudgeSectionText.includes('web_search') ||
-        nudgeSectionText.includes('browser_use') ||
+        nudgeSectionText.includes('navis') ||
         nudgeSectionText.includes('web_fetch');
 
       // On UNFIXED code: this is false — FAILS (confirms bug)
@@ -263,7 +263,7 @@ describe('Bug Condition — Path B: Nudge message references computer_use instea
     const hasAgentSpecificHint =
       source.includes('agentToolHint') ||
       source.match(/nodeName\s*===\s*['"]web_explorer['"][\s\S]{0,100}web_search/) !== null ||
-      source.match(/web_explorer[\s\S]{0,50}web_search[\s\S]{0,50}browser_use/) !== null;
+      source.match(/web_explorer[\s\S]{0,50}web_search[\s\S]{0,50}navis/) !== null;
 
     // On UNFIXED code: this is false — FAILS (confirms bug)
     expect(hasAgentSpecificHint).toBe(true);

@@ -6,7 +6,6 @@ const agent_1 = require("./agent");
 const history_1 = require("./history");
 const store_handlers_1 = require("./store-handlers");
 const tool_settings_handlers_1 = require("./tool-settings-handlers");
-const browser_use_1 = require("./browser-use");
 const chat_title_generator_1 = require("../lib/chat-title-generator");
 function setupIPC(historyStore) {
     (0, system_1.registerSystemHandlers)();
@@ -14,6 +13,5 @@ function setupIPC(historyStore) {
     (0, history_1.registerHistoryHandlers)(historyStore);
     (0, store_handlers_1.registerStoreHandlers)();
     (0, tool_settings_handlers_1.registerToolSettingsHandlers)();
-    (0, browser_use_1.registerBrowserUseHandlers)();
     (0, chat_title_generator_1.registerChatTitleHandler)();
 }

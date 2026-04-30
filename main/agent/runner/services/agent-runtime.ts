@@ -238,7 +238,7 @@ export async function runAgentStep(
         runner.telemetry.warn(`[AgentRuntime] ${nodeName} failed to call a tool. Nudging...`);
 
         const agentToolHint =
-          nodeName === 'web_explorer' ? `'web_search' or 'browser_use'` :
+          nodeName === 'web_explorer' ? `'web_search' or 'navis'` :
           nodeName === 'coding_specialist' ? `your coding tools (read_file, write_file, terminal_execute, etc.)` :
           nodeName === 'data_analyst' ? `your data analysis tools (python_executor, read_file, etc.)` :
           `'computer_use'`;

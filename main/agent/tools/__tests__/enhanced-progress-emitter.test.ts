@@ -30,7 +30,7 @@ interface SubAgentProgressEvent {
   };
   timelineBranch?: {
     parentId?: string;
-    agentType?: 'web-explorer' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
+    agentType?: 'web-explorer' | 'navis' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
     branchLevel?: number;
     visualPosition?: { x: number; y: number };
     branchStatus?: 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
