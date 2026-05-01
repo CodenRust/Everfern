@@ -68,7 +68,7 @@ export class AgentRunner {
     // Start async initialization but don't block constructor
     this.initializePiTools();
     this.initializeSkills();
-    this.telemetry = new TelemetryLogger();
+    this.telemetry = new TelemetryLogger(this.client.model, this.config.silent);
   }
 
   /**

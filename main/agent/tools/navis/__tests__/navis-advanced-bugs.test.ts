@@ -89,10 +89,10 @@ describe('Fix: open_tab switches to new tab', () => {
 });
 
 describe('Integration: orchestrator uses all fixes together', () => {
-  it('orchestrator calls session, getTabs, waits, and slices', () => {
+  it('orchestrator calls session, gets pages, waits, and slices', () => {
     const src = read('orchestrator.ts');
     expect(src).toContain('this.session');
-    expect(src).toContain('await this.session.getTabs()');
+    expect(src).toContain('this.session.allPages');
     expect(src).toContain('waitForLoadState');
     expect(src).toContain('.slice(0, maxActionsPerStep)');
     expect(src).not.toContain('(this.session as any)');

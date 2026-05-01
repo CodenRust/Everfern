@@ -11,7 +11,7 @@ exports.captureInteractiveElements = captureInteractiveElements;
 exports.parseRefs = parseRefs;
 exports.formatElementsForPrompt = formatElementsForPrompt;
 async function captureInteractiveElements(page) {
-    const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 5000 });
+    const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 2000 });
     const refs = parseRefs(raw);
     return { raw, refs };
 }

@@ -30,6 +30,8 @@ async function executeAction(actionName, args, page, session, logger, step, maxS
                 return await executeSwitchTab(args, session, logger, step, maxSteps);
             case 'close_tab':
                 return await executeCloseTab(page, session, logger, step, maxSteps);
+            case 'solve_captcha':
+                return await executeSolveCaptcha(page, session, logger, step, maxSteps);
             case 'done':
                 return executeDone(args);
             default:
@@ -124,6 +126,82 @@ async function executeCloseTab(page, session, logger, step, maxSteps) {
     await session.closeTab(page);
     logger?.tabChange(step, maxSteps, 'tab closed');
     return { success: true, message: 'Tab closed', stateChanged: true };
+}
+async function executeSolveCaptcha(page, session, logger, step, maxSteps) {
+    logger?.tabChange(step, maxSteps, 'solving captcha...');
+    await session.setOverlayStatus('Solving captcha...');
+    const solved = await page.evaluate(() => {
+        const title = document.title.toLowerCase();
+        const bodyText = document.body?.innerText?.toLowerCase() || '';
+        if (title.includes('hcaptcha') || bodyText.includes('hcaptcha')) {
+            const checkbox = document.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                checkbox.click();
+                return true;
+            }
+            const label = document.querySelector('label[for]');
+            if (label) {
+                label.click();
+                return true;
+            }
+        }
+        if (title.includes('cloudflare') || bodyText.includes('cloudflare') || bodyText.includes('verifying')) {
+            const checkbox = document.querySelector('#challenge-stage input[type="checkbox"]');
+            if (checkbox) {
+                checkbox.click();
+                return true;
+            }
+            const cfBtn = document.querySelector('.cf-solve input, .cf-button, .turnstile-input');
+            if (cfBtn) {
+                cfBtn.click();
+                return true;
+            }
+        }
+        if (bodyText.includes('confirm you') || bodyText.includes('verify you') || bodyText.includes('security check')) {
+            const buttons = document.querySelectorAll('button, [role="button"], input[type="submit"]');
+            for (const btn of Array.from(buttons)) {
+                const el = btn;
+                const text = el.textContent?.toLowerCase() || '';
+                if (text.includes('confirm') || text.includes('verify') || text.includes('continue') || text.includes('proceed')) {
+                    el.click();
+                    return true;
+                }
+            }
+            const links = document.querySelectorAll('a');
+            for (const link of Array.from(links)) {
+                const el = link;
+                const text = el.textContent?.toLowerCase() || '';
+                if (text.includes('confirm') || text.includes('verify') || text.includes('continue')) {
+                    el.click();
+                    return true;
+                }
+            }
+        }
+        const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+        for (const cb of Array.from(checkboxes)) {
+            const el = cb;
+            if (!el.checked) {
+                el.click();
+                return true;
+            }
+        }
+        return false;
+    });
+    if (solved) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        logger?.tabChange(step, maxSteps, 'captcha solved, waiting for redirect...');
+        return { success: true, message: 'Captcha solved, waiting for page to proceed', stateChanged: true };
+    }
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const stillCaptcha = await page.evaluate(() => {
+        const title = document.title.toLowerCase();
+        const body = document.body?.innerText?.toLowerCase() || '';
+        return title.includes('captcha') || body.includes('captcha') || body.includes('verify') || body.includes('human');
+    });
+    if (stillCaptcha) {
+        return { success: false, message: 'Captcha still present, attempting alternate approach', stateChanged: false };
+    }
+    return { success: true, message: 'Page no longer shows captcha challenge', stateChanged: true };
 }
 function executeDone(args) {
     return { success: args.success, message: args.text, stateChanged: false };

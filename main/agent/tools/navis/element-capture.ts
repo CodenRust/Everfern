@@ -14,7 +14,7 @@ export interface AriaSnapshotResult {
 }
 
 export async function captureInteractiveElements(page: Page): Promise<AriaSnapshotResult> {
-  const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 5000 });
+  const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 2000 });
   const refs = parseRefs(raw);
   return { raw, refs };
 }

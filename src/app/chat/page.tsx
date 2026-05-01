@@ -3043,7 +3043,9 @@ export default function ChatPage() {
                                                                 </div>
                                                             )}
                                                             {msg.toolCalls?.filter(tc => tc.toolName === 'write' || tc.toolName === 'write_to_file' || tc.toolName === 'write_file').map(tc => (
-                                                                <WriteDiffCard key={`write-${tc.id}`} tc={tc} />
+                                                                <div className="my-6" key={`write-${tc.id}`}>
+                                                                    <WriteDiffCard tc={tc} />
+                                                                </div>
                                                             ))}
                                                             {msg.toolCalls?.filter(tc => tc.toolName === 'computer_use').map(tc => (
                                                                 <ComputerUseResultCard key={`cu-${tc.id}`} tc={tc} />

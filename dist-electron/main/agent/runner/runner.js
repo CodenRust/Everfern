@@ -76,7 +76,7 @@ class AgentRunner {
         // Start async initialization but don't block constructor
         this.initializePiTools();
         this.initializeSkills();
-        this.telemetry = new telemetry_logger_1.TelemetryLogger();
+        this.telemetry = new telemetry_logger_1.TelemetryLogger(this.client.model, this.config.silent);
     }
     /**
      * Ensure all asynchronous tool/skill initialization is complete

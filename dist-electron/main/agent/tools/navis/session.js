@@ -43,7 +43,6 @@ class BrowserSession {
         try {
             this.browser = await chromium.launch({
                 headless,
-                channel: 'chrome',
                 args: [
                     '--no-sandbox',
                     '--disable-dev-shm-usage',

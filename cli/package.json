@@ -1,0 +1,22 @@
+{
+  "name": "everfern-cli",
+  "version": "0.1.1",
+  "description": "EverFern CLI - Terminal UI for your autonomous AI workplace agent",
+  "bin": {
+    "everfern": "./src/cli.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "start": "tsx src/cli.ts",
+    "tui": "node -e \"const { runTui } = require('./src/tui/index.js'); runTui({ session: 'main' });\""
+  },
+  "dependencies": {
+    "@mariozechner/pi-tui": "^0.8.0",
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "commander": "^13.0.0",
+    "inquirer": "^8.2.7",
+    "ora": "^5.4.1",
+    "tsx": "^4.21.0"
+  }
+}

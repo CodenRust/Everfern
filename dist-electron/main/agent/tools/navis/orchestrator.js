@@ -45,6 +45,7 @@ exports.NAVIS_DECISION_SCHEMA = {
                     { properties: { switch_tab: { type: 'object', properties: { index: { type: 'number' }, target: { type: 'string' } }, additionalProperties: false } }, required: ['switch_tab'], additionalProperties: false },
                     { properties: { close_tab: { type: 'object', additionalProperties: false } }, required: ['close_tab'], additionalProperties: false },
                     { properties: { done: { type: 'object', properties: { success: { type: 'boolean' }, text: { type: 'string' } }, required: ['success', 'text'], additionalProperties: false } }, required: ['done'], additionalProperties: false },
+                    { properties: { solve_captcha: { type: 'object', additionalProperties: false } }, required: ['solve_captcha'], additionalProperties: false },
                 ],
             },
             minItems: 1,
@@ -97,25 +98,47 @@ class NavisOrchestrator {
     getEventLogger() { return this.logger; }
     async run(options) {
         const { task, maxSteps = 25, maxActionsPerStep = 8, headless = false, startUrl } = options;
+        const runStart = Date.now();
         await this.session.launch({ headless, startUrl, logger: this.logger });
+        console.log(`[Navis] ⏱ launch: ${Date.now() - runStart}ms`);
         await this.session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => { });
+        console.log(`[Navis] ⏱ initial page load: ${Date.now() - runStart}ms`);
+        console.log(`[Navis] Browser launched, starting loop (task: "${task.slice(0, 60)}...")`);
         let steps = 0;
         let history = [];
         let lastResult = '';
         let snapshot = null;
         let lastUrl = '';
+        // Background snapshot: started after actions change the page, awaited at next step start
+        let pendingSnapshot = null;
         try {
             while (steps < maxSteps) {
                 steps++;
                 const page = this.session.page;
+                const t1 = Date.now();
                 const url = page.url();
                 const title = await page.title().catch(() => 'Unknown');
-                const tabs = await this.session.getTabs();
-                const tabsStr = tabs.length > 1
-                    ? tabs.map((t, i) => `  Tab ${i}: ${t.url} (${t.title})`).join('\n')
+                const pages = this.session.allPages;
+                const tabCount = pages.length;
+                const tabsStr = tabCount > 1
+                    ? pages.map((p, i) => `  Tab ${i}: ${p.url()}`).join('\n')
                     : `1 tab open: ${url}`;
-                // Only re-capture if page changed or first step
-                if (url !== lastUrl || !snapshot) {
+                // Use pre-captured snapshot from previous step (captured in background during AI call)
+                const t2 = Date.now();
+                if (pendingSnapshot) {
+                    const bgSnapshot = await pendingSnapshot;
+                    if (bgSnapshot) {
+                        snapshot = bgSnapshot;
+                        lastUrl = url;
+                    }
+                    pendingSnapshot = null;
+                }
+                else if (!snapshot || url !== lastUrl) {
+                    snapshot = await (0, element_capture_1.captureInteractiveElements)(page);
+                    lastUrl = url;
+                }
+                const t3 = Date.now();
+                if (!snapshot) {
                     snapshot = await (0, element_capture_1.captureInteractiveElements)(page);
                     lastUrl = url;
                 }
@@ -127,8 +150,8 @@ class NavisOrchestrator {
                 const inputContext = [
                     `Task: ${task}`,
                     `History: ${historyStr}`,
-                    `Current Tab: #${tabs.findIndex(t => t.url === url)} — ${url} (${title})`,
-                    `Open Tabs (${tabs.length}):\n${tabsStr}`,
+                    `Current Tab: ${url} (${title})`,
+                    `Open Tabs (${tabCount}):\n${tabsStr}`,
                     `Elements:`,
                     elementsFormatted,
                     lastResult ? `Last: ${lastResult}` : '',
@@ -137,17 +160,20 @@ class NavisOrchestrator {
                     .replace(/\{\{max_actions\}\}/g, String(maxActionsPerStep));
                 const nextPrompt = NEXT_STEP_PROMPT
                     .replace(/\{url_placeholder\}/g, ` (${url})`)
-                    .replace(/\{tabs_placeholder\}/g, ` (${tabs.length} tabs open)`)
+                    .replace(/\{tabs_placeholder\}/g, ` (${tabCount} tabs open)`)
                     .replace(/\{results_placeholder\}/g, lastResult ? ` (${lastResult})` : ' (None)')
                     .replace(/\{content_above_placeholder\}/g, '')
                     .replace(/\{content_below_placeholder\}/g, '');
+                const t4 = Date.now();
                 const decision = await this.callAI(systemPrompt, inputContext, nextPrompt);
+                const t5 = Date.now();
                 if (!decision) {
                     this.logger.error('AI returned no valid decision');
                     break;
                 }
                 this.logger.aiDecision(steps, maxSteps, decision.current_state?.next_goal);
                 await this.session.setOverlayStatus(decision.current_state?.next_goal || 'Working...');
+                const t6 = Date.now();
                 const actions = (decision.action || []).slice(0, maxActionsPerStep);
                 let stateChanged = false;
                 for (const actionObj of actions) {
@@ -168,18 +194,31 @@ class NavisOrchestrator {
                         break;
                     }
                 }
+                const t7 = Date.now();
+                let captureLabel = 'sync';
                 if (stateChanged) {
                     const currentUrl = page.url();
                     if (currentUrl !== lastUrl) {
-                        await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => { });
+                        // Start capturing next page's elements in background — hidden behind next AI call
+                        const captureUrl = currentUrl;
+                        pendingSnapshot = page.waitForLoadState('domcontentloaded', { timeout: 1500 })
+                            .then(() => (0, element_capture_1.captureInteractiveElements)(page))
+                            .then(r => { console.log(`[Navis] BG capture ready (${captureUrl})`); return r; })
+                            .catch(() => { console.log(`[Navis] BG capture failed`); return null; });
+                        captureLabel = 'bg';
                     }
                     else {
-                        await new Promise((r) => setTimeout(r, 100));
+                        await new Promise((r) => setTimeout(r, 20));
                     }
                 }
+                const t8 = Date.now();
+                const stepMs = t8 - t1;
+                const wallClock = Date.now() - runStart;
+                console.log(`[Navis Step ${steps}] pageInfo=${t2 - t1}ms capture=${t3 - t2}ms build=${t4 - t3}ms AI=${t5 - t4}ms actions=${t6 - t5}ms wait=${t8 - t7}ms(${captureLabel}) STEP=${stepMs}ms WALL=${wallClock}ms`);
                 this.logger.stepComplete(steps, maxSteps, lastResult);
                 history.push(`${decision.current_state?.next_goal} → ${lastResult}`);
             }
+            console.log(`[Navis] ⏱ Total wall clock: ${Date.now() - runStart}ms over ${steps} steps`);
             return {
                 success: false,
                 output: `Reached maximum ${maxSteps} steps. Last result: ${lastResult}`,
@@ -196,6 +235,7 @@ class NavisOrchestrator {
     }
     async callAI(systemPrompt, inputContext, nextStepPrompt) {
         try {
+            const aiStart = Date.now();
             const response = await this.aiClient.chat({
                 messages: [
                     { role: 'system', content: systemPrompt },
@@ -206,6 +246,7 @@ class NavisOrchestrator {
                 jsonSchema: exports.NAVIS_DECISION_SCHEMA,
                 temperature: 0.1,
             });
+            console.log(`[Navis] AI call: ${Date.now() - aiStart}ms (model: ${this.model})`);
             const raw = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
             return this.extractJson(raw);
         }

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { MarkdownRenderer } from "./MarkdownComponents";
 
 interface SimpleFileNotificationProps {
   filename: string;
@@ -25,8 +26,10 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
   onOpenInEditor,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const ext = filename.split(".").pop()?.toUpperCase() ?? "FILE";
+  const isMd = filename.toLowerCase().endsWith(".md") || filename.toLowerCase().endsWith(".markdown");
   const fileSizeKB = (size / 1024).toFixed(1);
   const lineCount = content.split("\n").length;
 
@@ -45,40 +48,40 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="group relative flex items-center gap-4 p-3 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow"
+      className="group rounded-2xl border border-[#e5e7eb] bg-white shadow-sm hover:shadow-md transition-shadow"
     >
-      {/* ── Left Side: Thumbnail Preview ── */}
-      <div className="relative flex-shrink-0 w-16 h-16 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden">
-        <div className="flex flex-col items-center gap-1.5">
-          <div className="w-7 h-9 rounded bg-white border border-gray-200 shadow-sm flex items-end justify-center pb-1">
-            <span className="text-[7px] font-bold tracking-tighter text-gray-400">
-              {ext}
-            </span>
+      {/* ── Main Card Row ── */}
+      <div className="flex items-center gap-4 px-4 py-3.5 rounded-t-2xl border border-[#e5e7eb]" style={{ borderBottom: "none" }}>
+        {/* ── Left Side: Thumbnail Preview ── */}
+        <div className="relative flex-shrink-0 w-14 h-14 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden">
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="w-7 h-9 rounded bg-white border border-gray-200 shadow-sm flex items-end justify-center pb-1">
+              <span className="text-[7px] font-bold tracking-tighter text-gray-400">
+                {ext}
+              </span>
+            </div>
+
+            {status === "creating" && (
+              <div className="flex gap-0.5">
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="w-0.5 h-0.5 rounded-full bg-blue-400"
+                    animate={{ opacity: [0.3, 1, 0.3] }}
+                    transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
-          {status === "creating" && (
-            <div className="flex gap-0.5">
-              {[0, 1, 2].map((i) => (
-                <motion.div
-                  key={i}
-                  className="w-0.5 h-0.5 rounded-full bg-blue-400"
-                  animate={{ opacity: [0.3, 1, 0.3] }}
-                  transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                />
-              ))}
-            </div>
+          {isNew && status === "success" && (
+            <div className="absolute top-1 left-1 w-2 h-2 bg-blue-500 rounded-full border-2 border-white" />
           )}
         </div>
 
-        {isNew && status === "success" && (
-          <div className="absolute top-1 left-1 w-2 h-2 bg-blue-500 rounded-full border-2 border-white" />
-        )}
-      </div>
-
-      {/* ── Right Side: Content & Actions ── */}
-      <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
-        {/* File Details */}
-        <div className="min-w-0">
+        {/* ── Center: File Details ── */}
+        <div className="flex-1 min-w-0">
           <h4 className="text-[14px] font-semibold text-gray-900 truncate leading-snug">
             {filename}
           </h4>
@@ -93,8 +96,22 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
           </div>
         </div>
 
-        {/* Action Group */}
-        <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-xl border border-gray-100">
+        {/* ── Right Side: Action Group ── */}
+        <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-xl border border-gray-100 shrink-0">
+          {isMd && status === "success" && (
+            <ToolbarBtn title={isExpanded ? "Collapse preview" : "Preview markdown"} onClick={() => setIsExpanded(!isExpanded)}>
+              {isExpanded ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              )}
+            </ToolbarBtn>
+          )}
+
           <ToolbarBtn title="View" onClick={() => onViewFile?.()}>
             <EyeIcon />
           </ToolbarBtn>
@@ -132,6 +149,26 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
           )}
         </div>
       </div>
+
+      {/* ── Expandable Markdown Preview ── */}
+      <AnimatePresence>
+        {isExpanded && isMd && status === "success" && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            <div className="px-6 py-6">
+              <div className="flex justify-center">
+                <div className="bg-gray-50 rounded-xl border border-gray-100 px-8 py-6 shadow-sm max-w-lg w-full">
+                  <MarkdownRenderer content={content} />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

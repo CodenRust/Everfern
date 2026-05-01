@@ -10,6 +10,7 @@
 !.yarn/releases
 !.yarn/versions
 .kiro/
+cli/node_modules
 # testing
 /coverage
 Everfern-win32-x64/

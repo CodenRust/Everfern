@@ -37,9 +37,11 @@ class TelemetryLogger {
     currentFrame = 0;
     spinTimer = null;
     currentTask = 'Initializing...';
-    constructor(agentId = 'EverFern-1') {
+    silent = false;
+    constructor(agentId = 'EverFern-1', silent = false) {
         this.agentId = agentId;
         this.startTime = Date.now();
+        this.silent = silent;
     }
     setAgentId(id) {
         this.agentId = id;
@@ -58,6 +60,8 @@ class TelemetryLogger {
         }
     }
     startSpinner(task) {
+        if (this.silent)
+            return;
         this.stopSpinner();
         this.currentTask = task;
         this.spinTimer = setInterval(() => {
@@ -66,11 +70,15 @@ class TelemetryLogger {
         }, 80);
     }
     updateSpinner(task) {
+        if (this.silent)
+            return;
         this.startSpinner(task);
     }
     printLog(msg, resumeSpinnerTask) {
         this.stopSpinner();
-        console.log(msg);
+        if (!this.silent) {
+            console.log(msg);
+        }
         if (resumeSpinnerTask) {
             this.startSpinner(resumeSpinnerTask);
         }
@@ -80,9 +88,11 @@ class TelemetryLogger {
      */
     begin(task) {
         this.stopSpinner();
-        const divider = `\x1b[90m${'='.repeat(90)}\x1b[0m`;
-        const header = `\x1b[1m\x1b[34m[🚀 INITIATE]\x1b[0m Agent: \x1b[33m${this.agentId}\x1b[0m | Objective: \x1b[97m${task.substring(0, 60)}${task.length > 60 ? '...' : ''}\x1b[0m`;
-        console.log(`\n${divider}\n${this.getTimestamp()} ${header}\n${divider}`);
+        if (!this.silent) {
+            const divider = `\x1b[90m${'='.repeat(90)}\x1b[0m`;
+            const header = `\x1b[1m\x1b[34m[🚀 INITIATE]\x1b[0m Agent: \x1b[33m${this.agentId}\x1b[0m | Objective: \x1b[97m${task.substring(0, 60)}${task.length > 60 ? '...' : ''}\x1b[0m`;
+            console.log(`\n${divider}\n${this.getTimestamp()} ${header}\n${divider}`);
+        }
         this.startSpinner('Booting up intelligence core...');
     }
     /**
@@ -126,12 +136,14 @@ class TelemetryLogger {
      */
     terminate(success, responseSummary) {
         this.stopSpinner();
-        const status = success ? '\x1b[32mCOMPLETED\x1b[0m' : '\x1b[31mABORTED\x1b[0m';
-        const summary = responseSummary ? ` | Result: \x1b[97m${responseSummary.substring(0, 50)}...\x1b[0m` : '';
-        const duration = ((Date.now() - this.startTime) / 1000).toFixed(2);
-        const divider = `\x1b[90m${'='.repeat(90)}\x1b[0m`;
-        const finishLine = `\x1b[1m\x1b[32m[🏁 COMPLETE]\x1b[0m Mission ${status} | Duration: \x1b[1m${duration}s\x1b[0m | Final Steps: \x1b[1m${this.iteration}\x1b[0m${summary}`;
-        console.log(`${divider}\n${this.getTimestamp()} ${finishLine}\n${divider}\n`);
+        if (!this.silent) {
+            const status = success ? '\x1b[32mCOMPLETED\x1b[0m' : '\x1b[31mABORTED\x1b[0m';
+            const summary = responseSummary ? ` | Result: \x1b[97m${responseSummary.substring(0, 50)}...\x1b[0m` : '';
+            const duration = ((Date.now() - this.startTime) / 1000).toFixed(2);
+            const divider = `\x1b[90m${'='.repeat(90)}\x1b[0m`;
+            const finishLine = `\x1b[1m\x1b[32m[🏁 COMPLETE]\x1b[0m Mission ${status} | Duration: \x1b[1m${duration}s\x1b[0m | Final Steps: \x1b[1m${this.iteration}\x1b[0m${summary}`;
+            console.log(`${divider}\n${this.getTimestamp()} ${finishLine}\n${divider}\n`);
+        }
     }
 }
 exports.TelemetryLogger = TelemetryLogger;

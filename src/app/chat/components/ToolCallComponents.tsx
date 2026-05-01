@@ -551,91 +551,84 @@ const WriteDiffCard = ({ tc }: { tc: any }) => {
     if (tc.status !== 'done' && tc.status !== 'running') return null;
 
     return (
-        <div className="mb-6 w-full max-w-3xl">
-            {/* ── Main Notification Card ── */}
-            <div className={`relative z-10 transition-transform duration-200 ${expanded ? 'scale-[1.01]' : ''}`}>
-                <SimpleFileNotification
-                    filename={filename}
-                    content={content}
-                    size={content.length}
-                    isNew={isNew}
-                    status={tc.status === 'running' ? 'creating' : tc.status === 'done' ? 'success' : 'error'}
-                    onViewFile={() => setExpanded(!expanded)}
-                    onCopyContent={() => navigator.clipboard.writeText(content)}
-                    onOpenInEditor={() => {
-                        const blob = new Blob([content], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                    }}
-                />
-            </div>
+        <div className="w-full max-w-3xl">
+            <SimpleFileNotification
+                filename={filename}
+                content={content}
+                size={content.length}
+                isNew={isNew}
+                status={tc.status === 'running' ? 'creating' : tc.status === 'done' ? 'success' : 'error'}
+                onViewFile={() => setExpanded(!expanded)}
+                onCopyContent={() => navigator.clipboard.writeText(content)}
+                onOpenInEditor={() => {
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }}
+            />
 
-            {/* ── Unified Diff Viewer Panel ── */}
             <AnimatePresence>
                 {expanded && (
                     <motion.div
-                        initial={{ height: 0, opacity: 0, y: -20 }}
-                        animate={{ height: 'auto', opacity: 1, y: -8 }}
-                        exit={{ height: 0, opacity: 0, y: -20 }}
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
                         transition={{ type: "spring", duration: 0.4, bounce: 0 }}
-                        className="overflow-hidden"
+                        className="overflow-hidden mt-1"
                     >
-                        <div className="pt-2"> {/* Offset for the overlap effect */}
-                            <div className="rounded-b-2xl border-x border-b border-gray-200 bg-white shadow-sm">
-                                {/* Sub-header / Breadcrumbs */}
-                                <div className="flex items-center justify-between px-4 py-2 bg-gray-50/50 border-b border-gray-100">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                                        <span className="text-[11px] font-mono text-gray-400 truncate max-w-[300px]">
-                                            {path || filename}
-                                        </span>
-                                    </div>
-
-                                    <button
-                                        onClick={() => setExpanded(false)}
-                                        className="group p-1 hover:bg-gray-200/50 rounded-md transition-colors"
-                                    >
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-gray-400 group-hover:text-gray-600">
-                                            <path d="M18 6L6 18M6 6l12 12" />
-                                        </svg>
-                                    </button>
+                        <div className="rounded-b-2xl border-x border-b border-gray-200 bg-white shadow-sm">
+                            {/* Sub-header / Breadcrumbs */}
+                            <div className="flex items-center justify-between px-4 py-2 bg-gray-50/50 border-b border-gray-100">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                                    <span className="text-[11px] font-mono text-gray-400 truncate max-w-[300px]">
+                                        {path || filename}
+                                    </span>
                                 </div>
 
-                                {/* Diff Area */}
-                                <div className="p-1 max-h-[500px] overflow-y-auto custom-scrollbar">
-                                    {/* Component Placeholder - Ensure your DiffViewer has internal padding */}
-                                    <div className="rounded-xl overflow-hidden border border-gray-100">
-                                        <DiffViewer
-                                            oldFile={hasDiff ? { content: oldContent, name: filename } : { content: '', name: filename }}
-                                            newFile={{ content, name: filename }}
-                                            viewMode="unified"
-                                            showLineNumbers
-                                            showStats
-                                            variant="ghost"
-                                        />
-                                    </div>
-                                </div>
+                                <button
+                                    onClick={() => setExpanded(false)}
+                                    className="group p-1 hover:bg-gray-200/50 rounded-md transition-colors"
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-gray-400 group-hover:text-gray-600">
+                                        <path d="M18 6L6 18M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
 
-                                {/* Footer / Status */}
-                                <div className="px-4 py-2 border-t border-gray-50 flex justify-end">
-                                    <p className="text-[10px] uppercase tracking-widest font-bold text-gray-300">
-                                        {hasDiff ? 'Modification' : 'New File'}
-                                    </p>
+                            {/* Diff Area */}
+                            <div className="p-1 max-h-[500px] overflow-y-auto custom-scrollbar">
+                                <div className="rounded-xl overflow-hidden border border-gray-100">
+                                    <DiffViewer
+                                        oldFile={hasDiff ? { content: oldContent, name: filename } : { content: '', name: filename }}
+                                        newFile={{ content, name: filename }}
+                                        viewMode="unified"
+                                        showLineNumbers
+                                        showStats
+                                        variant="ghost"
+                                    />
                                 </div>
+                            </div>
+
+                            {/* Footer / Status */}
+                            <div className="px-4 py-2 border-t border-gray-50 flex justify-end">
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-gray-300">
+                                    {hasDiff ? 'Modification' : 'New File'}
+                                </p>
                             </div>
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
-        </div>
-    );
-};
+            </div>
+        );
+    };
 
 // ── ComputerUseResultCard ────────────────────────────────────────────────────
 const ComputerUseResultCard = ({ tc }: { tc: ToolCallDisplay }) => {

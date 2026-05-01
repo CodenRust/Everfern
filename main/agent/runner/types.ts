@@ -126,4 +126,6 @@ export interface AgentRunnerConfig {
   };
   /** Callback to check if execution should be aborted (user clicked stop) */
   shouldAbort?: () => boolean;
+  /** Whether to suppress internal console logging */
+  silent?: boolean;
 }
