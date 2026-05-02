@@ -87,11 +87,12 @@ Results: {results_placeholder}`;
 // ─────────────────────────────────────────────────────────────────────────────
 class NavisOrchestrator {
     aiClient;
-    model = 'minimax-m2.7:cloud';
+    model;
     session;
     logger;
     constructor(aiClient, logger) {
         this.aiClient = aiClient;
+        this.model = aiClient.model;
         this.logger = logger || new logger_1.NavisLogger();
         this.session = new session_1.BrowserSession();
     }

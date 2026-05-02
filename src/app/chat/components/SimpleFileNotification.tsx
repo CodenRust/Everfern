@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MarkdownRenderer } from "./MarkdownComponents";
+import { ChevronDownIcon, FolderIcon } from "@heroicons/react/24/outline";
 
 interface SimpleFileNotificationProps {
   filename: string;
@@ -13,7 +13,46 @@ interface SimpleFileNotificationProps {
   onViewFile?: () => void;
   onCopyContent?: () => void;
   onOpenInEditor?: () => void;
+  appName?: string;
 }
+
+const AntigravityIcon = () => (
+    <div className="w-[18px] h-[18px] bg-[#111] rounded-[5px] flex items-center justify-center shadow-sm">
+        <span className="text-white text-[10px] font-black font-sans leading-none" style={{ transform: 'translateY(-0.5px)' }}>A</span>
+    </div>
+);
+
+const TiltedFileIcon = ({ extension }: { extension: string }) => {
+    return (
+        <div className="relative w-[120px] h-[100px] shrink-0 pointer-events-none select-none">
+            {/* Card 1 — left (Background) */}
+            <div className="absolute left-[-12px] top-[14px] w-[80px] h-[80px] bg-white border border-[#dcdad0] rounded-[10px] shadow-[0_2px_10px_rgba(0,0,0,0.04)] p-[12px_10px] flex flex-col gap-[4px] opacity-30 scale-90 -rotate-3 origin-left">
+                <div className="w-[45%] h-[4px] bg-[#CCCAC4] rounded-[1px]" />
+                <div className="w-[85%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[65%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[75%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+            </div>
+
+            {/* Card 3 — right (Background) */}
+            <div className="absolute left-[52px] top-[14px] w-[80px] h-[80px] bg-white border border-[#dcdad0] rounded-[10px] shadow-[0_2px_10px_rgba(0,0,0,0.04)] p-[12px_10px] flex flex-col gap-[4px] opacity-30 scale-90 rotate-3 origin-right">
+                <div className="w-[45%] h-[4px] bg-[#CCCAC4] rounded-[1px]" />
+                <div className="w-[85%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[65%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[75%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+            </div>
+
+            {/* Card 2 — center (Main) */}
+            <div className="absolute left-[20px] top-0 w-[84px] h-[94px] bg-white border border-[#dcdad0] rounded-[12px] shadow-[0_8px_24px_rgba(0,0,0,0.08)] p-[14px_12px] flex flex-col gap-[6px] z-10 transition-transform duration-300 group-hover:scale-105">
+                <div className="w-[55%] h-[5px] bg-[#CCCAC4] rounded-[1.5px]" />
+                <div className="w-[95%] h-[4px] bg-[#DEDAD5] rounded-[1.5px]" />
+                <div className="w-[80%] h-[4px] bg-[#DEDAD5] rounded-[1.5px]" />
+                <div className="w-[90%] h-[4px] bg-[#DEDAD5] rounded-[1.5px]" />
+                <div className="w-[60%] h-[4px] bg-[#DEDAD5] rounded-[1.5px]" />
+                <div className="w-[75%] h-[4px] bg-[#DEDAD5] rounded-[1.5px]" />
+            </div>
+        </div>
+    );
+};
 
 export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
   filename,
@@ -24,197 +63,151 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
   onViewFile,
   onCopyContent,
   onOpenInEditor,
+  appName = "Antigravity",
 }) => {
-  const [copied, setCopied] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
 
-  const ext = filename.split(".").pop()?.toUpperCase() ?? "FILE";
-  const isMd = filename.toLowerCase().endsWith(".md") || filename.toLowerCase().endsWith(".markdown");
-  const fileSizeKB = (size / 1024).toFixed(1);
-  const lineCount = content.split("\n").length;
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  
+  const getFileDetails = (extension: string) => {
+    let subtitle = extension.toUpperCase();
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-      onCopyContent?.();
-    } catch {}
+    if (['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'py', 'json', 'c', 'cpp', 'go', 'rs'].includes(extension)) {
+        subtitle = `Code · ${extension.toUpperCase()}`;
+    } else if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(extension)) {
+        subtitle = 'Image';
+    }
+
+    return { subtitle };
   };
+
+  const fileDetails = getFileDetails(ext);
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
-      className="group rounded-2xl border border-[#e5e7eb] bg-white shadow-sm hover:shadow-md transition-shadow"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setShowDropdown(false);
+      }}
+      className={`group flex flex-row items-center p-[20px_32px] bg-[#F5F4F0] border border-[#E1E0DA] rounded-[24px] cursor-pointer transition-all duration-300 w-full max-w-[820px] gap-[24px] relative overflow-visible ${
+          isHovered ? 'shadow-[0_16px_48px_rgba(0,0,0,0.08)] -translate-y-1' : 'shadow-[0_4px_12px_rgba(0,0,0,0.02)]'
+      }`}
+      onClick={(e) => {
+          if (showDropdown) setShowDropdown(false);
+          else onViewFile?.();
+      }}
     >
-      {/* ── Main Card Row ── */}
-      <div className="flex items-center gap-4 px-4 py-3.5 rounded-t-2xl border border-[#e5e7eb]" style={{ borderBottom: "none" }}>
-        {/* ── Left Side: Thumbnail Preview ── */}
-        <div className="relative flex-shrink-0 w-14 h-14 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden">
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="w-7 h-9 rounded bg-white border border-gray-200 shadow-sm flex items-end justify-center pb-1">
-              <span className="text-[7px] font-bold tracking-tighter text-gray-400">
-                {ext}
+      {/* Background Grid Accent */}
+      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+           style={{ backgroundImage: 'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
+
+      {/* Tilted File Icon - Left */}
+      <div className="relative flex-shrink-0">
+          <TiltedFileIcon extension={ext} />
+          
+          {/* Status Dot */}
+          {status === 'creating' && (
+            <motion.div 
+              animate={{ opacity: [0.4, 1, 0.4], scale: [1, 1.3, 1] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+              className="absolute top-0 left-4 w-3.5 h-3.5 bg-blue-500 rounded-full border-[3px] border-[#F5F4F0] z-20 shadow-sm" 
+            />
+          )}
+      </div>
+      
+      {/* Text Area - Center */}
+      <div className="flex-1 min-w-0 flex flex-col gap-[2px] z-10">
+          <div className="text-[20px] font-bold text-[#1a1a1a] tracking-tight truncate">
+              {filename}
+          </div>
+          <div className="flex items-center gap-2">
+              <span className="text-[11px] text-[#86847F] font-bold uppercase tracking-widest leading-none">
+                  {fileDetails.subtitle}
               </span>
-            </div>
-
-            {status === "creating" && (
-              <div className="flex gap-0.5">
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    className="w-0.5 h-0.5 rounded-full bg-blue-400"
-                    animate={{ opacity: [0.3, 1, 0.3] }}
-                    transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                  />
-                ))}
-              </div>
-            )}
+              <div className="w-1 h-1 bg-[#DEDAD5] rounded-full" />
+              <span className="text-[13px] text-[#86847F] font-medium leading-none">
+                  {(size / 1024).toFixed(1)} KB
+              </span>
           </div>
-
-          {isNew && status === "success" && (
-            <div className="absolute top-1 left-1 w-2 h-2 bg-blue-500 rounded-full border-2 border-white" />
-          )}
-        </div>
-
-        {/* ── Center: File Details ── */}
-        <div className="flex-1 min-w-0">
-          <h4 className="text-[14px] font-semibold text-gray-900 truncate leading-snug">
-            {filename}
-          </h4>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[12px] text-gray-500 font-medium">
-              {fileSizeKB} KB
-            </span>
-            <span className="w-1 h-1 rounded-full bg-gray-300" />
-            <span className="text-[12px] text-gray-400">
-              {lineCount} lines
-            </span>
-          </div>
-        </div>
-
-        {/* ── Right Side: Action Group ── */}
-        <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-xl border border-gray-100 shrink-0">
-          {isMd && status === "success" && (
-            <ToolbarBtn title={isExpanded ? "Collapse preview" : "Preview markdown"} onClick={() => setIsExpanded(!isExpanded)}>
-              {isExpanded ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="18 15 12 9 6 15" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              )}
-            </ToolbarBtn>
-          )}
-
-          <ToolbarBtn title="View" onClick={() => onViewFile?.()}>
-            <EyeIcon />
-          </ToolbarBtn>
-
-          <ToolbarBtn title={copied ? "Copied!" : "Copy"} onClick={handleCopy}>
-            <AnimatePresence mode="wait" initial={false}>
-              {copied ? (
-                <motion.span
-                  key="check"
-                  initial={{ scale: 0.5, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.5, opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  <CheckIcon className="text-emerald-500" />
-                </motion.span>
-              ) : (
-                <motion.span
-                  key="copy"
-                  initial={{ scale: 0.5, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.5, opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  <CopyIcon />
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </ToolbarBtn>
-
-          {onOpenInEditor && (
-            <ToolbarBtn title="Download" onClick={onOpenInEditor}>
-              <DownloadIcon />
-            </ToolbarBtn>
-          )}
-        </div>
       </div>
 
-      {/* ── Expandable Markdown Preview ── */}
-      <AnimatePresence>
-        {isExpanded && isMd && status === "success" && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-          >
-            <div className="px-6 py-6">
-              <div className="flex justify-center">
-                <div className="bg-gray-50 rounded-xl border border-gray-100 px-8 py-6 shadow-sm max-w-lg w-full">
-                  <MarkdownRenderer content={content} />
+      {/* Action Button - Right */}
+      <div className="relative flex flex-col items-end z-20">
+        <div 
+            className={`flex items-center border border-[#E1E0DA] rounded-[14px] h-[44px] transition-all duration-200 overflow-hidden shadow-sm hover:shadow-md ${
+                showDropdown ? 'bg-white border-[#C8C6BC]' : 'bg-[#FFFFFF]/80 hover:bg-white'
+            }`}
+        >
+            <div 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onViewFile?.();
+                }}
+                className="flex items-center gap-[10px] pl-[14px] pr-[12px] h-full border-r border-[#E1E0DA] cursor-pointer hover:bg-black/[0.03] group/btn"
+            >
+                <AntigravityIcon />
+                <div className="flex flex-col">
+                    <span className="text-[12.5px] font-bold text-[#111] leading-tight">{appName}</span>
+                    <span className="text-[9px] text-[#86847F] font-black uppercase tracking-tight leading-none">Default App</span>
                 </div>
-              </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            
+            <div 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setShowDropdown(!showDropdown);
+                }}
+                className={`flex items-center justify-center w-[38px] h-full transition-colors duration-200 ${
+                    showDropdown ? 'bg-black/[0.05] text-[#111]' : 'text-[#86847F] hover:text-[#111] hover:bg-black/[0.03]'
+                }`}
+            >
+                <ChevronDownIcon width={16} height={16} strokeWidth={3} className={`transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`} />
+            </div>
+        </div>
+
+        <AnimatePresence>
+            {showDropdown && (
+                <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-[calc(100%+8px)] right-0 w-[200px] bg-white border border-[#E1E0DA] rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.15)] z-[100] p-[6px] overflow-hidden"
+                >
+                    <DropdownItem 
+                        icon={<AntigravityIcon />} 
+                        label={`Open in ${appName}`} 
+                        onClick={() => { onViewFile?.(); setShowDropdown(false); }} 
+                    />
+                    <DropdownItem 
+                        icon={<FolderIcon width={18} height={18} className="text-[#86847F]" />} 
+                        label="Show in Folder" 
+                        onClick={() => { setShowDropdown(false); }} 
+                    />
+                    <div className="h-[1px] bg-[#F5F4F0] mx-2 my-1" />
+                    <DropdownItem 
+                        label="Copy Path" 
+                        onClick={() => { setShowDropdown(false); }} 
+                    />
+                </motion.div>
+            )}
+        </AnimatePresence>
+      </div>
     </motion.div>
   );
 };
 
-/* ── Refined Toolbar button ── */
-const ToolbarBtn: React.FC<{
-  title: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}> = ({ title, onClick, children }) => (
-  <button
-    onClick={onClick}
-    title={title}
-    className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-900 hover:bg-white hover:shadow-sm transition-all active:scale-95"
-  >
-    {children}
-  </button>
-);
-
-/* ── Standardized SVG icons (16px) ── */
-const EyeIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-    <circle cx="12" cy="12" r="3" />
-  </svg>
-);
-
-const CopyIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="9" y="9" width="13" height="13" rx="2" />
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-  </svg>
-);
-
-const CheckIcon: React.FC<{ className?: string }> = ({ className = "" }) => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <polyline points="20 6 9 17 4 12" />
-  </svg>
-);
-
-const DownloadIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="7 10 12 15 17 10" />
-    <line x1="12" y1="15" x2="12" y2="3" />
-  </svg>
+const DropdownItem: React.FC<{ icon?: React.ReactNode, label: string, onClick: () => void }> = ({ icon, label, onClick }) => (
+    <div 
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        className="flex items-center gap-[10px] p-[10px_12px] rounded-[10px] cursor-pointer transition-colors duration-150 text-[13px] font-bold text-[#111] hover:bg-[#F5F4F0]"
+    >
+        {icon}
+        <span className="flex-1">{label}</span>
+    </div>
 );
 
 export default SimpleFileNotification;

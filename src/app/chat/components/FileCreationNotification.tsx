@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MarkdownRenderer } from "./MarkdownComponents";
+import { ChevronDownIcon, FolderIcon } from "@heroicons/react/24/outline";
 
 interface FileCreationNotificationProps {
     filename: string;
@@ -15,6 +15,28 @@ interface FileCreationNotificationProps {
     onOpenInEditor?: () => void;
 }
 
+const AntigravityIcon = () => (
+    <div className="w-[18px] h-[18px] bg-[#111] rounded-[4px] flex items-center justify-center">
+        <span className="text-white text-[10px] font-[900] font-mono">A</span>
+    </div>
+);
+
+const TiltedFileIcon = ({ extension }: { extension: string }) => {
+    return (
+        <div className="relative w-[60px] height-[70px] flex items-center justify-center shrink-0">
+            {/* Tilted Card Background */}
+            <div className="absolute w-[48px] h-[60px] bg-white border-[1.5px] border-[#e8e6d9] rounded-[8px] -rotate-[5deg] shadow-[0_4px_10px_rgba(0,0,0,0.04)] flex flex-col p-[10px_8px] gap-[5px]">
+                <div className="w-[60%] h-[4px] bg-[#CCCAC4] rounded-[1px]" />
+                <div className="w-[90%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[75%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[85%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[55%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+                <div className="w-[70%] h-[3px] bg-[#DEDAD5] rounded-[1px]" />
+            </div>
+        </div>
+    );
+};
+
 export const FileCreationNotification: React.FC<FileCreationNotificationProps> = ({
     filename,
     content,
@@ -25,175 +47,131 @@ export const FileCreationNotification: React.FC<FileCreationNotificationProps> =
     onViewFile,
     onOpenInEditor
 }) => {
-    const [copied, setCopied] = useState(false);
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [isHovered, setIsHovered] = useState(false);
+    const [isButtonHovered, setIsButtonHovered] = useState(false);
+    const [showDropdown, setShowDropdown] = useState(false);
 
-    const fileExtension = filename.split('.').pop()?.toUpperCase() || 'FILE';
-    const isMd = filename.toLowerCase().endsWith('.md') || filename.toLowerCase().endsWith('.markdown');
-    const fileSizeKB = (size / 1024).toFixed(1);
-    const lineCount = content.split('\n').length;
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    
+    const getFileDetails = (extension: string) => {
+        let subtitle = extension.toUpperCase();
 
-    const handleCopyContent = async () => {
-        try {
-            await navigator.clipboard.writeText(content);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy content:', err);
+        if (['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'py', 'json', 'c', 'cpp', 'go', 'rs'].includes(extension)) {
+            if (extension === 'js') subtitle = 'JS';
+            else if (extension === 'ts') subtitle = 'TS';
+            else if (extension === 'json') subtitle = 'Code · JSON';
+            else if (extension === 'html') subtitle = 'Code · HTML';
+            else if (extension === 'css') subtitle = 'Style · CSS';
+            else if (extension === 'py') subtitle = 'Script · Python';
+            else subtitle = `Code · ${extension.toUpperCase()}`;
+        } else if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(extension)) {
+            subtitle = 'Image';
         }
+
+        return { subtitle };
     };
 
-    const getActionText = () => {
-        if (status === 'creating') return isNew ? 'Creating' : 'Updating';
-        if (status === 'success') return isNew ? 'Created' : 'Updated';
-        if (status === 'error') return 'Failed to ' + (isNew ? 'create' : 'update');
-        return '';
-    };
+    const fileDetails = getFileDetails(ext);
 
     return (
-        <>
-            <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="rounded-xl border border-green-200 bg-green-50 overflow-hidden relative"
-            >
-                <div className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-md border border-gray-300 bg-white flex items-center justify-center text-[10px] font-bold text-gray-600 shrink-0 font-mono">
-                            {fileExtension}
-                        </div>
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => {
+                setIsHovered(false);
+                setShowDropdown(false);
+            }}
+            onClick={onViewFile}
+            className={`flex flex-row items-center p-[20px_28px] bg-white border border-[#e8e6d9] rounded-[20px] cursor-pointer transition-all duration-300 w-full max-w-[860px] gap-[20px] relative overflow-visible my-[8px] ${
+                isHovered ? 'shadow-[0_10px_25px_rgba(0,0,0,0.05)]' : 'shadow-[0_2px_8px_rgba(0,0,0,0.01)]'
+            }`}
+        >
+            {/* Tilted File Icon - Left */}
+            <div className="relative w-[60px] h-[70px]">
+                <TiltedFileIcon extension={ext} />
+                
+                {/* Status Indicator */}
+                {status === 'creating' && (
+                    <motion.div 
+                        animate={{ opacity: [0.4, 1, 0.4] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                        className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full border-[1.5px] border-white" 
+                    />
+                )}
+            </div>
+            
+            {/* Text Area - Center */}
+            <div className="flex-1 min-w-0 flex flex-col gap-[2px]">
+                <div className="text-[16px] font-semibold text-[#111] tracking-[-0.01em]">
+                    {filename}
+                </div>
+                <div className="text-[13px] text-[#8a8886] font-medium">
+                    {fileDetails.subtitle}
+                </div>
+            </div>
 
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-gray-900 truncate">
-                                    {getActionText()} {filename}
-                                </span>
-                                {isNew && status === 'success' && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-md text-xs font-medium">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                                        </svg>
-                                        New
-                                    </span>
-                                )}
-                            </div>
-
-                            <div className="flex items-center gap-3 text-xs text-gray-600 mt-0.5">
-                                <span>{fileSizeKB} KB</span>
-                                <span>{lineCount} lines</span>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            {status === 'success' && (
-                                <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="20 6 9 17 4 12"/>
-                                    </svg>
-                                </div>
-                            )}
-
-                            {isMd && status === 'success' && (
-                                <button
-                                    onClick={() => setIsExpanded(!isExpanded)}
-                                    className="p-1.5 hover:bg-green-100 rounded-md transition-colors"
-                                    title={isExpanded ? "Collapse preview" : "Preview markdown"}
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600">
-                                        {isExpanded ? (
-                                            <polyline points="18 15 12 9 6 15" />
-                                        ) : (
-                                            <polyline points="6 9 12 15 18 9" />
-                                        )}
-                                    </svg>
-                                </button>
-                            )}
-
-                            <button
-                                onClick={() => onViewFile?.()}
-                                className="p-1.5 hover:bg-green-100 rounded-md transition-colors"
-                                title="View file"
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                    <circle cx="12" cy="12" r="3"/>
-                                </svg>
-                            </button>
-
-                            <button
-                                onClick={handleCopyContent}
-                                className="p-1.5 hover:bg-green-100 rounded-md transition-colors"
-                                title="Copy content"
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={copied ? 'text-green-600' : 'text-gray-600'}>
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                </svg>
-                            </button>
-
-                            {onOpenInEditor && (
-                                <button
-                                    onClick={onOpenInEditor}
-                                    className="p-1.5 hover:bg-green-100 rounded-md transition-colors"
-                                    title="Open in editor"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600">
-                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                                        <polyline points="15,3 21,3 21,9"/>
-                                        <line x1="10" y1="14" x2="21" y2="3"/>
-                                    </svg>
-                                </button>
-                            )}
-                        </div>
+            {/* Action Button - Right */}
+            <div className="relative">
+                <div 
+                    onMouseEnter={() => setIsButtonHovered(true)}
+                    onMouseLeave={() => setIsButtonHovered(false)}
+                    className={`flex items-center border border-[#e8e6d9] rounded-[12px] h-[38px] transition-all duration-200 ${
+                        isButtonHovered ? 'bg-[#f9f8f4]' : 'bg-white'
+                    }`}
+                >
+                    <div 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onViewFile?.();
+                        }}
+                        className="flex items-center gap-[8px] px-[14px] h-full border-r border-[#e8e6d9] cursor-pointer"
+                    >
+                        <AntigravityIcon />
+                        <span className="text-[13px] font-semibold text-[#111]">Antigravity</span>
                     </div>
-
-                    {status === 'success' && (
-                        <div className="flex items-center gap-2 mt-2 text-sm text-green-800">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                                <polyline points="22 4 12 14.01 9 11.01"/>
-                            </svg>
-                            <span>File {isNew ? 'created' : 'updated'} successfully</span>
-                        </div>
-                    )}
+                    
+                    <div 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setShowDropdown(!showDropdown);
+                        }}
+                        className="flex items-center justify-center w-[34px] h-full text-[#8a8886] cursor-pointer"
+                    >
+                        <ChevronDownIcon width={14} height={14} />
+                    </div>
                 </div>
 
                 <AnimatePresence>
-                    {isExpanded && isMd && status === 'success' && (
+                    {showDropdown && (
                         <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="overflow-hidden border-t border-green-200"
+                            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                            className="absolute top-[calc(100%+6px)] right-0 w-[170px] bg-white border border-[#e8e6d9] rounded-[12px] shadow-[0_10px_25px_rgba(0,0,0,0.1)] z-[100] p-[5px]"
                         >
-                            <div className="bg-white p-4">
-                                <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Markdown Preview</div>
-                                <div className="prose prose-sm max-w-none">
-                                    <MarkdownRenderer content={content} />
-                                </div>
+                            <div 
+                                onClick={(e) => { e.stopPropagation(); onViewFile?.(); setShowDropdown(false); }}
+                                className="flex items-center gap-[10px] p-[8px_10px] rounded-[8px] cursor-pointer transition-colors duration-200 text-[13px] font-medium text-[#111] hover:bg-[#f5f4f0]"
+                            >
+                                <AntigravityIcon />
+                                Open in Antigravity
+                            </div>
+                            <div 
+                                onClick={(e) => { e.stopPropagation(); setShowDropdown(false); }}
+                                className="flex items-center gap-[10px] p-[8px_10px] rounded-[8px] cursor-pointer transition-colors duration-200 text-[13px] font-medium text-[#111] hover:bg-[#f5f4f0]"
+                            >
+                                <FolderIcon width={16} height={16} className="text-[#8a8886]" />
+                                Show in Folder
                             </div>
                         </motion.div>
                     )}
                 </AnimatePresence>
-
-                <AnimatePresence>
-                    {copied && (
-                        <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            className="absolute top-2 right-2 bg-green-600 text-white text-xs px-2 py-1 rounded shadow-lg z-10"
-                        >
-                            Copied to clipboard!
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </motion.div>
-        </>
+            </div>
+        </motion.div>
     );
 };
 
 export default FileCreationNotification;
+
+

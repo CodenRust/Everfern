@@ -18,6 +18,7 @@ export interface ChatMessage {
     | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } }
   >;
   thought?: string;
+  reasoning_content?: string;
   toolCalls?: any[];
   attachments?: any[];
   hasTimeline?: boolean;

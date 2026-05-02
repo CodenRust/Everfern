@@ -1,0 +1,11 @@
+
+LineNumber Line                                                                          
+---------- ----                                                                          
+       941                     const updated = [...liveToolCallsRef.current];            
+      1021                             const updated = [...liveToolCallsRef.current];    
+      1044                             const updated = [...liveToolCallsRef.current];    
+      1760                         const updated = streamingToolCallsRef.current.map(t =>
+      1769                     const updated = streamingToolCallsRef.current.map(t =>    
+      1792                             const updated = [...liveToolCallsRef.current];    
+
+

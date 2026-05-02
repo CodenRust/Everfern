@@ -209,7 +209,7 @@ export async function classifyIntent(
         ],
         responseFormat: 'json',
         temperature: 0.0,
-        maxTokens: 100,
+        maxTokens: 500,
       }),
       timeoutPromise,
     ]) as any;

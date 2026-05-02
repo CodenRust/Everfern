@@ -5,9 +5,15 @@ import React from "react";
 /**
  * Mac-style traffic light window controls.
  * Close (red), Minimize (yellow), Maximize (green).
- * Rounded dots with proper spacing.
+ * Hidden on macOS where Electron provides native traffic lights.
  */
 export default function WindowControls() {
+    // On macOS, Electron already renders native traffic lights — hide ours
+    const isMac = typeof window !== 'undefined' && /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
+    if (isMac) {
+        return null;
+    }
+
     const handleClose = () => {
         if ((window as any).electronAPI?.window?.close) {
             (window as any).electronAPI.window.close();

@@ -16,12 +16,13 @@ exports.initializeToolRegistry = initializeToolRegistry;
 const tool_registry_1 = require("../helpers/tool-registry");
 // File tools
 function registerFileTools(tools) {
+    const safeTools = new Set(['read', 'find', 'grep', 'ls', 'read_file', 'view_file', 'list_directory']);
     for (const tool of tools) {
         (0, tool_registry_1.registerTool)(tool, {
             name: tool.name,
             description: tool.description,
             category: 'file',
-            riskLevel: tool.name === 'delete' ? 'high' : 'moderate'
+            riskLevel: safeTools.has(tool.name) ? 'safe' : (tool.name === 'delete' ? 'high' : 'moderate')
         });
     }
 }

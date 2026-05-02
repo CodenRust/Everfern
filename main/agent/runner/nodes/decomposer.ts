@@ -27,14 +27,21 @@ export const createDecomposerNode = (
     integrator.startNode('decomposer', 'Intelligently decomposing task into execution steps');
 
     try {
-      runner.telemetry.transition('decomposer');
-      eventQueue?.push({ type: 'thought', content: '🧠 Decomposer: Analyzing task structure using AI classification...' });
-
       const lastUserMsg = state.messages.filter(m => {
         const msg = m as any;
         return msg.role === 'user' || msg.type === 'human' || msg._getType?.() === 'human';
       }).pop();
       const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : '';
+      const isPlanApproval = content.includes('[PLAN_APPROVED]');
+
+      // Check if plan already exists and has progress or is approved to prevent re-decomposition glitches
+      if (state.decomposedTask && (isPlanApproval || (state.completedSteps && state.completedSteps.length > 0))) {
+          console.log(`[Decomposer] Skipping decomposition: existing plan found. Approval: ${isPlanApproval}, Completed: ${state.completedSteps?.length || 0}`);
+          return { taskPhase: 'planning' as const };
+      }
+
+      runner.telemetry.transition('decomposer');
+      eventQueue?.push({ type: 'thought', content: '🧠 Decomposer: Analyzing task structure using AI classification...' });
 
       const startTime = Date.now();
 

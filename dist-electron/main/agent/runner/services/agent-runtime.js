@@ -260,6 +260,7 @@ async function runAgentStep(state, options) {
             role: 'assistant',
             content: scrubbed,
             tool_calls: response.toolCalls,
+            reasoning_content: response.reasoning_content,
         };
         // Always send the final response to frontend if it's not a tool call
         // This ensures the AI's message is displayed even if streaming already happened

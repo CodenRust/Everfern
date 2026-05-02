@@ -11,11 +11,12 @@ function normalizeMessage(m) {
         return {
             role: m.role,
             content: m.content,
-            tool_call_id: m.tool_call_id,
-            tool_calls: m.tool_calls
+            tool_call_id: m.tool_call_id || m.toolCallId,
+            tool_calls: m.tool_calls || m.toolCalls,
+            reasoning_content: m.reasoning_content || m.thought
         };
     }
-    // Handle LangChain message objects
+    // Handle LangChain message objects or other formats
     let role = 'user';
     const type = m.type || m._getType?.();
     if (type === 'human')
@@ -37,8 +38,9 @@ function normalizeMessage(m) {
     return {
         role,
         content: m.content || '',
-        tool_call_id: m.tool_call_id || m.tool_call_id,
-        tool_calls: m.tool_calls || m.tool_calls
+        tool_call_id: m.tool_call_id || m.tool_call_id || m.toolCallId,
+        tool_calls: m.tool_calls || m.tool_calls || m.toolCalls,
+        reasoning_content: m.reasoning_content || m.reasoning_content || m.thought
     };
 }
 /**

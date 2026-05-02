@@ -21,11 +21,25 @@ function adaptTool(
   executor: (toolCallId: string, params: any) => Promise<any>,
   customName?: string
 ): AgentTool {
-  const name = customName ?? definition.name;
+  let name = customName ?? definition.name;
+  let description = definition.description;
+  let parameters = definition.parameters as any;
+
+  // Enhance descriptions to enforce engineering standards from SYSTEM_PROMPT
+  if (name === 'read') {
+    description = `[EXPLORE-FIRST] ${description} Mandatory before any edit. For large files, use start_line/end_line to maintain context efficiency.`;
+  } else if (name === 'edit') {
+    description = `[SURGICAL-EDIT] ${description} ALWAYS PREFERRED over 'write' for existing files. Identify exact lines to change and provide minimal targeted diffs.`;
+  } else if (name === 'write') {
+    description = `[DISCIPLINED-WRITE] ${description} Use ONLY for new files or total structural rewrites. NEVER use for minor changes to existing files; use 'edit' instead.`;
+  } else if (name === 'grep' || name === 'find') {
+    description = `[REPO-TRIAGE] ${description} Use for mandatory triage and convention matching before writing any code.`;
+  }
+
   return {
     name,
-    description: definition.description,
-    parameters: definition.parameters as any, // Note: AgentTool expects JSON schema format.
+    description,
+    parameters,
     execute: async (args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> => {
       try {
         const id = toolCallId ?? `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

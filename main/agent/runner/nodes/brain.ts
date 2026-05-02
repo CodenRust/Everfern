@@ -330,6 +330,9 @@ export const createBrainNode = (
     // Bug 1, 6, 10: Early deterministic short-circuit logic
     // Skip if: not research intent OR iterations > 0 OR returning from tool call OR returning from specialist
     const isFirstEntry = (state.iterations === 0 || !state.iterations) && !state.brainToolsInFlight && !state.returningFromSpecialist;
+    const plan = state.decomposedTask;
+    const hasParallelPlan = plan && (plan.executionMode === 'parallel' || plan.executionMode === 'hybrid');
+    const isPlanApproval = originalRequest.includes('[PLAN_APPROVED]');
 
     // Strict Routing: If we just returned from a specialist, we MUST evaluate if they should continue
     // This prevents the brain from taking over and looping on tools itself.
@@ -348,7 +351,8 @@ export const createBrainNode = (
       }
     }
 
-    if (isFirstEntry && isResearchIntent && WEB_RESEARCH_EARLY_CHECK.test(originalRequest)) {
+    // SWARM FIX: Never use the deterministic early pre-check if we have a parallel/hybrid swarm plan or plan approval!
+    if (isFirstEntry && isResearchIntent && WEB_RESEARCH_EARLY_CHECK.test(originalRequest) && !hasParallelPlan && !isPlanApproval) {
 
       console.log('[Brain] Early pre-check: web-research keywords in user request → route_web_explorer immediately');
       eventQueue?.push({ type: 'thought', content: '🧭 BRAIN: Routing to web explorer (research task detected)' });

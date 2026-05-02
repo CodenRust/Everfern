@@ -417,6 +417,7 @@ You do not need to use complex execution plans or tools for this interaction.`;
       role: 'assistant',
       content: scrubbed,
       tool_calls: response.toolCalls,
+      reasoning_content: response.reasoning_content,
     };
 
     // ONLY push scrubbed content if nothing was streamed (prevents duplicates)

@@ -17,14 +17,14 @@ import type {
 export class DeepSeekProvider implements ACPProvider {
   private apiKey = '';
   private baseUrl = 'https://api.deepseek.com';
-  private model = 'deepseek-chat';
+  private model = 'deepseek-v4-pro';
 
   readonly info: ProviderInfo = {
     type: 'deepseek',
     name: 'DeepSeek',
-    description: 'DeepSeek-V3 and DeepSeek-R1 via DeepSeek API',
+    description: 'DeepSeek-V4-Flash and DeepSeek-V4-Pro',
     requiresApiKey: true,
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'deepseek-v4-pro',
     isLocal: false,
   };
 
@@ -139,6 +139,6 @@ export class DeepSeekProvider implements ACPProvider {
   }
 
   async listModels(): Promise<string[]> {
-    return ['deepseek-chat', 'deepseek-reasoner'];
+    return ['deepseek-v4-flash', 'deepseek-v4-pro'];
   }
 }

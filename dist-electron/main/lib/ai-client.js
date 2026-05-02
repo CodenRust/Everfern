@@ -94,7 +94,7 @@ const DEFAULT_URLS = {
 const DEFAULT_MODELS = {
     openai: 'gpt-4o',
     anthropic: 'claude-3-5-sonnet-20241022',
-    deepseek: 'deepseek-chat',
+    deepseek: 'deepseek-v4-pro',
     gemini: 'gemini-3.1-pro-preview',
     ollama: 'llama3',
     'ollama-cloud': 'llama3.3', // Cloud model accessed via Ollama Cloud API
@@ -106,12 +106,12 @@ const DEFAULT_MODELS = {
 // ── AIClient ─────────────────────────────────────────────────────────
 class AIClient {
     config;
-    openaiClient; // For NVIDIA NIM and Ollama Cloud
+    openaiClient; // For NVIDIA NIM and DeepSeek
     constructor(config) {
         let finalApiKey = config.apiKey ?? '';
         // Only apply cleaning for legacy providers if they contain noise
         // Ollama Cloud / Custom keys must be preserved exactly as provided
-        if (['openai', 'anthropic', 'nvidia'].includes(config.provider)) {
+        if (['openai', 'anthropic', 'nvidia', 'deepseek'].includes(config.provider)) {
             if (finalApiKey.includes(' ') || finalApiKey.includes('\n')) {
                 const match = finalApiKey.match(/(?:nvapi-[A-Za-z0-9_-]+|sk-[A-Za-z0-9T\-]+|[A-Za-z0-9]{32,})/);
                 if (match)
@@ -127,17 +127,21 @@ class AIClient {
             maxTokens: config.maxTokens ?? (config.provider === 'nvidia' ? 16383 : config.provider === 'openrouter' ? 8192 : 4096),
             vlm: config.vlm,
         };
-        // Initialize OpenAI client for NVIDIA NIM only
-        // NOTE: Ollama Cloud uses native Ollama API (/api/chat), NOT OpenAI SDK
-        if (config.provider === 'nvidia') {
+        // Initialize OpenAI client for NVIDIA NIM, DeepSeek, and OpenRouter
+        if (config.provider === 'nvidia' || config.provider === 'deepseek' || config.provider === 'openrouter') {
+            const headers = {
+                'User-Agent': 'EverFern/1.0'
+            };
+            if (config.provider === 'openrouter') {
+                headers['HTTP-Referer'] = 'https://everfern.app';
+                headers['X-OpenRouter-Title'] = 'EverFern';
+            }
             this.openaiClient = new openai_1.default({
                 apiKey: this.config.apiKey || 'dummy-key',
                 baseURL: this.config.baseUrl,
                 timeout: 60000, // 60 second timeout
                 maxRetries: 3,
-                defaultHeaders: {
-                    'User-Agent': 'EverFern/1.0'
-                }
+                defaultHeaders: headers
             });
         }
     }
@@ -165,8 +169,8 @@ class AIClient {
         };
     }
     async chat(request) {
-        // Use OpenAI SDK for NVIDIA NIM only (Ollama Cloud uses native Ollama API)
-        if (this.config.provider === 'nvidia') {
+        // Use OpenAI SDK for NVIDIA NIM, DeepSeek, and OpenRouter
+        if (this.config.provider === 'nvidia' || this.config.provider === 'deepseek' || this.config.provider === 'openrouter') {
             return this._openAISDKChat(request);
         }
         switch (this.config.provider) {
@@ -180,8 +184,8 @@ class AIClient {
         }
     }
     async *streamChat(request) {
-        // Use OpenAI SDK for NVIDIA NIM only (Ollama Cloud uses native Ollama API)
-        if (this.config.provider === 'nvidia') {
+        // Use OpenAI SDK for NVIDIA NIM, DeepSeek, and OpenRouter
+        if (this.config.provider === 'nvidia' || this.config.provider === 'deepseek' || this.config.provider === 'openrouter') {
             yield* this._openAISDKStream(request);
             return;
         }
@@ -201,23 +205,19 @@ class AIClient {
         }
     }
     // ── OpenAI SDK Methods (for NVIDIA NIM and Ollama Cloud) ────────
-    async _openAISDKChat(req) {
-        if (!this.openaiClient) {
-            throw new Error('OpenAI client not initialized for ' + this.config.provider);
-        }
-        const isStreaming = !!req.onStreamChunk;
-        // Map messages to OpenAI format
-        const messages = req.messages.flatMap(m => {
+    _mapMessagesForOpenAI(messages) {
+        let processedMessages = messages.flatMap(m => {
             let content = m.content;
-            // Nvidia NIM/OpenAI strict validation
+            // Nvidia NIM/OpenAI strict validation:
             if (this.config.provider === 'nvidia') {
-                // Flatten assistant/system messages to prevent format errors
+                // Flatten assistant/system messages as before to prevent format errors
                 if (m.role === 'assistant' || m.role === 'system') {
                     content = typeof m.content === 'string'
                         ? m.content
                         : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
                 }
-                // Tool responses CANNOT contain image_url blocks in strict OpenAI schemas
+                // Tool responses CANNOT contain image_url blocks in strict OpenAI schemas (like NIM).
+                // We must defer the image into a subsequent user message AFTER all tools.
                 else if (m.role === 'tool' && Array.isArray(m.content)) {
                     const hasImages = m.content.some(c => c.type === 'image_url');
                     if (hasImages) {
@@ -226,56 +226,210 @@ class AIClient {
                         const toolMsg = {
                             role: 'tool',
                             content: textContent || 'Action complete.',
-                            tool_call_id: m.tool_call_id || 'unknown'
+                            _images: imageChunks // Tag for second pass
                         };
-                        const bridgeAssistantMsg = {
-                            role: 'assistant',
-                            content: 'Action completed. Please provide the visual result of this action.'
-                        };
-                        const userMsg = {
-                            role: 'user',
-                            content: [
-                                { type: 'text', text: 'Screenshot provided from the system:' },
-                                ...imageChunks
-                            ]
-                        };
-                        return [toolMsg, bridgeAssistantMsg, userMsg];
+                        if (m.tool_call_id)
+                            toolMsg.tool_call_id = m.tool_call_id;
+                        return [toolMsg];
                     }
                 }
             }
-            // Build message based on role
+            const msg = { role: m.role, content };
+            if (m.tool_call_id)
+                msg.tool_call_id = m.tool_call_id;
+            if (m.reasoning_content)
+                msg.reasoning_content = m.reasoning_content;
+            if (m.tool_calls && m.tool_calls.length > 0) {
+                msg.tool_calls = m.tool_calls.map((tc, idx) => ({
+                    id: tc.id || `call_${m.role}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+                    type: 'function',
+                    function: { name: tc.name, arguments: JSON.stringify(tc.arguments || {}) }
+                }));
+            }
+            // Additional standard formatting for roles
             if (m.role === 'system') {
-                return [{ role: 'system', content: content }];
-            }
-            else if (m.role === 'user') {
-                return [{ role: 'user', content }];
-            }
-            else if (m.role === 'assistant') {
-                const msg = {
-                    role: 'assistant',
-                    content: content
-                };
-                if (m.tool_calls) {
-                    msg.tool_calls = m.tool_calls.map(tc => ({
-                        id: tc.id,
-                        type: 'function',
-                        function: {
-                            name: tc.name,
-                            arguments: JSON.stringify(tc.arguments)
-                        }
-                    }));
-                }
-                return [msg];
+                msg.content = typeof content === 'string' ? content : JSON.stringify(content);
             }
             else if (m.role === 'tool') {
-                return [{
-                        role: 'tool',
-                        content: typeof content === 'string' ? content : JSON.stringify(content),
-                        tool_call_id: m.tool_call_id || 'unknown'
-                    }];
+                msg.content = typeof content === 'string' ? content : JSON.stringify(content);
+                msg.tool_call_id = m.tool_call_id || 'unknown';
             }
-            return [];
+            return [msg];
         });
+        // Final Role-Alternation Pass for NVIDIA NIM
+        if (this.config.provider === 'nvidia') {
+            const finalMessages = [];
+            const seenToolCallIds = new Set();
+            let pendingImages = [];
+            let hasAssistantSeen = false;
+            for (let i = 0; i < processedMessages.length; i++) {
+                let m = processedMessages[i];
+                // Collect images from tool messages
+                if (m.role === 'tool' && m._images) {
+                    pendingImages.push(...m._images);
+                }
+                if (m.role === 'assistant') {
+                    hasAssistantSeen = true;
+                    // NIM specific: Move reasoning_content to content if content is empty.
+                    // NIM (and most OpenAI models) reject empty assistant content unless tool_calls are present.
+                    if (!m.content && m.reasoning_content && (!m.tool_calls || m.tool_calls.length === 0)) {
+                        m.content = `<think>${m.reasoning_content}</think>`;
+                    }
+                    // Final safety: Ensure no assistant message has empty content AND no tool calls.
+                    if (!m.content && (!m.tool_calls || m.tool_calls.length === 0)) {
+                        m.content = 'Action acknowledged.';
+                    }
+                }
+                let last = finalMessages[finalMessages.length - 1];
+                if (last) {
+                    // Rule: Bridge Tool -> User gap or Handle pending images
+                    // If we are exiting a tool block and have pending images, inject them
+                    if (last.role === 'tool' && m.role !== 'tool' && pendingImages.length > 0) {
+                        finalMessages.push({ role: 'assistant', content: 'Action completed.' });
+                        last = {
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: 'Screenshot(s) provided from the system:' },
+                                ...pendingImages
+                            ]
+                        };
+                        finalMessages.push(last);
+                        pendingImages = [];
+                        // Continue to evaluate the current 'm' against this new 'last'
+                    }
+                    // Rule: NVIDIA NIM strictly prohibits 'system' messages after the first message.
+                    // We must convert mid-conversation system messages to 'user' messages.
+                    if (m.role === 'system') {
+                        m.role = 'user';
+                        m.content = `[SYSTEM INSTRUCTION]: ${m.content}`;
+                    }
+                    // Rule: Ensure valid role after 'system'. NIM usually expects 'user'.
+                    if (last.role === 'system' && m.role !== 'user') {
+                        // If it's a tool after system, we MUST drop it as it's an orphan from slicing.
+                        if (m.role === 'tool') {
+                            console.warn(`[AIClient] Dropping orphan tool message after system to prevent 400 error.`);
+                            continue;
+                        }
+                        // If it's assistant after system, NIM might accept it but user is safer.
+                        // We'll inject a dummy user message.
+                        finalMessages.push({ role: 'user', content: 'Please continue.' });
+                        last = finalMessages[finalMessages.length - 1];
+                    }
+                    // Rule: Drop tool messages if we haven't seen an assistant message yet in this history slice.
+                    // (They are orphans from context window slicing).
+                    if (m.role === 'tool' && !hasAssistantSeen) {
+                        console.warn(`[AIClient] Dropping orphan tool message (no assistant parent in slice).`);
+                        continue;
+                    }
+                    // Rule: Deduplicate Tool results by ID
+                    if (m.role === 'tool' && m.tool_call_id) {
+                        if (seenToolCallIds.has(m.tool_call_id)) {
+                            console.warn(`[AIClient] Dropping duplicate tool result for ID: ${m.tool_call_id}`);
+                            continue;
+                        }
+                        seenToolCallIds.add(m.tool_call_id);
+                    }
+                    // Rule 1: Bridge Tool -> User gap (if not already handled by vision injection)
+                    if (last.role === 'tool' && m.role === 'user') {
+                        finalMessages.push({ role: 'assistant', content: 'Action completed.' });
+                    }
+                    // Rule 2: Merge consecutive messages of the same role (except 'tool' which can be multiple)
+                    else if (last.role === m.role && (m.role === 'user' || m.role === 'assistant')) {
+                        if (typeof last.content === 'string' && typeof m.content === 'string') {
+                            last.content = last.content + '\n' + m.content;
+                        }
+                        else {
+                            const content1 = Array.isArray(last.content) ? last.content : [{ type: 'text', text: last.content }];
+                            const content2 = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }];
+                            last.content = [...content1, ...content2];
+                        }
+                        if (m.tool_calls) {
+                            const existingCalls = last.tool_calls || [];
+                            const newCalls = m.tool_calls.filter((nc) => !existingCalls.some((ec) => ec.id === nc.id));
+                            last.tool_calls = [...existingCalls, ...newCalls];
+                        }
+                        continue;
+                    }
+                }
+                else {
+                    // First message
+                    if (m.role === 'tool') {
+                        // A tool message cannot be the first message. Drop it.
+                        console.warn(`[AIClient] Dropping first message as it is 'tool'.`);
+                        continue;
+                    }
+                    if (m.role === 'tool' && m.tool_call_id) {
+                        seenToolCallIds.add(m.tool_call_id);
+                    }
+                }
+                finalMessages.push(m);
+            }
+            // Final check for pending images at the end of conversation
+            if (pendingImages.length > 0) {
+                finalMessages.push({ role: 'assistant', content: 'Action completed.' });
+                finalMessages.push({
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'Screenshot(s) provided from the system:' },
+                        ...pendingImages
+                    ]
+                });
+            }
+            // Final synchronization pass for NVIDIA NIM: 
+            // Ensure EVERY tool call ID in an assistant message has a corresponding 'tool' response following it.
+            const syncMessages = [];
+            const outstandingIds = new Set();
+            for (const m of finalMessages) {
+                // If we see a non-tool message but have outstanding tool calls, we MUST close them first.
+                if (m.role !== 'tool' && outstandingIds.size > 0) {
+                    for (const id of outstandingIds) {
+                        console.warn(`[AIClient] Injecting missing tool response for ID: ${id} to satisfy NIM strictness.`);
+                        syncMessages.push({
+                            role: 'tool',
+                            tool_call_id: id,
+                            content: 'Action acknowledged.'
+                        });
+                    }
+                    outstandingIds.clear();
+                    // If the message we are about to push is a 'user' message, bridge the gap
+                    if (m.role === 'user') {
+                        syncMessages.push({ role: 'assistant', content: 'Action completed.' });
+                    }
+                }
+                if (m.role === 'assistant' && m.tool_calls) {
+                    for (const tc of m.tool_calls) {
+                        outstandingIds.add(tc.id);
+                    }
+                }
+                else if (m.role === 'tool' && m.tool_call_id) {
+                    if (!outstandingIds.has(m.tool_call_id)) {
+                        // This is an orphan tool message with no call in this slice.
+                        // Strict NIM usually rejects this. We'll drop it.
+                        console.warn(`[AIClient] Dropping orphan tool result (ID: ${m.tool_call_id}) with no preceding call.`);
+                        continue;
+                    }
+                    outstandingIds.delete(m.tool_call_id);
+                }
+                syncMessages.push(m);
+            }
+            // Close any remaining outstanding IDs at the very end
+            for (const id of outstandingIds) {
+                syncMessages.push({
+                    role: 'tool',
+                    tool_call_id: id,
+                    content: 'Action acknowledged.'
+                });
+            }
+            processedMessages = syncMessages;
+        }
+        return processedMessages;
+    }
+    async _openAISDKChat(req) {
+        if (!this.openaiClient) {
+            throw new Error('OpenAI client not initialized for ' + this.config.provider);
+        }
+        const isStreaming = !!req.onStreamChunk;
+        const messages = this._mapMessagesForOpenAI(req.messages);
         // Build request options
         const options = {
             model: req.model ?? this.config.model,
@@ -345,6 +499,7 @@ class AIClient {
                     stream: true
                 });
                 let fullContent = '';
+                let fullReasoning = '';
                 const toolCallsMap = {};
                 let finishReason = 'stop';
                 let responseId = `${this.config.provider}-${Date.now()}`;
@@ -355,6 +510,9 @@ class AIClient {
                     if (delta?.content) {
                         fullContent += delta.content;
                         req.onStreamChunk(delta.content);
+                    }
+                    if (delta?.reasoning_content) {
+                        fullReasoning += delta.reasoning_content;
                     }
                     if (delta?.tool_calls) {
                         for (const tc of delta.tool_calls) {
@@ -384,6 +542,7 @@ class AIClient {
                 return {
                     id: responseId,
                     content: fullContent,
+                    reasoning_content: fullReasoning || undefined,
                     model: this.config.model,
                     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
                     finishReason: finishReason === 'tool_calls' || toolCalls.length > 0 ? 'tool_calls' : 'stop'
@@ -401,6 +560,7 @@ class AIClient {
                 return {
                     id: response.id,
                     content: choice?.message?.content ?? '',
+                    reasoning_content: choice?.message?.reasoning_content,
                     model: response.model,
                     toolCalls,
                     usage: response.usage ? {
@@ -422,48 +582,7 @@ class AIClient {
         if (!this.openaiClient) {
             throw new Error('OpenAI client not initialized for ' + this.config.provider);
         }
-        // Map messages (same logic as _openAISDKChat)
-        const messages = req.messages.flatMap(m => {
-            let content = m.content;
-            if (this.config.provider === 'nvidia') {
-                if (m.role === 'assistant' || m.role === 'system') {
-                    content = typeof m.content === 'string'
-                        ? m.content
-                        : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
-                }
-            }
-            if (m.role === 'system') {
-                return [{ role: 'system', content: content }];
-            }
-            else if (m.role === 'user') {
-                return [{ role: 'user', content }];
-            }
-            else if (m.role === 'assistant') {
-                const msg = {
-                    role: 'assistant',
-                    content: content
-                };
-                if (m.tool_calls) {
-                    msg.tool_calls = m.tool_calls.map(tc => ({
-                        id: tc.id,
-                        type: 'function',
-                        function: {
-                            name: tc.name,
-                            arguments: JSON.stringify(tc.arguments)
-                        }
-                    }));
-                }
-                return [msg];
-            }
-            else if (m.role === 'tool') {
-                return [{
-                        role: 'tool',
-                        content: typeof content === 'string' ? content : JSON.stringify(content),
-                        tool_call_id: m.tool_call_id || 'unknown'
-                    }];
-            }
-            return [];
-        });
+        const messages = this._mapMessagesForOpenAI(req.messages);
         const options = {
             model: req.model ?? this.config.model,
             messages,
@@ -619,55 +738,10 @@ class AIClient {
     }
     async _openAICompatChat(req) {
         const isStreaming = !!req.onStreamChunk;
-        const messages = req.messages;
+        const processedMessages = this._mapMessagesForOpenAI(req.messages);
         const body = {
             model: req.model ?? this.config.model,
-            messages: messages.flatMap(m => {
-                let content = m.content;
-                // Nvidia NIM/OpenAI strict validation:
-                if (this.config.provider === 'nvidia') {
-                    // Flatten assistant/system messages as before to prevent format errors
-                    if (m.role === 'assistant' || m.role === 'system') {
-                        content = typeof m.content === 'string'
-                            ? m.content
-                            : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
-                    }
-                    // Tool responses CANNOT contain image_url blocks in strict OpenAI schemas (like NIM).
-                    // We must split the image into a subsequent user message.
-                    else if (m.role === 'tool' && Array.isArray(m.content)) {
-                        const hasImages = m.content.some(c => c.type === 'image_url');
-                        if (hasImages) {
-                            const textContent = m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
-                            const imageChunks = m.content.filter(c => c.type === 'image_url');
-                            const toolMsg = { role: 'tool', content: textContent || 'Action complete.' };
-                            if (m.tool_call_id)
-                                toolMsg.tool_call_id = m.tool_call_id;
-                            // NIM enforces strict alternating sequences. We must bridge the Tool -> User gap.
-                            const bridgeAssistantMsg = { role: 'assistant', content: 'Action completed. Please provide the visual result of this action.' };
-                            // Exactly matches Python test structure: [ {type: 'text'}, {type: 'image_url', image_url: ...} ]
-                            const userMsg = {
-                                role: 'user',
-                                content: [
-                                    { type: 'text', text: 'Screenshot provided from the system:' },
-                                    ...imageChunks
-                                ]
-                            };
-                            return [toolMsg, bridgeAssistantMsg, userMsg];
-                        }
-                    }
-                }
-                const msg = { role: m.role, content };
-                if (m.tool_call_id)
-                    msg.tool_call_id = m.tool_call_id;
-                if (m.tool_calls) {
-                    msg.tool_calls = m.tool_calls.map(tc => ({
-                        id: tc.id,
-                        type: 'function',
-                        function: { name: tc.name, arguments: JSON.stringify(tc.arguments) }
-                    }));
-                }
-                return [msg];
-            }),
+            messages: processedMessages,
             temperature: req.temperature ?? this.config.temperature,
             max_tokens: req.maxTokens ?? this.config.maxTokens,
             stream: isStreaming,
@@ -897,25 +971,7 @@ class AIClient {
         };
     }
     async *_openAICompatStream(req) {
-        // Re-use the same mapping logic as the non-streaming version
-        const messages = req.messages.map(m => {
-            let content = m.content;
-            if (this.config.provider === 'nvidia') {
-                if (m.role === 'tool' || m.role === 'assistant' || m.role === 'system') {
-                    content = typeof m.content === 'string'
-                        ? m.content
-                        : m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
-                }
-                else if (m.role === 'user') {
-                    const modelName = (req.model ?? this.config.model).toLowerCase();
-                    const isVision = modelName.includes('vision') || modelName.includes('vl') || modelName.includes('lava') || modelName.includes('gpt-4o');
-                    if (!isVision && typeof m.content !== 'string') {
-                        content = m.content.filter(c => c.type === 'text').map(c => 'text' in c ? c.text : '').join('\n');
-                    }
-                }
-            }
-            return { ...m, content };
-        });
+        const messages = this._mapMessagesForOpenAI(req.messages);
         const streamBody = {
             model: req.model ?? this.config.model,
             messages: messages,

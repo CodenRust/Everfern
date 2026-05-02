@@ -207,6 +207,7 @@ export function registerAgentHandlers() {
     messages: any[],
     model?: string,
     conversationId?: string,
+    projectId?: string,
     providerType?: string,
     apiKey?: string
   }) => {
@@ -292,7 +293,7 @@ export function registerAgentHandlers() {
       const userInput = request.messages[request.messages.length - 1].content;
 
       let fullResponse = '';
-      for await (const streamEvent of runner.runStream(userInput, history, request.model, request.conversationId)) {
+      for await (const streamEvent of runner.runStream(userInput, history, request.model, request.conversationId, undefined, request.projectId)) {
         if (globalAbortManager.streamAborted) {
           flushBuffers();
           streamSender.send('acp:stream-chunk', { delta: '\n\n🛑 Stopped by user.', done: true });
@@ -324,6 +325,8 @@ export function registerAgentHandlers() {
 
           // Self-Improvement: Trigger non-blocking memory reflection
           reflectAndRemember(history, userInput, fullResponse, client);
+        } else if (streamEvent.type === 'subagent-progress') {
+          safeSend('acp:sub-agent-progress', streamEvent.data);
         } else {
           safeSend(`acp:${streamEvent.type}`, streamEvent);
         }

@@ -1,8 +1,8 @@
 /**
  * EverFern Desktop — Subagent Registry
  * 
- * In-memory + disk persistence for subagent visibility.
- * Implements OpenClaw-style parent-child session tracking.
+ * In-memory + async disk persistence for subagent visibility.
+ * Implements a debounced write queue to prevent event loop blocking.
  */
 
 import * as fs from 'fs';
@@ -26,6 +26,7 @@ export interface SubagentEntry {
     result?: string;
     error?: string;
     workspaceDir?: string;
+    projectId?: string;
     maxDepth: number;
     currentDepth: number;
 }
@@ -34,53 +35,67 @@ function getRegistryPath(): string {
     return path.join(os.homedir(), '.everfern', 'subagent-registry.json');
 }
 
-function ensureDir(): void {
+async function ensureDirAsync(): Promise<void> {
     const dir = path.dirname(getRegistryPath());
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+    try {
+        await fs.promises.access(dir);
+    } catch {
+        await fs.promises.mkdir(dir, { recursive: true });
     }
 }
 
 class SubagentRegistry {
     private entries: Map<string, SubagentEntry> = new Map();
     private listeners: Map<string, Set<(entry: SubagentEntry) => void>> = new Map();
+    private saveTimeout: NodeJS.Timeout | null = null;
+    private readonly DEBOUNCE_MS = 500;
 
     constructor() {
-        this.load();
+        this.loadSync();
     }
 
-    private load(): void {
-        ensureDir();
+    /**
+     * loadSync is used only in constructor to ensure baseline state.
+     */
+    private loadSync(): void {
         const filePath = getRegistryPath();
-
-        if (!fs.existsSync(filePath)) {
-            return;
-        }
+        if (!fs.existsSync(filePath)) return;
 
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
             const data: SubagentEntry[] = JSON.parse(content);
+            const cutoff = Date.now() - 24 * 60 * 60 * 1000;
 
             for (const entry of data) {
-                // Only keep recent entries (24 hours)
-                if (Date.now() - entry.updatedAt < 24 * 60 * 60 * 1000) {
+                if (entry.updatedAt > cutoff) {
                     this.entries.set(entry.agentId, entry);
                 }
             }
-
             console.log(`[SubagentRegistry] Loaded ${this.entries.size} entries`);
         } catch (e) {
             console.error('[SubagentRegistry] Failed to load registry:', e);
         }
     }
 
-    private save(): void {
-        ensureDir();
+    /**
+     * Debounced async save to prevent blocking the event loop.
+     */
+    private scheduleSave(): void {
+        if (this.saveTimeout) return;
+
+        this.saveTimeout = setTimeout(async () => {
+            this.saveTimeout = null;
+            await this.saveAsync();
+        }, this.DEBOUNCE_MS);
+    }
+
+    private async saveAsync(): Promise<void> {
+        await ensureDirAsync();
         const filePath = getRegistryPath();
 
         try {
             const data = Array.from(this.entries.values());
-            fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+            await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
         } catch (e) {
             console.error('[SubagentRegistry] Failed to save registry:', e);
         }
@@ -95,7 +110,7 @@ class SubagentRegistry {
         };
 
         this.entries.set(entry.agentId, fullEntry);
-        this.save();
+        this.scheduleSave();
         this.notifyListeners(entry.parentSessionId, fullEntry);
 
         console.log(`[SubagentRegistry] Registered agent ${entry.agentId} (parent: ${entry.parentSessionId})`);
@@ -145,7 +160,7 @@ class SubagentRegistry {
         };
 
         this.entries.set(agentId, updated);
-        this.save();
+        this.scheduleSave();
         this.notifyListeners(updated.parentSessionId, updated);
 
         return updated;
@@ -169,7 +184,7 @@ class SubagentRegistry {
 
     cleanup(): number {
         let cleaned = 0;
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
 
         for (const [agentId, entry] of this.entries.entries()) {
             if (entry.updatedAt < cutoff) {
@@ -179,14 +194,13 @@ class SubagentRegistry {
         }
 
         if (cleaned > 0) {
-            this.save();
+            this.scheduleSave();
             console.log(`[SubagentRegistry] Cleaned up ${cleaned} old entries`);
         }
 
         return cleaned;
     }
 
-    // Listener pattern for completion notifications
     onUpdate(parentSessionId: string, callback: (entry: SubagentEntry) => void): () => void {
         if (!this.listeners.has(parentSessionId)) {
             this.listeners.set(parentSessionId, new Set());
@@ -206,7 +220,6 @@ class SubagentRegistry {
     }
 }
 
-// Singleton
 let registry: SubagentRegistry | null = null;
 
 export function getSubagentRegistry(): SubagentRegistry {
@@ -216,7 +229,6 @@ export function getSubagentRegistry(): SubagentRegistry {
     return registry;
 }
 
-// Convenience functions
 export function generateAgentId(): string {
     return `agent_${crypto.randomUUID().replace(/-/g, '').substring(0, 12)}`;
 }

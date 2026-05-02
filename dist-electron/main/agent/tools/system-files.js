@@ -99,10 +99,10 @@ async function listDirRecursive(rootAbs, maxEntries) {
 }
 exports.systemFilesTool = {
     name: 'system_files',
-    description: 'Manage, organize, move, rename, list, and delete files and folders on the local filesystem. ' +
-        'Use this tool for ANY file management task (e.g., "organize my downloads", "move fonts into a folder", "clean up my desktop"). ' +
-        'Pass the target directory as `root` (absolute path like C:\\Users\\username\\Downloads). All other paths are relative to root. ' +
-        'Workflow: 1) list files, 2) mkdirp target folders, 3) move files into them.',
+    description: '[SURGICAL-DISCIPLINE] Manage, organize, move, rename, list, and delete files and folders on the local filesystem. ' +
+        'Use this tool for file structure operations. For content changes, ALWAYS prefer the "edit" tool for surgical precision. ' +
+        'Workflow: 1) list files, 2) mkdirp target folders, 3) move files into them. ' +
+        'Never delete files without explicit confirmation.',
     parameters: {
         type: 'object',
         properties: {

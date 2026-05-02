@@ -150,6 +150,7 @@ class ChatHistoryStore {
                 role: row.role,
                 content: row.content,
                 thought: row.thought,
+                reasoning_content: row.thought, // Restore reasoning_content from thought column
                 toolCalls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
                 hasTimeline: !!row.has_timeline,
             }));
@@ -204,7 +205,7 @@ class ChatHistoryStore {
                     conversation.id,
                     msg.role,
                     typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-                    msg.thought || null,
+                    msg.thought || msg.reasoning_content || null,
                     msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
                     msg.hasTimeline ? 1 : 0,
                     msgId,

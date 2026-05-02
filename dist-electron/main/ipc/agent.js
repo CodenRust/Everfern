@@ -305,7 +305,7 @@ function registerAgentHandlers() {
             const history = request.messages.slice(0, -1);
             const userInput = request.messages[request.messages.length - 1].content;
             let fullResponse = '';
-            for await (const streamEvent of runner.runStream(userInput, history, request.model, request.conversationId)) {
+            for await (const streamEvent of runner.runStream(userInput, history, request.model, request.conversationId, undefined, request.projectId)) {
                 if (abort_manager_1.globalAbortManager.streamAborted) {
                     flushBuffers();
                     streamSender.send('acp:stream-chunk', { delta: '\n\n🛑 Stopped by user.', done: true });
@@ -345,6 +345,9 @@ function registerAgentHandlers() {
                     safeSend('acp:stream-chunk', { delta: '', done: true });
                     // Self-Improvement: Trigger non-blocking memory reflection
                     (0, memory_manager_1.reflectAndRemember)(history, userInput, fullResponse, client);
+                }
+                else if (streamEvent.type === 'subagent-progress') {
+                    safeSend('acp:sub-agent-progress', streamEvent.data);
                 }
                 else {
                     safeSend(`acp:${streamEvent.type}`, streamEvent);

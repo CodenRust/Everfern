@@ -55,6 +55,8 @@ export class AgentRunner {
   public skills: Skill[] = [];
   public completionGateRetries: number = 0;
   public currentConversationId?: string;
+  public workspaceDir?: string;
+  public projectId?: string;
   public telemetry: TelemetryLogger;
 
   constructor(client: AIClient, config: Partial<AgentRunnerConfig> = {}) {
@@ -187,7 +189,7 @@ export class AgentRunner {
         const agentId = crypto.randomUUID();
         const timeout = AGENT_TYPE_TIMEOUT[agentType] ?? 120000;
 
-        onUpdate?.(`Spawning ${agentType} sub-agent for: ${task.substring(0, 60)}...`);
+        onUpdate?.(`Spawning ${agentType} agent for: ${(task || '').substring(0, 80)}...`);
 
         if (emitEvent && toolCallId) {
             emitEvent({
@@ -198,7 +200,7 @@ export class AgentRunner {
                     type: 'step',
                     toolCallId,
                     timestamp: new Date().toISOString(),
-                    content: `${agentType} agent spawned: ${task.substring(0, 80)}...`
+                    content: `[Subagent: ${agentType}] Task: ${(task || '').substring(0, 100)}...`
                 }
             });
         }
@@ -227,101 +229,7 @@ export class AgentRunner {
 
           const { getSubagentSpawner } = await import('./subagent-spawn');
           const spawner = getSubagentSpawner();
-          spawner.setRunner({
-            run: async (t, h, m, subSystemPrompt) => {
-              const subRunner = new AgentRunner(this.client, this.config);
-              subRunner.skills = this.skills;
-              const clonedHistory = [...h] as any[];
-              let lastResponse = '';
-              let toolCalls: any[] = [];
-
-              const effectivePrompt = subSystemPrompt || systemPrompt;
-              const enrichedTask = effectivePrompt ? `${effectivePrompt}\n\n---\n\nTASK: ${t}` : t;
-
-              const stream = subRunner.runStream(enrichedTask, clonedHistory, m, `sub:${agentId}`);
-
-              for await (const event of stream) {
-                  if (event.type === 'done') break;
-                  if (event.type === 'chunk') lastResponse += event.content;
-
-                  if (event.type === 'thought' && emitEvent && toolCallId) {
-                      emitEvent({
-                          type: 'subagent-progress',
-                          toolCallId,
-                          timestamp: new Date().toISOString(),
-                          data: {
-                              type: 'reasoning',
-                              toolCallId,
-                              timestamp: new Date().toISOString(),
-                              content: event.content
-                          }
-                      });
-                  }
-
-                  if (event.type === 'tool_start' && emitEvent && toolCallId) {
-                      emitEvent({
-                          type: 'subagent-progress',
-                          toolCallId,
-                          timestamp: new Date().toISOString(),
-                          data: {
-                              type: 'action',
-                              toolCallId,
-                              timestamp: new Date().toISOString(),
-                              content: `Running tool: ${event.toolName}`,
-                              toolName: event.toolName
-                          }
-                      });
-                  }
-
-                  if (event.type === 'tool_call' && emitEvent && toolCallId) {
-                      emitEvent({
-                          type: 'subagent-progress',
-                          toolCallId,
-                          timestamp: new Date().toISOString(),
-                          data: {
-                              type: 'action',
-                              toolCallId,
-                              timestamp: new Date().toISOString(),
-                              content: `Finished ${event.toolCall.toolName}`,
-                              toolName: event.toolCall.toolName,
-                              status: event.toolCall.result.success ? 'success' : 'failure'
-                          }
-                      });
-                  }
-
-                  if (event.type === 'thought') {
-                      if (event.content.includes('\n')) onUpdate?.(`[Sub-Agent] ${event.content.trim().split('\n').pop()}`);
-                  }
-                  if (event.type === 'tool_start') onUpdate?.(`[Sub-Agent] Tool: ${event.toolName}`);
-                  if (event.type === 'tool_update') onUpdate?.(`[Sub-Agent] Running ${event.toolName}...`);
-                  if (event.type === 'tool_call') {
-                      toolCalls.push(event.toolCall);
-                      onUpdate?.(`[Sub-Agent] Done: ${event.toolCall.toolName}`);
-                  }
-              }
-
-              if (emitEvent && toolCallId) {
-                  emitEvent({
-                      type: 'subagent-progress',
-                      toolCallId,
-                      timestamp: new Date().toISOString(),
-                      data: {
-                          type: 'complete',
-                          toolCallId,
-                          timestamp: new Date().toISOString()
-                      }
-                  });
-              }
-
-              return {
-                response: lastResponse,
-                toolCalls: toolCalls.map(tc => ({
-                  toolName: tc.toolName,
-                  args: tc.args as Record<string, unknown>
-                }))
-              };
-            }
-          });
+          spawner.setRunner(this); // Provide the full runner to enable runStream piping
 
           const spawnedAgent = await spawner.spawn({
             parentSessionId: this.currentConversationId || 'default',
@@ -330,7 +238,9 @@ export class AgentRunner {
             context,
             model: this.client.model,
             maxDepth,
-            parentHistory
+            parentHistory: parentHistory as Array<{ role: 'user' | 'assistant'; content: string | any[] }>,
+            workspaceDir: this.workspaceDir,
+            projectId: this.projectId
           });
 
           const child = await spawner.waitForAgent(spawnedAgent.agentId, timeout);
@@ -428,8 +338,10 @@ export class AgentRunner {
     history: Array<{ role: 'user' | 'assistant'; content: string | any[] }>,
     model?: string,
     conversationId?: string,
+    systemPromptOverride?: string,
+    projectId?: string,
   ): Promise<{ response: string; toolCalls: ToolCallRecord[] }> {
-    const stream = this.runStream(userInput, history, model, conversationId);
+    const stream = this.runStream(userInput, history, model, conversationId, systemPromptOverride, projectId);
     let lastResponse = '';
     let toolCalls: ToolCallRecord[] = [];
     for await (const event of stream) {
@@ -445,9 +357,26 @@ export class AgentRunner {
     history: Array<{ role: 'user' | 'assistant'; content: string | any[] }>,
     model?: string,
     conversationId?: string,
+    systemPromptOverride?: string,
+    projectId?: string,
   ): AsyncGenerator<StreamEvent, void, unknown> {
     if (model) this.client.setModel(model);
     this.telemetry.setAgentId(this.client.model);
+    this.projectId = projectId;
+
+    if (projectId) {
+      try {
+        const { projectsStore } = await import('../../store/projects/projects');
+        const project = await projectsStore.get(projectId);
+        if (project) {
+          this.workspaceDir = project.path;
+          console.log(`[AgentRunner] 📂 Project context detected: ${project.name} (${project.path})`);
+        }
+      } catch (err) {
+        console.warn(`[AgentRunner] Failed to resolve project ${projectId}:`, err);
+      }
+    }
+
     const convId = conversationId || crypto.randomUUID();
     this.currentConversationId = convId;
     const sessionKey = `session:${convId}`;
@@ -541,7 +470,7 @@ export class AgentRunner {
     }
 
     // Pre-load system prompt asynchronously with pre-loaded skills to avoid loading them twice
-    const preloadedPrompt = await getSlimSystemPromptAsync(platform, conversationId, [], this.skills);
+    const preloadedPrompt = await getSlimSystemPromptAsync(platform, convId, [], this.skills, projectId);
 
     // Create eventQueue early so we can push status updates
     let pushResolver: any = null;
@@ -561,7 +490,7 @@ export class AgentRunner {
     this.telemetry.updateSpinner('Compiling system messages...');
     console.log('[AgentRunner] 🔄 Building system messages...');
 
-    const { messages: initialMessages } = buildSystemMessages(history, userInput, platform, conversationId, [], preloadedPrompt);
+    const { messages: initialMessages } = await buildSystemMessages(history, userInput, platform, convId, [], systemPromptOverride || preloadedPrompt, projectId);
 
     // Bug 2 Fix: Load full conversation history including tool calls into initialMessages
     const chatHistoryStore = new ChatHistoryStore();
@@ -601,8 +530,24 @@ export class AgentRunner {
     // Reset abort state for new execution
     globalAbortManager.reset();
 
-    // Create shouldAbort callback for graph nodes
-    const shouldAbort = globalAbortManager.createShouldAbortCallback();
+    // SWARM SYNC: Listen for sub-agent progress events to forward to the stream
+    const { getAgentEvents } = await import('../infra/agent-events');
+    const swarmEvents = getAgentEvents(convId);
+    
+    // onStream returns a cleanup function
+    const removeProgressListener = swarmEvents.onStream('subagent-progress', (event: any) => {
+        console.log(`[AgentRunner] 🛰️ Forwarding subagent progress: ${event.type}`);
+        eventQueue.push({
+            type: 'subagent-progress',
+            toolCallId: event.data.toolCallId,
+            timestamp: event.data.timestamp || new Date().toISOString(),
+            data: { ...event.data, type: event.type }
+        } as any);
+    });
+
+    try {
+        // Create shouldAbort callback for graph nodes
+        const shouldAbort = globalAbortManager.createShouldAbortCallback();
 
     // Build graph asynchronously to avoid blocking the event loop
     const graph = await Promise.resolve().then(() => buildGraph(
@@ -779,6 +724,10 @@ export class AgentRunner {
     durationTracker.reset();
 
     yield { type: 'done' };
+    } finally {
+        removeProgressListener();
+        console.log('[AgentRunner] 🏁 Stream finished and listener removed');
+    }
   }
 }
 
@@ -802,36 +751,70 @@ function reconstructFullHistory(storedMessages: any[], currentUserInput: string 
     }
   }
 
+  // Pre-collect all existing tool message IDs to avoid duplication
+  const existingToolMessageIds = new Set<string>();
+  for (const m of messagesToProcess) {
+    if (m.role === 'tool' && (m.tool_call_id || m.toolCallId)) {
+      existingToolMessageIds.add(m.tool_call_id || m.toolCallId);
+    }
+  }
+
   for (const msg of messagesToProcess) {
     if (msg.toolCalls && msg.toolCalls.length > 0) {
       // This is an assistant message with tool calls
+      // Ensure all tool calls have IDs and they are consistent.
+      // We use the message ID + index to generate a STABLE ID if one is missing.
+      const toolCallsWithIds = msg.toolCalls.map((tc: any, idx: number) => {
+        const stableId = tc.id || tc.toolCallId || `call_${msg.id || 'stub'}_${idx}`;
+        return {
+          id: stableId,
+          name: tc.toolName || tc.name,
+          arguments: tc.args || tc.arguments || {},
+          result: tc.result
+        };
+      });
+
       // First emit the assistant message with tool_calls array
       reconstructed.push({
         role: 'assistant',
         content: msg.content || '',
-        tool_calls: msg.toolCalls.map((tc: any) => ({
-          id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          type: 'function',
-          function: {
-            name: tc.toolName,
-            arguments: JSON.stringify(tc.args || {})
-          }
+        reasoning_content: msg.reasoning_content || msg.thought,
+        tool_calls: toolCallsWithIds.map((tc: any) => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments
         }))
       });
 
-      // Then emit individual tool result messages
-      for (const tc of msg.toolCalls) {
-        reconstructed.push({
-          role: 'tool',
-          tool_call_id: tc.id || `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          content: JSON.stringify(tc.result || { success: false, output: 'No result available' })
-        });
+      // Then emit individual tool result messages ONLY if they are missing from the original history
+      // and we have a result available in the assistant message's toolCalls.
+      for (const tc of toolCallsWithIds) {
+        if (tc.result && !existingToolMessageIds.has(tc.id)) {
+          reconstructed.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(tc.result || { success: false, output: 'No result available' })
+          });
+          // Add to seen set to prevent further duplicates of this specific ID in this turn
+          existingToolMessageIds.add(tc.id);
+        }
       }
     } else {
-      // Plain user/assistant text message - emit as-is
+      // Plain user/assistant/tool message - emit as-is
+      // If it's a tool message, ensure it has an ID
+      if (msg.role === 'tool' && !(msg.tool_call_id || msg.toolCallId)) {
+          // This is a rare case where a tool message exists but has no ID.
+          // Since we don't have its parent assistant message easily accessible here,
+          // we hope it's rare. But for safety, we skip it as an orphan.
+          console.warn('[Runner] Skipping orphan tool message with no ID');
+          continue;
+      }
+
       reconstructed.push({
         role: msg.role,
-        content: msg.content
+        content: msg.content,
+        reasoning_content: msg.reasoning_content || msg.thought,
+        tool_call_id: msg.tool_call_id || msg.toolCallId
       });
     }
   }

@@ -47,7 +47,7 @@ describe('providers:get-models IPC handler logic', () => {
   it('should format known model names correctly', () => {
     expect(formatModelName('gpt-4o')).toBe('GPT-4o');
     expect(formatModelName('claude-sonnet-4-20250514')).toBe('Claude Sonnet 4');
-    expect(formatModelName('deepseek-chat')).toBe('DeepSeek V3');
+    expect(formatModelName('deepseek-v4-pro')).toBe('DeepSeek V4 Pro');
   });
 
   it('should return model ID as name for unknown models', () => {

@@ -9,12 +9,13 @@ export function normalizeMessage(m: any): ChatMessage {
     return {
       role: m.role,
       content: m.content,
-      tool_call_id: m.tool_call_id,
-      tool_calls: m.tool_calls
+      tool_call_id: m.tool_call_id || (m as any).toolCallId,
+      tool_calls: m.tool_calls || (m as any).toolCalls,
+      reasoning_content: m.reasoning_content || (m as any).thought
     };
   }
 
-  // Handle LangChain message objects
+  // Handle LangChain message objects or other formats
   let role: 'system' | 'user' | 'assistant' | 'tool' = 'user';
   const type = m.type || m._getType?.();
 
@@ -30,8 +31,9 @@ export function normalizeMessage(m: any): ChatMessage {
   return {
     role,
     content: m.content || '',
-    tool_call_id: m.tool_call_id || (m as any).tool_call_id,
-    tool_calls: m.tool_calls || (m as any).tool_calls
+    tool_call_id: m.tool_call_id || (m as any).tool_call_id || (m as any).toolCallId,
+    tool_calls: m.tool_calls || (m as any).tool_calls || (m as any).toolCalls,
+    reasoning_content: m.reasoning_content || (m as any).reasoning_content || (m as any).thought
   };
 }
 

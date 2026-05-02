@@ -251,6 +251,15 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         write: (chatId, filename, content) => electron_1.ipcRenderer.invoke('plans:write', chatId, filename, content),
         delete: (chatId, filename) => electron_1.ipcRenderer.invoke('plans:delete', chatId, filename),
     },
+    // ── Projects ────────────────────────────────────────────────────
+    projects: {
+        list: () => electron_1.ipcRenderer.invoke('projects:list'),
+        create: (data) => electron_1.ipcRenderer.invoke('projects:create', data),
+        delete: (id) => electron_1.ipcRenderer.invoke('projects:delete', id),
+        getDefaultPath: () => electron_1.ipcRenderer.invoke('projects:getDefaultPath'),
+        selectFolder: () => electron_1.ipcRenderer.invoke('projects:selectFolder'),
+        selectFiles: () => electron_1.ipcRenderer.invoke('projects:selectFiles'),
+    },
     // ── Sites ─────────────────────────────────────────────────────────
     sites: {
         list: (chatId) => electron_1.ipcRenderer.invoke('sites:list', chatId),

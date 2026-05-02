@@ -176,7 +176,7 @@ async function classifyIntent(userInput, client, history = []) {
                 ],
                 responseFormat: 'json',
                 temperature: 0.0,
-                maxTokens: 100,
+                maxTokens: 500,
             }),
             timeoutPromise,
         ]);

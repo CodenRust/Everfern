@@ -301,6 +301,7 @@ export async function runAgentStep(
       role: 'assistant',
       content: scrubbed,
       tool_calls: response.toolCalls,
+      reasoning_content: response.reasoning_content,
     };
 
     // Always send the final response to frontend if it's not a tool call

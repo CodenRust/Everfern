@@ -3,6 +3,7 @@ import { AgentRunner } from '../runner';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
 import type { AIClient } from '../../../lib/ai-client';
+import { toolApprovalStore } from '../../../store/tool-approvals';
 
 const MAX_ITERATIONS = 50;
 
@@ -20,6 +21,10 @@ const SAFE_TOOL_WHITELIST = new Set([
   'view_file',
   'list_directory',
   'execution_plan',
+  'read',
+  'find',
+  'grep',
+  'ls',
 ]);
 
 /**
@@ -28,6 +33,13 @@ const SAFE_TOOL_WHITELIST = new Set([
  */
 async function assessToolRisk(toolCalls: any[], client?: AIClient): Promise<boolean> {
   if (!toolCalls || toolCalls.length === 0) return false;
+
+  // Auto-approval check: if ALL pending tool calls match user-defined auto-approval policies, skip risk assessment
+  const allAutoApproved = toolCalls.every(tc => toolApprovalStore.isApproved(tc.name, tc.arguments || {}));
+  if (allAutoApproved) {
+    console.log('[Validation] 🚀 All tool calls are auto-approved via user policies');
+    return false;
+  }
 
   // Whitelist check: if ALL pending tool calls are safe internal tools, skip risk assessment
   const allSafe = toolCalls.every(tc => SAFE_TOOL_WHITELIST.has(tc.name));

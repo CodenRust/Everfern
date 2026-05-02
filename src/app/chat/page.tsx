@@ -34,12 +34,13 @@ import {
     ArrowPathIcon,
     EyeIcon,
     StopCircleIcon,
+    BriefcaseIcon,
 } from "@heroicons/react/24/outline";
 import { CheckIcon as CheckSolidIcon } from "@heroicons/react/24/solid";
 
 // Components
 import { AgentTimeline } from "../../components/AgentTimeline";
-import MissionTimelineComponent from "../../components/MissionTimeline";
+import MissionProgressCard from './components/MissionProgressCard';
 import type { MissionTimeline as MissionTimelineType } from "../../components/MissionTimeline";
 import StreamView from "../../components/StreamView";
 import WindowControls from "../components/WindowControls";
@@ -58,9 +59,12 @@ import PlanViewerPanel from './PlanViewerPanel';
 import TasksPanel from './TasksPanel';
 import SitePreview from './SitePreview';
 import SettingsPage from './SettingsPage';
+import CustomizeModal from './CustomizeModal';
 import FileArtifact from './FileArtifact';
 import VoiceAssistantUI from './VoiceAssistantUI';
 import { SurfaceCanvas } from './SurfaceCanvas';
+import ProjectsPage from '../components/ProjectsPage';
+import CreateProjectModal from '../components/CreateProjectModal';
 
 // Extracted components
 import {
@@ -137,6 +141,9 @@ export default function ChatPage() {
     const [showSettings, setShowSettings] = useState(false);
     const [showDirectoryModal, setShowDirectoryModal] = useState(false);
     const [showIntegrationSettings, setShowIntegrationSettings] = useState(false);
+    const [showProjectsPage, setShowProjectsPage] = useState(false);
+    const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
+    const [showCustomizeModal, setShowCustomizeModal] = useState(false);
     const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [randomGreeting, setRandomGreeting] = useState("");
@@ -144,6 +151,8 @@ export default function ChatPage() {
     const [settingsMotionBlur, setSettingsMotionBlur] = useState(true);
     const [activeTaskIds, setActiveTaskIds] = useState<string[]>([]);
     const [notification, setNotification] = useState<{ id: string; title: string } | null>(null);
+    const [projects, setProjects] = useState<any[]>([]);
+    const [showProjectDropdown, setShowProjectDropdown] = useState(false);
 
     const loadingMessages = ["marinating...", "schlepping...", "concocting...", "honking..."];
     const greetingMessages = [
@@ -164,6 +173,22 @@ export default function ChatPage() {
 
     // Inject CSS for token ring tooltip hover
     useEffect(() => {
+        const fetchProjects = async () => {
+            try {
+                if ((window as any).electronAPI?.projects?.list) {
+                    const list = await (window as any).electronAPI.projects.list();
+                    setProjects(list || []);
+                }
+            } catch (err) {
+                console.error('Failed to fetch projects:', err);
+            }
+        };
+        fetchProjects();
+        const interval = setInterval(fetchProjects, 5000);
+        return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
         const style = document.createElement('style');
         style.textContent = `
             .token-ring-tooltip { opacity: 0 !important; transition: opacity 0.15s ease !important; }
@@ -181,7 +206,7 @@ export default function ChatPage() {
     const [currentPlan, setCurrentPlan] = useState<any | null>(null);
     const [executionPlan, setExecutionPlan] = useState<{ title?: string; content: string } | null>(null);
     const [isExecutionPlanPaneOpen, setIsExecutionPlanPaneOpen] = useState<boolean>(true);
-    const [isProjectTasksPaneOpen, setIsProjectTasksPaneOpen] = useState<boolean>(false);
+    const [progressExpanded, setProgressExpanded] = useState<boolean>(true);
     const [reportPane, setReportPane] = useState<{ label: string; path: string } | null>(null);
     const [contextItems, setContextItems] = useState<{ id: string; type: 'file' | 'web' | 'app'; label: string; base64Image?: string; appName?: string; appLogo?: string }[]>([]);
     const [isValidatingModel, setIsValidatingModel] = useState(false);
@@ -225,7 +250,7 @@ export default function ChatPage() {
                 setActiveTaskIds(prev => prev.filter(id => id !== conversationId));
                 if (conversationId !== activeConversationId) {
                     // Find title from history or use default
-                    const convTitle = history.find(h => h.id === conversationId)?.title || "Chat task";
+                    const convTitle = "Chat task";
                     setNotification({ id: conversationId, title: convTitle });
                     // Auto-hide toast after 8 seconds
                     setTimeout(() => setNotification(prev => prev?.id === conversationId ? null : prev), 8000);
@@ -364,6 +389,10 @@ export default function ChatPage() {
     const [currentNode, setCurrentNode] = useState<string>("");
     const [currentPhase, setCurrentPhase] = useState<"triage" | "planning" | "execution" | "validation" | "completion" | undefined>(undefined);
     const [activeContextTab, setActiveContextTab] = useState<'Overview' | 'Resources' | 'Permissions' | 'History'>('Overview');
+    const [instructionsExpanded, setInstructionsExpanded] = useState(true);
+    const [scheduledExpanded, setScheduledExpanded] = useState(false);
+    const [contextExpanded, setContextExpanded] = useState(true);
+    const [instructions, setInstructions] = useState('');
 
     // Sub-agent progress pane state
     const [zoomedScreenshot, setZoomedScreenshot] = useState<string | null>(null);
@@ -431,6 +460,7 @@ export default function ChatPage() {
     // HITL Approval state
     const [showHitlApproval, setShowHitlApproval] = useState(false);
     const [hitlRequest, setHitlRequest] = useState<{
+        id: string;
         question: string;
         details: {
             tools: any[];
@@ -470,6 +500,7 @@ export default function ChatPage() {
     const isHandlingPlanRef = useRef(false);
 
     const isEmpty = messages.length === 0;
+    const isProjectLocked = folderContexts.length > 0 && projects.some(p => p.id === folderContexts[0].id || p.path === folderContexts[0].path);
     const displayName = (config?.userName || onboardingName || "there").toString();
 
     useEffect(() => {
@@ -783,15 +814,7 @@ export default function ChatPage() {
         }
     };
 
-    const handleAddContextFolder = async () => {
-        const picker = (window as any).electronAPI?.system?.openFolderPicker;
-        if (!picker) return;
-        const folder = await picker();
-        if (folder && folder.success && folder.path) {
-            setFolderContexts(prev => { if (prev.some(f => f.path === folder.path)) return prev; return [...prev, { id: crypto.randomUUID(), path: folder.path, name: folder.name || folder.path }]; });
-            setContextItems(prev => { const label = `Folder: ${folder.path}`; if (prev.some(i => i.label === label)) return prev; return [...prev, { id: crypto.randomUUID(), type: 'file', label }]; });
-        }
-    };
+    // Removed handleAddContextFolder
 
     const checkForPlan = useCallback(async (chatId: string) => {
         const api = (window as any).electronAPI;
@@ -1037,7 +1060,6 @@ export default function ChatPage() {
             acpApi.onMissionStepUpdate(({ step, timeline }: { step: any; timeline: MissionTimelineType }) => {
                 console.log('[Mission] Step update received:', step?.name, step?.status);
                 setMissionTimeline(timeline);
-                setIsProjectTasksPaneOpen(true);
                 setIsExecutionPlanPaneOpen(false);
 
                 // Update current node based on the latest step
@@ -1049,7 +1071,6 @@ export default function ChatPage() {
             acpApi.onMissionPhaseChange(({ phase, timeline }: { phase: string; timeline: MissionTimelineType }) => {
                 console.log('[Mission] Phase change received:', phase);
                 setMissionTimeline(timeline);
-                setIsProjectTasksPaneOpen(true);
                 setIsExecutionPlanPaneOpen(false);
                 setCurrentPhase(phase as any);
             });
@@ -1372,13 +1393,19 @@ export default function ChatPage() {
         console.log('[Frontend handleSend] CALLED - Starting new message send');
         const textToUse = typeof overrideValue === 'string' ? overrideValue : inputValue;
         if ((!textToUse.trim() && attachments.length === 0 && folderContexts.length === 0) || isLoading) return;
-        const folderContextText = folderContexts.length > 0 ? `\n\n[Shared folder context]\n${folderContexts.map(f => `- ${f.path}`).join('\n')}\n\nNote: This folder structure is provided as passive context. You do not need to process, scan, or organize these files automatically. However, if the user explicitly asks you to take an action on these files in this message, you MUST fulfill their request using your tools immediately without asking for extra confirmation.` : '';
+        const isProject = folderContexts.length > 0 && projects.some(p => p.id === folderContexts[0].id || p.path === folderContexts[0].path);
+        const folderContextText = (folderContexts.length > 0 && !isProject) ? `\n\n[Shared folder context]\n${folderContexts.map(f => `- ${f.path}`).join('\n')}\n\nNote: This folder structure is provided as passive context. You do not need to process, scan, or organize these files automatically. However, if the user explicitly asks you to take an action on these files in this message, you MUST fulfill their request using your tools immediately without asking for extra confirmation.` : '';
         const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: (textToUse.trim() + folderContextText).trim(), timestamp: new Date(), attachments: attachments.length > 0 ? [...attachments] : undefined };
         const newMessages = [...messages, userMessage];
         setMessages(newMessages);
         if (typeof overrideValue !== 'string') setInputValue("");
         setAttachments([]);
-        setFolderContexts([]);
+        
+        // Keep project context if it exists
+        if (!isProject) {
+            setFolderContexts([]);
+        }
+        
         setIsLoading(true);
         setLiveToolCalls([]);
         setStreamingToolCalls([]);
@@ -1878,7 +1905,8 @@ export default function ChatPage() {
                     }),
                     model: selectedModel,
                     providerType: currentM?.providerType || 'everfern',
-                    conversationId: activeConversationId || crypto.randomUUID()
+                    conversationId: activeConversationId || crypto.randomUUID(),
+                    projectId: folderContexts.length > 0 ? folderContexts[0].id : undefined
                 });
             } catch (err) {
                 if (isMessageCommittedRef.current) return;
@@ -2113,6 +2141,10 @@ export default function ChatPage() {
     }, [handleSend]);
 
     const handleNewChat = () => { 
+        setShowArtifacts(false);
+        setShowSettings(false);
+        setShowIntegrationSettings(false);
+        setShowProjectsPage(false);
         setMessages([]); 
         setInputValue(""); 
         setAttachments([]); 
@@ -2128,13 +2160,23 @@ export default function ChatPage() {
         setLiveToolCalls([]);
         setStreamingToolCalls([]);
         setSubAgentProgress(new Map());
-        setCurrentPhase('thinking');
-        setCurrentNode(null);
+        setCurrentPhase(undefined);
+        setCurrentNode("");
+        setMissionTimeline(null);
+        setMissionComplete(false);
         setActivePlanSteps(null);
         setActivePlanTitle(null);
     };
 
     const handleSelectConversation = async (id: string) => {
+        if (!id) return;
+        
+        setShowArtifacts(false);
+        setShowSettings(false);
+        setShowIntegrationSettings(false);
+        setShowProjectsPage(false);
+        setSidebarOpen(false); // auto-collapse on mobile/small screens
+        
         try {
             if ((window as any).electronAPI?.history?.load) {
                 const conv = await (window as any).electronAPI.history.load(id);
@@ -2145,8 +2187,10 @@ export default function ChatPage() {
                     setLiveToolCalls([]);
                     setStreamingToolCalls([]);
                     setSubAgentProgress(new Map());
-                    setCurrentPhase('thinking');
-                    setCurrentNode(null);
+                    setCurrentPhase(undefined);
+                    setCurrentNode("");
+                    setMissionTimeline(null);
+                    setMissionComplete(false);
                     setActivePlanSteps(null);
                     setActivePlanTitle(null);
 
@@ -2319,16 +2363,59 @@ export default function ChatPage() {
                 </AnimatePresence>
             </div>
 
-            <button type="button"
-                onClick={folderContexts.length > 0 && folderHover ? () => setFolderContexts([]) : handleAddContextFolder}
-                title={folderContexts.length > 0 && folderHover ? "Remove context" : "Add context folder"}
-                style={{ display: "flex", alignItems: "center", gap: 6, background: folderHover && folderContexts.length > 0 ? "rgba(239, 68, 68, 0.15)" : "transparent", border: folderHover && folderContexts.length > 0 ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid #e8e6d9", borderRadius: 14, color: folderHover && folderContexts.length > 0 ? "#ef4444" : "#201e24", cursor: "pointer", padding: "6px 14px", fontSize: 13, fontWeight: 500, transition: "0.2s" }}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = folderContexts.length > 0 ? "rgba(239, 68, 68, 0.15)" : "rgba(0,0,0,0.04)"; e.currentTarget.style.color = folderContexts.length > 0 ? "#ef4444" : "#111111"; if (folderContexts.length > 0) e.currentTarget.style.border = "1px solid rgba(239, 68, 68, 0.3)"; setFolderHover(true); }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#201e24"; e.currentTarget.style.border = "1px solid #e8e6d9"; setFolderHover(false); }}
-            >
-                {folderHover && folderContexts.length > 0 ? <XMarkIcon width={15} height={15} /> : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>}
-                {folderContexts.length > 0 ? folderContexts[folderContexts.length - 1].name : "Add context"}
-            </button>
+            <div style={{ position: 'relative' }}>
+                <button type="button"
+                    onClick={() => !isProjectLocked && setShowProjectDropdown(!showProjectDropdown)}
+                    title={isProjectLocked ? "Project Locked" : "Select Project"}
+                    style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "1px solid #e8e6d9", borderRadius: 14, color: folderContexts.length > 0 ? "#111111" : "#8a8886", cursor: isProjectLocked ? "default" : "pointer", padding: "6px 14px", fontSize: 13, fontWeight: 500, transition: "0.2s" }}
+                    onMouseEnter={e => { if (!isProjectLocked) { e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.04)"; e.currentTarget.style.color = "#111111"; } }}
+                    onMouseLeave={e => { if (!isProjectLocked) { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = folderContexts.length > 0 ? "#111111" : "#8a8886"; } }}
+                >
+                    <BriefcaseIcon width={15} height={15} style={{ color: folderContexts.length > 0 ? "#111111" : "#8a8886" }} />
+                    {folderContexts.length > 0 ? folderContexts[0].name : "Project"}
+                    {!isProjectLocked && <ChevronDownIcon width={12} height={12} style={{ marginLeft: 4, color: '#8a8886' }} />}
+                </button>
+
+                <AnimatePresence>
+                    {showProjectDropdown && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                            transition={{ duration: 0.15 }}
+                            style={{ position: "absolute", bottom: "100%", left: 0, marginBottom: 8, width: 220, backgroundColor: "#ffffff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.1)", border: "1px solid #f4f4f4", padding: 6, zIndex: 50, display: "flex", flexDirection: "column", gap: 2, maxHeight: 300, overflowY: "auto" }}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => { setFolderContexts([]); setShowProjectDropdown(false); }}
+                                style={{ display: "flex", alignItems: "center", padding: "8px 12px", borderRadius: 8, border: "none", backgroundColor: folderContexts.length === 0 ? "rgba(0,0,0,0.04)" : "transparent", color: folderContexts.length === 0 ? "#111111" : "#8a8886", cursor: "pointer", fontSize: 13, textAlign: "left", transition: "0.15s" }}
+                                onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"}
+                                onMouseLeave={e => e.currentTarget.style.backgroundColor = folderContexts.length === 0 ? "rgba(0,0,0,0.04)" : "transparent"}
+                            >
+                                No Project
+                            </button>
+                            
+                            {projects.length > 0 && <div style={{ height: 1, backgroundColor: '#f4f4f4', margin: '4px 0' }} />}
+                            
+                            {projects.map(p => (
+                                <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => { setFolderContexts([{ id: p.id, path: p.path, name: p.name }]); setShowProjectDropdown(false); }}
+                                    style={{ display: "flex", alignItems: "center", padding: "8px 12px", borderRadius: 8, border: "none", backgroundColor: folderContexts[0]?.id === p.id ? "rgba(0,0,0,0.04)" : "transparent", color: "#111111", cursor: "pointer", fontSize: 13, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", transition: "0.15s" }}
+                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.05)"}
+                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = folderContexts[0]?.id === p.id ? "rgba(0,0,0,0.04)" : "transparent"}
+                                >
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", overflow: "hidden" }}>
+                                        <BriefcaseIcon width={14} height={14} style={{ flexShrink: 0, color: folderContexts[0]?.id === p.id ? '#111111' : '#8a8886' }} />
+                                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
         </div>
     );
 
@@ -2336,32 +2423,6 @@ export default function ChatPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {/* Context Token Ring */}
             <ContextTokenRing used={contextTokens.used} max={contextTokens.max} />
-
-            {/* Voice Output Toggle */}
-            {showVolumeToggle && voiceProvider && voiceElevenlabsKey && (
-                <button type="button" onClick={() => setVoiceOutputEnabled(!voiceOutputEnabled)} title={voiceOutputEnabled ? "Sound on" : "Sound off"}
-                    style={{ width: 32, height: 32, borderRadius: 10, background: voicePlayback ? "rgba(59, 130, 246, 0.15)" : voiceOutputEnabled ? "transparent" : "rgba(0,0,0,0.05)", border: voiceOutputEnabled ? "1px solid #a1a1aa" : "1px solid #e8e6d9", color: voicePlayback ? "#3b82f6" : voiceOutputEnabled ? "#717171" : "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.2s" }}
-                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = voiceOutputEnabled ? "rgba(16, 185, 129, 0.1)" : "rgba(0,0,0,0.08)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = voicePlayback ? "rgba(59, 130, 246, 0.15)" : voiceOutputEnabled ? "transparent" : "rgba(0,0,0,0.05)"; }}
-                >
-                    {voicePlayback ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, animation: "pulse 1s infinite" }}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 3.54a9 9 0 0 1 0 12.72M19.07 4.93a16 16 0 0 1 0 14.14"></path></svg>
-                    ) : voiceOutputEnabled ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 3.54a9 9 0 0 1 0 12.72M19.07 4.93a16 16 0 0 1 0 14.14"></path></svg>
-                    ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
-                    )}
-                </button>
-            )}
-
-            {/* ── VOICE BUTTON ── appears in BOTH empty and non-empty composers */}
-            <VoiceButton
-                isRecording={isRecording}
-                voiceProvider={voiceProvider}
-                voiceDeepgramKey={voiceDeepgramKey}
-                voiceElevenlabsKey={voiceElevenlabsKey}
-                onClick={() => setShowVoiceAssistant(true)}
-            />
 
             {renderModelSelector(true)}
 
@@ -2699,10 +2760,11 @@ export default function ChatPage() {
                 activeTaskIds={activeTaskIds}
                 onSelectConversation={handleSelectConversation}
                 onNewChat={handleNewChat}
-                onSettingsClick={() => setShowSettings(true)}
-                onArtifactsClick={() => setShowArtifacts(true)}
-                onCustomizeClick={() => setShowDirectoryModal(true)}
-                onIntegrationClick={() => setShowIntegrationSettings(true)}
+                onSettingsClick={() => { setShowSettings(true); setShowCustomizeModal(false); setShowArtifacts(false); setShowIntegrationSettings(false); setShowProjectsPage(false); }}
+                onArtifactsClick={() => { setShowArtifacts(true); setShowSettings(false); setShowCustomizeModal(false); setShowIntegrationSettings(false); setShowProjectsPage(false); }}
+                onCustomizeClick={() => { setShowDirectoryModal(true); setShowSettings(false); setShowArtifacts(false); setShowIntegrationSettings(false); setShowProjectsPage(false); }}
+                onIntegrationClick={() => { setShowIntegrationSettings(true); setShowSettings(false); setShowCustomizeModal(false); setShowArtifacts(false); setShowProjectsPage(false); }}
+                onProjectsClick={() => { setShowProjectsPage(true); setShowSettings(false); setShowCustomizeModal(false); setShowArtifacts(false); setShowIntegrationSettings(false); }}
             />
 
             <CompletionToast />
@@ -2725,14 +2787,7 @@ export default function ChatPage() {
                                     View Plan
                                 </button>
                             )}
-                            {missionTimeline && !isProjectTasksPaneOpen && (
-                                <button onClick={() => {
-                                    setIsProjectTasksPaneOpen(true);
-                                }} style={{ fontSize: 12, fontWeight: 600, color: "#201e24", backgroundColor: "rgba(0,0,0,0.04)", padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                                    Project Tasks
-                                </button>
-                            )}
+                            {/* Project Tasks button removed as it is now in the sidebar */}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, WebkitAppRegion: "no-drag" } as any}>
                             <button type="button" style={{ position: "relative", background: "transparent", border: "none", color: "#73716e", cursor: "pointer", display: "flex", alignItems: "center", padding: 4 }} onMouseEnter={e => e.currentTarget.style.color = "#111111"} onMouseLeave={e => e.currentTarget.style.color = "#73716e"}>
@@ -2745,6 +2800,28 @@ export default function ChatPage() {
 
                     <div style={{ flex: 1, position: "relative", minHeight: 0, display: "flex", flexDirection: "row", backgroundColor: "#ffffff", margin: "0 12px 12px 0", borderRadius: 28, border: "1px solid #e8e6d9", boxShadow: "0 4px 20px rgba(0,0,0,0.03)", overflow: "hidden" }}>
                         {/* Main Chat Area */}
+                        {showProjectsPage ? (
+                            <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", backgroundColor: "#fff" }}>
+                                <ProjectsPage
+                                    onClose={() => setShowProjectsPage(false)}
+                                    onCreateNew={() => setShowCreateProjectModal(true)}
+                                    onSelectProject={(project) => {
+                                        handleNewChat();
+                                        // Set conversation ID to project ID for persistent, project-locked context
+                                        setActiveConversationId(project.id);
+                                        activeConversationIdRef.current = project.id;
+                                        setFolderContexts([{ id: project.id, path: project.path, name: project.name }]);
+                                        setContextItems([{ 
+                                            id: crypto.randomUUID(), 
+                                            type: 'folder' as any, 
+                                            label: project.name,
+                                            path: project.path
+                                        } as any]);
+                                        setShowProjectsPage(false);
+                                    }}
+                                />
+                            </div>
+                        ) : (
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
                             <div style={{ flex: 1, overflowY: "auto", padding: "16px 0 32px" }}>
                                 <div style={{ maxWidth: 800, margin: "0 auto", padding: "0 32px" }}>
@@ -2752,17 +2829,41 @@ export default function ChatPage() {
                                     {/* ── Empty / Home State ── */}
                                     {isEmpty && (
                                         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", duration: 0.7 }}
-                                            style={{ marginTop: "14vh", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                                            <div style={{ marginBottom: 26 }}>
-                                                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "5px 12px", borderRadius: 8, backgroundColor: "rgba(0, 0, 0, 0.04)", border: "1px solid rgba(0, 0, 0, 0.08)", color: "#717171", fontSize: 13 }}>
-                                                    <span>Free plan</span>
-                                                    <span style={{ opacity: 0.5 }}>·</span>
-                                                    <button type="button" style={{ background: "transparent", border: "none", color: "#4a4846", cursor: "pointer", fontSize: 13, padding: 0, textDecoration: "underline" }} onClick={() => setShowSettings(true)}>Upgrade</button>
+                                            style={{ marginTop: "14vh", textAlign: "left", display: "flex", flexDirection: "column", alignItems: "stretch", width: "100%", maxWidth: 740 }}>
+                                            {folderContexts.length === 0 && (
+                                                <div style={{ marginBottom: 26, textAlign: "center" }}>
+                                                    <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "5px 12px", borderRadius: 8, backgroundColor: "rgba(0, 0, 0, 0.04)", border: "1px solid rgba(0, 0, 0, 0.08)", color: "#717171", fontSize: 13 }}>
+                                                        <span>Free plan</span>
+                                                        <span style={{ opacity: 0.5 }}>·</span>
+                                                        <button type="button" style={{ background: "transparent", border: "none", color: "#4a4846", cursor: "pointer", fontSize: 13, padding: 0, textDecoration: "underline" }} onClick={() => setShowSettings(true)}>Upgrade</button>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 28 }}>
-                                                <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 36, fontWeight: 400, margin: 0, color: "#201e24", letterSpacing: "-0.01em" }}>{randomGreeting}</h1>
-                                            </div>
+                                            )}
+                                            {folderContexts.length > 0 ? (
+                                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+                                                    <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 44, fontWeight: 400, margin: 0, color: "#201e24", letterSpacing: "-0.01em" }}>
+                                                        {folderContexts[0].name}
+                                                    </h1>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                                        <button type="button" style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: 6, display: "flex", borderRadius: 8 }} title="Favorite"
+                                                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,0,0,0.05)"; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                                        </button>
+                                                        <button type="button" style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: 6, display: "flex", borderRadius: 8 }} title="More options"
+                                                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,0,0,0.05)"; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 28 }}>
+                                                    <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 36, fontWeight: 400, margin: 0, color: "#201e24", letterSpacing: "-0.01em" }}>
+                                                        {randomGreeting}
+                                                    </h1>
+                                                </div>
+                                            )}
 
                                             {/* ── Empty state composer ── */}
                                             <div style={{ width: "100%", maxWidth: 740 }}>
@@ -2857,37 +2958,54 @@ export default function ChatPage() {
                                                     />
                                                 )}
 
-                                                <div style={{ backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#f4f4f4", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: 16, display: "flex", flexDirection: "column", minHeight: 120, transition: "all 0.3s ease" }}>
+                                                <div style={{ backgroundColor: (isRecording || showVoiceAssistant) ? "transparent" : "#f4f4f4", border: (isRecording || showVoiceAssistant) ? "none" : "1px solid #e8e6d9", borderRadius: 16, display: "flex", flexDirection: "column", minHeight: 120, transition: "all 0.3s ease", position: "relative" }}>
                                                     {renderAttachmentStrip()}
                                                     <textarea ref={textareaRef} value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={activeUserQuestions.length > 0 ? "Please answer the question above" : showHitlApproval ? "Please approve or reject the operation above" : "How can I help you today?"} rows={1}
                                                         disabled={activeUserQuestions.length > 0 || !!showHitlApproval}
                                                         className="placeholder-[#a5a3a0]"
                                                         style={{ width: "100%", background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 16, color: (activeUserQuestions.length > 0 || showHitlApproval) ? "#9ca3af" : "#111111", lineHeight: 1.5, padding: "20px 24px", minHeight: 70, maxHeight: 240 }} />
+                                                    {/* Progressive fade at the bottom of the textarea */}
+                                                    <div style={{ position: "absolute", bottom: 52, left: 0, right: 0, height: 60, background: "linear-gradient(to bottom, transparent, #f4f4f4 80%)", pointerEvents: "none", borderRadius: "0 0 16px 16px", zIndex: 1 }} />
                                                     <div style={{ flex: 1 }} />
-                                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", padding: "10px 24px 16px" }}>
+                                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", padding: "10px 24px 16px", position: "relative", zIndex: 2 }}>
                                                         {renderComposerLeftActions()}
                                                         {renderComposerRightActions(false)}
                                                     </div>
                                                 </div>
 
-                                                {/* Quick prompt chips */}
-                                                <div style={{ marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-                                                    {[
-                                                        { label: "Code", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
-                                                        { label: "Write", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg> },
-                                                        { label: "Learn", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 14v7M22 9l-10 5L2 9l10-5 10 5z"></path><path d="M6 11v5a6 3 0 0 0 12 0v-5"></path></svg> },
-                                                        { label: "Life stuff", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"></path></svg> },
-                                                        { label: "Fern's choice", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6M10 21h4M12 2v2M4.2 6.2l1.4 1.4M18.4 18.4l1.4 1.4M19.8 6.2l-1.4 1.4M5.6 18.4l-1.4 1.4M22 12h-2M4 12H2M12 6a5 5 0 0 0-3 8.7V17h6v-2.3A5 5 0 0 0 12 6z"></path></svg> },
-                                                    ].map(c => (
-                                                        <button key={c.label} type="button" onClick={() => setInputValue(prev => prev || c.label + ": ")}
-                                                            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 10, backgroundColor: "transparent", border: "1px solid #f7f5f2", color: "#201e24", fontSize: 13, cursor: "pointer", transition: "all 0.1s" }}
-                                                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#f7f5f2"; e.currentTarget.style.color = "#111111"; }}
-                                                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#201e24"; }}>
-                                                            <span style={{ display: 'flex' }}>{c.icon}</span>
-                                                            <span style={{ fontWeight: 400 }}>{c.label}</span>
-                                                        </button>
-                                                    ))}
-                                                </div>
+                                                {/* Quick prompt chips — hidden when a project is selected */}
+                                                {folderContexts.length === 0 && (
+                                                    <div style={{ marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                                                        {[
+                                                            { label: "Code", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
+                                                            { label: "Write", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg> },
+                                                            { label: "Learn", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 14v7M22 9l-10 5L2 9l10-5 10 5z"></path><path d="M6 11v5a6 3 0 0 0 12 0v-5"></path></svg> },
+                                                            { label: "Life stuff", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"></path></svg> },
+                                                            { label: "Fern's choice", icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6M10 21h4M12 2v2M4.2 6.2l1.4 1.4M18.4 18.4l1.4 1.4M19.8 6.2l-1.4 1.4M5.6 18.4l-1.4 1.4M22 12h-2M4 12H2M12 6a5 5 0 0 0-3 8.7V17h6v-2.3A5 5 0 0 0 12 6z"></path></svg> },
+                                                        ].map(c => (
+                                                            <button key={c.label} type="button" onClick={() => setInputValue(prev => prev || c.label + ": ")}
+                                                                style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 10, backgroundColor: "transparent", border: "1px solid #f7f5f2", color: "#201e24", fontSize: 13, cursor: "pointer", transition: "all 0.1s" }}
+                                                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#f7f5f2"; e.currentTarget.style.color = "#111111"; }}
+                                                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#201e24"; }}>
+                                                                <span style={{ display: 'flex' }}>{c.icon}</span>
+                                                                <span style={{ fontWeight: 400 }}>{c.label}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {/* Project mode empty state cue */}
+                                                {folderContexts.length > 0 && (
+                                                    <div style={{ marginTop: 60, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+                                                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d1cfc9" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                                                            <line x1="9" y1="10" x2="15" y2="10"/>
+                                                            <line x1="9" y1="14" x2="13" y2="14"/>
+                                                        </svg>
+                                                        <p style={{ fontSize: 15, color: "#111111", margin: 0, fontWeight: 500, textAlign: "center", maxWidth: 360, lineHeight: 1.6 }}>
+                                                            Give EverFern a task and it'll pick up your project context automatically.
+                                                        </p>
+                                                    </div>
+                                                )}
                                             </div>
                                         </motion.div>
                                     )}
@@ -3451,207 +3569,241 @@ export default function ChatPage() {
                                 </div>
                             )}
                         </div>
+                        )}
 
-                        {/* Right Sidebar */}
-                        <AnimatePresence>
-                            {(currentPlan || contextItems.length > 0 || (executionPlan && isExecutionPlanPaneOpen) || (missionTimeline && isProjectTasksPaneOpen)) && (
-                                <motion.div key="right-sidebar"
-                                    initial={{ width: 0, opacity: 0 }}
-                                    animate={{ width: 420, opacity: 1 }}
-                                    exit={{ width: 0, opacity: 0 }}
-                                    style={{ borderLeft: "1px solid #e8e6d9", backgroundColor: "#f5f4f0", display: "flex", flexDirection: "column", overflow: "hidden" }}
+                        {/* Right Sidebar — always-visible cards */}
+                        <div style={{ width: 260, flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto", padding: "16px 12px", gap: 10 }}>
+
+                            {/* Instructions card */}
+                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setInstructionsExpanded(!instructionsExpanded)}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "none", border: "none", cursor: "pointer" }}
                                 >
-                                    <div style={{ width: 420, display: "flex", flexDirection: "column", padding: "24px 16px", overflowY: "auto", height: "100%" }}>
-                                        {((currentPlan || contextItems.length > 0) && !(executionPlan && isExecutionPlanPaneOpen) && !(missionTimeline && isProjectTasksPaneOpen)) && (
-                                            <>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
-                                                    {/* Title Row */}
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
-                                                            </div>
-                                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Active Context</span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', gap: 4 }}>
-                                                            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></div>
-                                                            <button
-                                                                onClick={() => { setContextItems([]); setCurrentPlan(null); }}
-                                                                title="Close active context"
-                                                                style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
-                                                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fee2e2'; e.currentTarget.style.borderColor = '#fca5a5'; }}
-                                                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#ffffff'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
-                                                            >
-                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Tabs Component Row */}
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #e5e7eb', paddingBottom: 8 }}>
-                                                        <span onClick={() => setActiveContextTab('Overview')} style={{ fontSize: 13, fontWeight: activeContextTab === 'Overview' ? 600 : 500, color: activeContextTab === 'Overview' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'Overview' ? '2px solid #22c55e' : 'none', paddingBottom: 6, cursor: 'pointer', transition: 'all 0.15s' }}>Overview</span>
-                                                        <span onClick={() => setActiveContextTab('Resources')} style={{ fontSize: 13, fontWeight: activeContextTab === 'Resources' ? 600 : 500, color: activeContextTab === 'Resources' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'Resources' ? '2px solid #22c55e' : 'none', paddingBottom: 6, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', transition: 'all 0.15s' }}>Resources <span style={{ backgroundColor: '#e5e7eb', color: '#374151', fontSize: 11, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>{contextItems.length > 0 ? contextItems.length : 1}</span></span>
-                                                        <span onClick={() => setActiveContextTab('Permissions')} style={{ fontSize: 13, fontWeight: activeContextTab === 'Permissions' ? 600 : 500, color: activeContextTab === 'Permissions' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'Permissions' ? '2px solid #22c55e' : 'none', paddingBottom: 6, cursor: 'pointer', transition: 'all 0.15s' }}>Permissions</span>
-                                                        <span onClick={() => setActiveContextTab('History')} style={{ fontSize: 13, fontWeight: activeContextTab === 'History' ? 600 : 500, color: activeContextTab === 'History' ? '#111827' : '#6b7280', borderBottom: activeContextTab === 'History' ? '2px solid #22c55e' : 'none', paddingBottom: 6, cursor: 'pointer', transition: 'all 0.15s' }}>History</span>
-                                                    </div>
-                                                </div>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24, flex: 1, minHeight: 0 }}>
-                                                    {activeContextTab === 'Overview' ? (
-                                                        <AgentWorkspaceCards plan={currentPlan} contextItems={contextItems} setTooltip={setTooltipState} currentNode={currentNode} isLoading={isLoading} />
-                                                    ) : activeContextTab === 'Resources' ? (
-                                                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
-                                                            {currentPlan ? (
-                                                                <div style={{ fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace', fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                                                                    <div style={{ color: '#9ca3af', marginBottom: 12, fontSize: 12 }}>{`<!-- .system_generated/plans/plan.md -->`}</div>
-                                                                    {`# ${currentPlan.title}\n\n${currentPlan.steps?.map((s: any, i: number) => `${i + 1}. [${s.status === 'done' ? 'x' : ' '}] ${s.description}`).join('\n')}`}
-                                                                </div>
-                                                            ) : executionPlan ? (
-                                                                <div style={{ fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace', fontSize: 13, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                                                                    <div style={{ color: '#9ca3af', marginBottom: 12, fontSize: 12 }}>{`<!-- .system_generated/plans/plan.md -->`}</div>
-                                                                    {executionPlan.content}
-                                                                </div>
-                                                            ) : (
-                                                                <div style={{ color: '#9ca3af', fontSize: 13, fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>No plan.md resource available in the current context.</div>
-                                                            )}
-                                                        </div>
-                                                    ) : (
-                                                        <div style={{ color: '#9ca3af', fontSize: 13, padding: '20px 0', textAlign: 'center', fontStyle: 'italic' }}>
-                                                            Nothing to display for '{activeContextTab}' yet.
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </>
-                                        )}
-
-                                        {executionPlan && isExecutionPlanPaneOpen && (() => {
-                                            // Check if plan was already approved by looking for [PLAN_APPROVED] in messages
-                                            const isPlanAlreadyApproved = messages.some(m => {
-                                                const content = typeof m.content === 'string' ? m.content : '';
-                                                return content.includes('[PLAN_APPROVED]');
-                                            });
-                                            const shouldShowApproveButton = !isLoading && !isPlanAlreadyApproved;
-
-                                            return (
-                                                <>
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid #e5e7eb' }}>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                {isLoading ? (
-                                                                    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                        <circle cx="12" cy="12" r="10" stroke="#c7d2fe" strokeWidth="4"></circle>
-                                                                        <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="#6366f1" stroke="none"></path>
-                                                                    </svg>
-                                                                ) : (
-                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                                                        <polyline points="14 2 14 8 20 8"></polyline>
-                                                                        <line x1="12" y1="18" x2="12" y2="12"></line>
-                                                                        <line x1="9" y1="15" x2="15" y2="15"></line>
-                                                                    </svg>
-                                                                )}
-                                                            </div>
-                                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Execution Plan</span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                            {shouldShowApproveButton && (
-                                                                <button type="button" onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                    setIsExecutionPlanPaneOpen(false);
-                                                                    if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true");
-                                                                    const approvalMsg = `[PLAN_APPROVED]\nI have reviewed and approved your execution plan. Please proceed with the execution as planned.`;
-                                                                    setInputValue(approvalMsg);
-                                                                    setTimeout(() => {
-                                                                        const sendBtn = document.querySelector('button[title="Send"]') as HTMLButtonElement;
-                                                                        if (sendBtn) sendBtn.click();
-                                                                    }, 100);
-                                                                }} style={{ fontSize: 11, fontWeight: 600, color: "#ffffff", backgroundColor: "#22c55e", padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", transition: "all 0.2s", boxShadow: '0 2px 6px rgba(34,197,94,0.25)' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 10px rgba(34,197,94,0.3)'; }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(34,197,94,0.25)'; }}>
-                                                                    Approve
-                                                                </button>
-                                                            )}
-                                                            <button type="button" onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                                setIsExecutionPlanPaneOpen(false);
-                                                                if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true");
-                                                            }} style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.1)'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.05)'; }} title="Close pane">
-                                                                <XMarkIcon width={16} height={16} color="#6b7280" />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                    <div style={{
-                                                        backgroundColor: "#ffffff",
-                                                        border: "1px solid #e5e7eb",
-                                                        borderRadius: 16,
-                                                        padding: "20px 22px",
-                                                        boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                                                        overflowWrap: "anywhere",
-                                                        wordBreak: "break-word",
-                                                        maxHeight: '60vh',
-                                                        overflowY: 'auto',
-                                                    }}>
-                                                        <MarkdownRenderer content={executionPlan.content} />
-                                                    </div>
-                                                    <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: 10, border: '1px solid rgba(245,158,11,0.15)' }}>
-                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                            <circle cx="12" cy="12" r="10"></circle>
-                                                            <line x1="12" y1="16" x2="12" y2="12"></line>
-                                                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                                                        </svg>
-                                                        <span style={{ fontSize: 11, color: '#92400e', fontWeight: 500 }}>Review and approve to proceed with execution</span>
-                                                    </div>
-                                                </>
-                                            );
-                                        })()}
-
-                                        {missionTimeline && isProjectTasksPaneOpen && (
-                                            <>
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid #e5e7eb' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                        <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                            {isLoading ? (
-                                                                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <circle cx="12" cy="12" r="10" stroke="#bbf7d0" strokeWidth="4"></circle>
-                                                                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="#22c55e" stroke="none"></path>
-                                                                </svg>
-                                                            ) : (
-                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                                                                </svg>
-                                                            )}
-                                                        </div>
-                                                        <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", letterSpacing: '0.02em' }}>Project Tasks</span>
-                                                    </div>
-                                                    <button type="button" onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        setIsProjectTasksPaneOpen(false);
-                                                    }} style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'all 0.2s' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.1)'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.05)'; }} title="Close pane">
-                                                        <XMarkIcon width={16} height={16} color="#6b7280" />
-                                                    </button>
-                                                </div>
-                                                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                                                    <ErrorBoundary componentName="MissionTimelineSidebar">
-                                                        <MissionTimelineComponent
-                                                            timeline={missionTimeline}
-                                                            isRunning={isLoading && !missionComplete}
-                                                            autoCollapse={false}
-                                                        />
-                                                    </ErrorBoundary>
-                                                </div>
-                                            </>
-                                        )}
+                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>Instructions</span>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: instructionsExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
                                     </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
+                                </button>
+                                <AnimatePresence>
+                                    {instructionsExpanded && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            style={{ overflow: "hidden" }}
+                                        >
+                                            <div style={{ padding: "0 14px 14px" }}>
+                                                <textarea
+                                                    value={instructions}
+                                                    onChange={(e) => setInstructions(e.target.value)}
+                                                    placeholder="Add tone, formatting, or rules to guide how EverFern works."
+                                                    rows={3}
+                                                    style={{ width: "100%", resize: "none", border: "none", outline: "none", fontSize: 12, color: instructions ? "#374151" : "#9ca3af", lineHeight: 1.6, background: "transparent", fontFamily: "var(--font-sans)", fontStyle: instructions ? "normal" : "italic" }}
+                                                />
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Scheduled card */}
+                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setScheduledExpanded(!scheduledExpanded)}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "none", border: "none", cursor: "pointer" }}
+                                >
+                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>Scheduled</span>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: scheduledExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
+                                    </div>
+                                </button>
+                                <AnimatePresence>
+                                    {scheduledExpanded && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            style={{ overflow: "hidden" }}
+                                        >
+                                            <div style={{ padding: "0 14px 14px" }}>
+                                                <p style={{ fontSize: 12, color: "#9ca3af", margin: 0, fontStyle: "italic", lineHeight: 1.6 }}>Set up recurring tasks for this project.</p>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Context card */}
+                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setContextExpanded(!contextExpanded)}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "none", border: "none", cursor: "pointer" }}
+                                >
+                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>Context</span>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: contextExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
+                                    </div>
+                                </button>
+                                <AnimatePresence>
+                                    {contextExpanded && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            style={{ overflow: "hidden" }}
+                                        >
+                                            <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                                                {/* Project context row */}
+                                                {folderContexts.length > 0 ? (
+                                                    <div>
+                                                        <p style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Project</p>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 8, backgroundColor: "#f3f4f6", borderRadius: 8, padding: "8px 10px" }}>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="#4b5563" stroke="none"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                                                            <span style={{ fontSize: 12, fontWeight: 500, color: "#374151", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{folderContexts[0].name}</span>
+                                                            <button type="button" onClick={() => setFolderContexts([])} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: 0, display: "flex" }}>
+                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <p style={{ fontSize: 12, color: "#9ca3af", margin: 0, fontStyle: "italic", lineHeight: 1.6 }}>No project selected. Use the Project dropdown in the composer.</p>
+                                                )}
+
+                                                {/* Memory row */}
+                                                <div>
+                                                    <p style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Memory</p>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 8, backgroundColor: "#f3f4f6", borderRadius: 8, padding: "8px 10px" }}>
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4b5563" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm0-10a2 2 0 1 0 2 2 2 2 0 0 0-2-2z"/></svg>
+                                                        <span style={{ fontSize: 12, fontWeight: 500, color: "#374151" }}>Memory</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Decorative Illustration */}
+                                                <svg viewBox="0 0 540 170" width="100%" height="auto" style={{ marginTop: 4, borderRadius: 10 }}>
+                                                    <defs>
+                                                        <filter id="shadow">
+                                                            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#00000020"/>
+                                                        </filter>
+                                                    </defs>
+
+                                                    {/* Background */}
+                                                    <rect width="540" height="170" rx="12" fill="#E9E5DE"/>
+
+                                                    {/* Card 1 — placed, left */}
+                                                    <rect x="30" y="32" width="110" height="108" rx="8" fill="#FFFFFF" filter="url(#shadow)"/>
+                                                    <rect x="44" y="50" width="55" height="6" rx="2" fill="#CCCAC4"/>
+                                                    <rect x="44" y="63" width="77" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="44" y="75" width="65" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="44" y="87" width="72" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="44" y="99" width="50" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="44" y="111" width="60" height="5" rx="2" fill="#DEDAD5"/>
+
+                                                    {/* Card 2 — placed, center */}
+                                                    <rect x="165" y="32" width="110" height="108" rx="8" fill="#FFFFFF" filter="url(#shadow)"/>
+                                                    <rect x="245" y="40" width="18" height="18" rx="4" fill="#F0EDE8"/>
+                                                    <rect x="249" y="45" width="10" height="3" rx="1" fill="#C5C2BC"/>
+                                                    <rect x="249" y="50" width="8"  height="3" rx="1" fill="#C5C2BC"/>
+                                                    <rect x="179" y="50" width="55" height="7" rx="2" fill="#C5C2BC"/>
+                                                    <rect x="179" y="65" width="88" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="179" y="77" width="80" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="179" y="89" width="88" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="179" y="101" width="70" height="5" rx="2" fill="#DEDAD5"/>
+                                                    <rect x="179" y="113" width="78" height="5" rx="2" fill="#DEDAD5"/>
+
+                                                    {/* Card 3 — being placed */}
+                                                    <rect x="300" y="32" width="110" height="108" rx="8" fill="#FFFFFF" opacity="0.75" filter="url(#shadow)"/>
+                                                    <rect x="300" y="32" width="110" height="108" rx="8" fill="none"
+                                                            stroke="#AAAAAA" strokeWidth="1.5" strokeDasharray="5,3"/>
+                                                    <rect x="314" y="50" width="55" height="6" rx="2" fill="#D8D5CF" opacity="0.7"/>
+                                                    <rect x="314" y="63" width="77" height="5" rx="2" fill="#E2DED9" opacity="0.7"/>
+                                                    <rect x="314" y="75" width="65" height="5" rx="2" fill="#E2DED9" opacity="0.7"/>
+                                                    <rect x="314" y="87" width="72" height="5" rx="2" fill="#E2DED9" opacity="0.7"/>
+                                                    <rect x="314" y="99" width="50" height="5" rx="2" fill="#E2DED9" opacity="0.7"/>
+                                                    <rect x="314" y="111" width="60" height="5" rx="2" fill="#E2DED9" opacity="0.7"/>
+                                                </svg>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Execution Plan pane (conditional) */}
+                            <AnimatePresence>
+                                {executionPlan && isExecutionPlanPaneOpen && (() => {
+                                    const isPlanAlreadyApproved = messages.some(m => {
+                                        const content = typeof m.content === 'string' ? m.content : '';
+                                        return content.includes('[PLAN_APPROVED]');
+                                    });
+                                    const shouldShowApproveButton = !isLoading && !isPlanAlreadyApproved;
+                                    return (
+                                        <motion.div key="exec-plan" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: "12px 14px", borderBottom: '1px solid #f4f4f4' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <div style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        {isLoading ? (
+                                                            <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><circle cx="12" cy="12" r="10" stroke="#c7d2fe" strokeWidth="4"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="#6366f1" stroke="none"/></svg>
+                                                        ) : (
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                                        )}
+                                                    </div>
+                                                    <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Execution Plan</span>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: 6 }}>
+                                                    {shouldShowApproveButton && (
+                                                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsExecutionPlanPaneOpen(false); if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true"); const msg = `[PLAN_APPROVED]\nI have reviewed and approved your execution plan. Please proceed with the execution as planned.`; setInputValue(msg); setTimeout(() => { const sendBtn = document.querySelector('button[title="Send"]') as HTMLButtonElement; if (sendBtn) sendBtn.click(); }, 100); }} style={{ fontSize: 11, fontWeight: 600, color: "#ffffff", backgroundColor: "#22c55e", padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>Approve</button>
+                                                    )}
+                                                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsExecutionPlanPaneOpen(false); if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true"); }} style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 6, cursor: 'pointer' }} title="Close"><XMarkIcon width={14} height={14} color="#6b7280" /></button>
+                                                </div>
+                                            </div>
+                                            <div style={{ padding: "12px 14px", maxHeight: 280, overflowY: 'auto', fontSize: 12, fontFamily: 'SFMono-Regular, Consolas, monospace', color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                                <MarkdownRenderer content={executionPlan.content} />
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })()}
+                            </AnimatePresence>
+
+                            {/* Mission Progress card */}
+                            <MissionProgressCard 
+                                timeline={missionTimeline}
+                                isRunning={isLoading && !missionComplete}
+                                isExpanded={progressExpanded}
+                                onToggleExpand={() => setProgressExpanded(!progressExpanded)}
+                            />
+
+                        </div>
+                                    </div>
                 </motion.div>
 
                 {settingsModalNode}
                 {integrationSettingsModalNode}
                 <DirectoryModal isOpen={showDirectoryModal} onClose={() => setShowDirectoryModal(false)} />
+
+                {/* Projects Feature is now rendered in main chat area */}
+                <CreateProjectModal 
+                    isOpen={showCreateProjectModal} 
+                    onClose={() => setShowCreateProjectModal(false)} 
+                    onCreated={(project) => {
+                        setShowCreateProjectModal(false);
+                        // ProjectsPage handles refreshing via polling
+                    }}
+                />
+
+                <CustomizeModal
+                    isOpen={showCustomizeModal}
+                    onClose={() => setShowCustomizeModal(false)}
+                />
+
                 {onboardingModalNode}
 
                 {/* Permission Modal */}

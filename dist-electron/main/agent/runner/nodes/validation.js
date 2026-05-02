@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createValidationNode = void 0;
 const mission_integrator_1 = require("../mission-integrator");
+const tool_approvals_1 = require("../../../store/tool-approvals");
 const MAX_ITERATIONS = 50;
 /**
  * Tools that are always safe and should never trigger HITL approval.
@@ -17,6 +18,10 @@ const SAFE_TOOL_WHITELIST = new Set([
     'view_file',
     'list_directory',
     'execution_plan',
+    'read',
+    'find',
+    'grep',
+    'ls',
 ]);
 /**
  * AI-based tool risk assessment
@@ -25,6 +30,12 @@ const SAFE_TOOL_WHITELIST = new Set([
 async function assessToolRisk(toolCalls, client) {
     if (!toolCalls || toolCalls.length === 0)
         return false;
+    // Auto-approval check: if ALL pending tool calls match user-defined auto-approval policies, skip risk assessment
+    const allAutoApproved = toolCalls.every(tc => tool_approvals_1.toolApprovalStore.isApproved(tc.name, tc.arguments || {}));
+    if (allAutoApproved) {
+        console.log('[Validation] 🚀 All tool calls are auto-approved via user policies');
+        return false;
+    }
     // Whitelist check: if ALL pending tool calls are safe internal tools, skip risk assessment
     const allSafe = toolCalls.every(tc => SAFE_TOOL_WHITELIST.has(tc.name));
     if (allSafe) {

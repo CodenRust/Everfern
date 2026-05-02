@@ -17,6 +17,7 @@ interface SidebarProps {
     onArtifactsClick?: () => void;
     onCustomizeClick?: () => void;
     onIntegrationClick?: () => void;
+    onProjectsClick?: () => void;
 }
 
 interface ConversationSummary {
@@ -26,7 +27,7 @@ interface ConversationSummary {
     updatedAt: string;
 }
 
-export default function Sidebar({ isOpen, onToggle, activeConversationId, activeTaskIds = [], onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick, onIntegrationClick }: SidebarProps) {
+export default function Sidebar({ isOpen, onToggle, activeConversationId, activeTaskIds = [], onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick, onIntegrationClick, onProjectsClick }: SidebarProps) {
     const [showOptionsId, setShowOptionsId] = useState<string | null>(null);
     const [username, setUsername] = useState<string>("User");
     const [showSearch, setShowSearch] = useState<boolean>(false);
@@ -222,6 +223,7 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, active
                                 else if (item.label === "Artifacts" && onArtifactsClick) onArtifactsClick();
                                 else if (item.label === "Customize" && onCustomizeClick) onCustomizeClick();
                                 else if (item.label === "Integrations" && onIntegrationClick) onIntegrationClick();
+                                else if (item.label === "Projects" && onProjectsClick) onProjectsClick();
                             }}
                             title={!isOpen ? item.label : undefined}
                         >
@@ -304,7 +306,13 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, active
                         </div>
                         {isOpen && (
                             <>
-                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
+                                <span style={{ 
+                                    flex: 1, 
+                                    overflow: "hidden", 
+                                    whiteSpace: "nowrap",
+                                    maskImage: 'linear-gradient(to right, black calc(100% - 20px), transparent 100%)',
+                                    WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 20px), transparent 100%)'
+                                }}>{item.title}</span>
                                 <div className="del-btn" onClick={(e) => handleDelete(e, item.id)} style={{ padding: 4, borderRadius: 10, color: "#666666", opacity: 0, transition: "opacity 0.15s, color 0.15s", cursor: "pointer", lineHeight: 1, display: "flex" }} onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.color = "#f87171"}>
                                     <TrashIcon width={14} height={14} />
                                 </div>
@@ -322,7 +330,15 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, active
                     </div>
                     {isOpen && (
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{username}</div>
+                            <div style={{ 
+                                fontSize: 13, 
+                                fontWeight: 600, 
+                                color: "#111111", 
+                                overflow: "hidden", 
+                                whiteSpace: "nowrap",
+                                maskImage: 'linear-gradient(to right, black calc(100% - 20px), transparent 100%)',
+                                WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 20px), transparent 100%)'
+                            }}>{username}</div>
                             <div style={{ fontSize: 11, color: "#8a8886" }}>Free plan</div>
                         </div>
                     )}

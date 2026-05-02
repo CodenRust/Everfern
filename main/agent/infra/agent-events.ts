@@ -7,7 +7,7 @@
 
 import { EventEmitter } from 'events';
 
-export type EventStream = 'lifecycle' | 'tool' | 'assistant' | 'error' | 'compaction';
+export type EventStream = 'lifecycle' | 'tool' | 'assistant' | 'error' | 'compaction' | 'subagent-progress';
 
 export interface AgentEvent {
     seq: number;

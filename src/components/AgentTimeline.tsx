@@ -411,139 +411,153 @@ const StatusDot = ({ status, isLive }: { status: ToolCallDisplay["status"]; isLi
                 border: "2px solid #faf9f7",
                 boxShadow: "0 0 0 1px #e8e6d9",
             }} />
-            {isRunning && (
-                <motion.div
-                    animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
-                    transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
-                    style={{
-                        position: "absolute", inset: -2,
-                        borderRadius: "50%",
-                        backgroundColor: color,
-                    }}
-                />
-            )}
         </div>
     );
 };
 
 // Thought item - appears as a branch off the main timeline
 const ThoughtItem = ({ content, isLive, isLast }: { content: string; isLive?: boolean; isLast: boolean }) => {
+    const [isExpanded, setIsExpanded] = useState(true);
+
+    // Clean up backend orchestrator logs for UI display
+    const cleanContent = content ? content.replace(/^(?:🤖|🧠|🧭|⚙️|🔍|👨‍💻|📊|🌐|🖥️|💻|✅|⚠️|⚖️|🎬)\s*[^:]+:\s*/, '').trim() : '';
+    const displayContent = cleanContent.replace(/^(?:🤖|🧠|🧭|⚙️|🔍|👨‍💻|📊|🌐|🖥️|💻|✅|⚠️|⚖️|🎬)\s*/, '');
+    
+    // Skip empty content
+    if (!displayContent) return null;
+
     return (
-        <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
-            {/* Main timeline line */}
+        <div style={{ display: "flex", gap: 0, paddingBottom: 0, position: "relative" }}>
+            {/* Timeline line */}
             <div style={{
                 width: 20,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                position: "relative",
+                paddingTop: 0,
             }}>
-                {/* Vertical line before */}
-                <div style={{
-                    width: 2,
-                    height: 12,
-                    backgroundColor: "#e8e6d9",
-                }} />
-
-                {/* Branch point */}
-                <div style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    backgroundColor: "#faf9f7",
-                    border: "2px solid #e8e6d9",
-                    flexShrink: 0,
-                    zIndex: 2,
-                }} />
-
-                {/* Vertical line after - extends through entire content */}
-                {!isLast && (
+                {/* Vertical line before dot */}
+                <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
+                
+                {/* Status dot */}
+                <div style={{ position: "relative", width: 10, height: 10, flexShrink: 0 }}>
                     <div style={{
-                        position: "absolute",
-                        top: 22,
-                        bottom: -20,
-                        width: 2,
-                        backgroundColor: "#e8e6d9",
+                        width: 10, height: 10, borderRadius: "50%",
+                        backgroundColor: isLive ? "#a855f7" : "#d8b4fe",
+                        border: "2px solid #faf9f7",
+                        boxShadow: "0 0 0 1px #e8e6d9",
                     }} />
-                )}
-
-                {/* Branch curve */}
-                <svg
-                    width="40"
-                    height="40"
-                    viewBox="0 0 40 40"
-                    style={{
-                        position: "absolute",
-                        left: 9,
-                        top: 12,
-                        pointerEvents: "none",
-                    }}
-                >
-                    <path
-                        d="M 0 0 Q 20 0 20 20 L 20 40"
-                        stroke="#e8e6d9"
-                        strokeWidth="2"
-                        fill="none"
-                    />
-                </svg>
-            </div>
-
-            {/* Thought content */}
-            <div style={{ flex: 1, paddingLeft: 32, paddingTop: 8, paddingBottom: 20 }}>
-                {isLive ? (
-                    <LoadingBreadcrumb text="Thinking" className="mb-2" />
-                ) : (
-                    <div style={{
-                        display: "flex", alignItems: "center", gap: 6,
-                        marginBottom: 6,
-                    }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                            stroke="#b5b2aa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                            <line x1="12" y1="17" x2="12.01" y2="17" />
-                            <circle cx="12" cy="12" r="10" />
-                        </svg>
-                        <span style={{
-                            fontSize: 11,
-                            color: "#8a8886",
-                            fontWeight: 600,
-                            letterSpacing: "0.04em",
-                            textTransform: "uppercase"
-                        }}>
-                            Reasoning
-                        </span>
-                    </div>
-                )}
-                <div style={{
-                    fontSize: 12.5,
-                    color: "#4a4846",
-                    whiteSpace: "pre-wrap",
-                    lineHeight: 1.75,
-                    borderLeft: "2px solid #e8e6d9",
-                    paddingLeft: 12,
-                    fontStyle: "italic",
-                    backgroundColor: "#faf9f7",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    position: 'relative'
-                }}>
-                    {content}
                     {isLive && (
-                        <motion.span
-                            animate={{ opacity: [1, 0, 1] }}
-                            transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
+                        <motion.div
+                            animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
+                            transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
                             style={{
-                                display: "inline-block",
-                                width: 2,
-                                height: "1.2em",
-                                backgroundColor: "#6366f1",
-                                marginLeft: 4,
-                                verticalAlign: "middle",
-                                boxShadow: "0 0 8px rgba(99, 102, 241, 0.4)"
+                                position: "absolute", inset: -2,
+                                borderRadius: "50%",
+                                backgroundColor: "#a855f7",
                             }}
                         />
                     )}
                 </div>
+                
+                {/* Vertical line after dot */}
+                {!isLast && (
+                    <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
+                )}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                <div 
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    style={{ 
+                        display: "flex", alignItems: "center", gap: 8, padding: "2px 0",
+                        cursor: "pointer", userSelect: "none"
+                    }}
+                >
+                    <span style={{ fontSize: 13.5, color: isLive ? "#a855f7" : "#d8b4fe" }}>🧠</span>
+                    <span style={{
+                        fontSize: 13.5,
+                        fontWeight: 500,
+                        color: isLive ? "#201e24" : "#4a4846",
+                        fontFamily: "'Figtree', system-ui, sans-serif",
+                        letterSpacing: "-0.01em",
+                    }}>
+                        {isLive ? "Thinking..." : (displayContent.length > 70 ? displayContent.substring(0, 70) + "..." : displayContent)}
+                    </span>
+                    
+                    {isLive && (
+                        <motion.div
+                            animate={{ opacity: [0.4, 1, 0.4] }}
+                            transition={{ repeat: Infinity, duration: 1.2 }}
+                            style={{ display: "flex", gap: 3, alignItems: "center" }}
+                        >
+                            {[0, 1, 2].map(i => (
+                                <motion.div
+                                    key={i}
+                                    animate={{ opacity: [0.3, 1, 0.3] }}
+                                    transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
+                                    style={{ width: 3, height: 3, borderRadius: "50%", backgroundColor: "#a855f7" }}
+                                />
+                            ))}
+                        </motion.div>
+                    )}
+                    
+                    {displayContent && displayContent.length > 70 && (
+                        <motion.svg
+                            animate={{ rotate: isExpanded ? 180 : 0 }}
+                            transition={{ duration: 0.18 }}
+                            width={12} height={12} viewBox="0 0 24 24"
+                            fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                            strokeLinecap="round" strokeLinejoin="round"
+                            style={{ marginLeft: "auto", flexShrink: 0 }}
+                        >
+                            <polyline points="6 9 12 15 18 9" />
+                        </motion.svg>
+                    )}
+                </div>
+
+                <AnimatePresence>
+                    {isExpanded && displayContent && displayContent.length > 70 && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            style={{ overflow: "hidden" }}
+                        >
+                            <div style={{
+                                marginTop: 8,
+                                padding: "10px 14px",
+                                backgroundColor: "#faf9f7",
+                                borderRadius: 8,
+                                border: "1px solid #e8e6d9",
+                                fontSize: 12.5,
+                                fontFamily: "'Figtree', system-ui, sans-serif",
+                                color: "#6b7280",
+                                whiteSpace: "pre-wrap",
+                                lineHeight: 1.6,
+                                fontStyle: "italic",
+                            }}>
+                                {displayContent}
+                                {isLive && (
+                                    <motion.span
+                                        animate={{ opacity: [1, 0, 1] }}
+                                        transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
+                                        style={{
+                                            display: "inline-block",
+                                            width: 2,
+                                            height: "1.2em",
+                                            backgroundColor: "#a855f7",
+                                            marginLeft: 4,
+                                            verticalAlign: "middle",
+                                        }}
+                                    />
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );
@@ -724,15 +738,6 @@ const SubAgentProgressItem = ({
                                 border: "2px solid #faf9f7",
                                 boxShadow: "0 0 0 1px #e8e6d9",
                             }} />
-                            <motion.div
-                                animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
-                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
-                                style={{
-                                    position: "absolute", inset: -2,
-                                    borderRadius: "50%",
-                                    backgroundColor: "#6366f1",
-                                }}
-                            />
                         </div>
                     ) : (
                         <div style={{
@@ -802,108 +807,133 @@ const SubAgentProgressItem = ({
     if (event.type === 'reasoning') {
         const isThinking = !event.content || event.content.trim() === '';
 
+        // Clean up backend orchestrator logs for UI display
+        const cleanContent = event.content ? event.content.replace(/^(?:🤖|🧠|🧭|⚙️|🔍|👨‍💻|📊|🌐|🖥️|💻|✅|⚠️|⚖️|🎬)\s*[^:]+:\s*/, '').trim() : '';
+        const displayContent = cleanContent.replace(/^(?:🤖|🧠|🧭|⚙️|🔍|👨‍💻|📊|🌐|🖥️|💻|✅|⚠️|⚖️|🎬)\s*/, '');
+        
+        // Skip empty content
+        if (!displayContent) return null;
+
+        const [isExpanded, setIsExpanded] = useState(true);
+
         return (
-            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+            <div style={{ display: "flex", gap: 0, paddingBottom: 0, position: "relative" }}>
                 {/* Timeline line */}
                 <div style={{
                     width: 20,
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
-                    position: "relative",
+                    paddingTop: 0,
                 }}>
-                    {/* Vertical line before */}
-                    <div style={{
-                        width: 2,
-                        height: 12,
-                        backgroundColor: "#e8e6d9",
-                    }} />
-
-                    {/* Branch point */}
-                    <div style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        backgroundColor: "#faf9f7",
-                        border: "2px solid #e8e6d9",
-                        flexShrink: 0,
-                        zIndex: 2,
-                    }} />
-
-                    {/* Vertical line after */}
-                    {!isLast && (
+                    {/* Vertical line before dot */}
+                    <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
+                    
+                    {/* Status dot */}
+                    <div style={{ position: "relative", width: 10, height: 10, flexShrink: 0 }}>
                         <div style={{
-                            position: "absolute",
-                            top: 22,
-                            bottom: -20,
-                            width: 2,
-                            backgroundColor: "#e8e6d9",
+                            width: 10, height: 10, borderRadius: "50%",
+                            backgroundColor: isThinking ? "#a855f7" : "#d8b4fe",
+                            border: "2px solid #faf9f7",
+                            boxShadow: "0 0 0 1px #e8e6d9",
                         }} />
+                        {isThinking && (
+                            <motion.div
+                                animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+                                style={{
+                                    position: "absolute", inset: -2,
+                                    borderRadius: "50%",
+                                    backgroundColor: "#a855f7",
+                                }}
+                            />
+                        )}
+                    </div>
+                    
+                    {/* Vertical line after dot */}
+                    {!isLast && (
+                        <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
                     )}
-
-                    {/* Branch curve */}
-                    <svg
-                        width="40"
-                        height="40"
-                        viewBox="0 0 40 40"
-                        style={{
-                            position: "absolute",
-                            left: 9,
-                            top: 12,
-                            pointerEvents: "none",
-                        }}
-                    >
-                        <path
-                            d="M 0 0 Q 20 0 20 20 L 20 40"
-                            stroke="#e8e6d9"
-                            strokeWidth="2"
-                            fill="none"
-                        />
-                    </svg>
                 </div>
 
-                {/* Reasoning content */}
-                <div style={{ flex: 1, paddingLeft: 32, paddingTop: 8, paddingBottom: 20 }}>
-                    {isThinking ? (
-                        <LoadingBreadcrumb text="Thinking" className="mb-2" />
-                    ) : (
-                        <div style={{
-                            display: "flex", alignItems: "center", gap: 6,
-                            marginBottom: 6,
+                {/* Content */}
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div 
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        style={{ 
+                            display: "flex", alignItems: "center", gap: 8, padding: "2px 0",
+                            cursor: "pointer", userSelect: "none"
+                        }}
+                    >
+                        <span style={{ fontSize: 13.5, color: isThinking ? "#a855f7" : "#d8b4fe" }}>🧠</span>
+                        <span style={{
+                            fontSize: 13.5,
+                            fontWeight: 500,
+                            color: isThinking ? "#201e24" : "#4a4846",
+                            fontFamily: "'Figtree', system-ui, sans-serif",
+                            letterSpacing: "-0.01em",
                         }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                                stroke="#b5b2aa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="1" />
-                                <circle cx="19" cy="12" r="1" />
-                                <circle cx="5" cy="12" r="1" />
-                            </svg>
-                            <span style={{
-                                fontSize: 11,
-                                color: "#8a8886",
-                                fontWeight: 600,
-                                letterSpacing: "0.04em",
-                                textTransform: "uppercase"
-                            }}>
-                                Reasoning
-                            </span>
-                        </div>
-                    )}
-                    {!isThinking && (
-                        <div style={{
-                            fontSize: 12.5,
-                            color: "#4a4846",
-                            whiteSpace: "pre-wrap",
-                            lineHeight: 1.75,
-                            borderLeft: "2px solid #e8e6d9",
-                            paddingLeft: 12,
-                            fontStyle: "italic",
-                            backgroundColor: "#faf9f7",
-                            padding: "8px 12px",
-                            borderRadius: 8,
-                        }}>
-                            {event.content}
-                        </div>
-                    )}
+                            {isThinking ? "Thinking..." : (displayContent.length > 70 ? displayContent.substring(0, 70) + "..." : displayContent)}
+                        </span>
+                        
+                        {isThinking && (
+                            <motion.div
+                                animate={{ opacity: [0.4, 1, 0.4] }}
+                                transition={{ repeat: Infinity, duration: 1.2 }}
+                                style={{ display: "flex", gap: 3, alignItems: "center" }}
+                            >
+                                {[0, 1, 2].map(i => (
+                                    <motion.div
+                                        key={i}
+                                        animate={{ opacity: [0.3, 1, 0.3] }}
+                                        transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.2 }}
+                                        style={{ width: 3, height: 3, borderRadius: "50%", backgroundColor: "#a855f7" }}
+                                    />
+                                ))}
+                            </motion.div>
+                        )}
+                        
+                        {displayContent && displayContent.length > 70 && (
+                            <motion.svg
+                                animate={{ rotate: isExpanded ? 180 : 0 }}
+                                transition={{ duration: 0.18 }}
+                                width={12} height={12} viewBox="0 0 24 24"
+                                fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                                strokeLinecap="round" strokeLinejoin="round"
+                                style={{ marginLeft: "auto", flexShrink: 0 }}
+                            >
+                                <polyline points="6 9 12 15 18 9" />
+                            </motion.svg>
+                        )}
+                    </div>
+
+                    <AnimatePresence>
+                        {isExpanded && !isThinking && displayContent && displayContent.length > 70 && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.18 }}
+                                style={{ overflow: "hidden" }}
+                            >
+                                <div style={{
+                                    marginTop: 8,
+                                    padding: "10px 14px",
+                                    backgroundColor: "#faf9f7",
+                                    borderRadius: 8,
+                                    border: "1px solid #e8e6d9",
+                                    fontSize: 12.5,
+                                    fontFamily: "'Figtree', system-ui, sans-serif",
+                                    color: "#6b7280",
+                                    whiteSpace: "pre-wrap",
+                                    lineHeight: 1.6,
+                                    fontStyle: "italic",
+                                }}>
+                                    {displayContent}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         );
@@ -1333,17 +1363,6 @@ const TimelineBranchItem = ({
                     zIndex: 2,
                     position: "relative"
                 }}>
-                    {isRunning && (
-                        <motion.div
-                            animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
-                            transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
-                            style={{
-                                position: "absolute", inset: -2,
-                                borderRadius: "50%",
-                                backgroundColor: statusColor,
-                            }}
-                        />
-                    )}
                 </div>
 
                 {/* Vertical line after - extends through entire content */}
@@ -2227,6 +2246,13 @@ export const AgentTimeline = ({
                             branchGroups.set(branchId, []);
                         }
                         branchGroups.get(branchId)!.push(event);
+                    } else if ((event as any).swarmId) {
+                        // Support for the new Swarm Memory synchronization events
+                        const swarmId = (event as any).swarmId;
+                        if (!branchGroups.has(swarmId)) {
+                            branchGroups.set(swarmId, []);
+                        }
+                        branchGroups.get(swarmId)!.push(event);
                     }
                 });
 
@@ -2236,24 +2262,24 @@ export const AgentTimeline = ({
 
                     const firstEvent = branchEvents[0];
                     const lastEvent = branchEvents[branchEvents.length - 1];
-                    const branchMetadata = firstEvent.timelineBranch!;
+                    const branchMetadata = firstEvent.timelineBranch || (firstEvent as any).swarmMetadata;
 
                     // Determine branch status
                     let status: TimelineBranch['status'] = 'running';
-                    if (lastEvent.type === 'complete') status = 'completed';
+                    if (lastEvent.type === 'complete' || (lastEvent as any).type === 'task_complete') status = 'completed';
                     else if (lastEvent.type === 'abort') status = 'aborted';
-                    else if (branchMetadata.branchStatus === 'failed') status = 'failed';
+                    else if (branchMetadata?.branchStatus === 'failed') status = 'failed';
 
                     const branch: TimelineBranch = {
                         id: branchId,
-                        parentId: branchMetadata.parentId || toolCallId,
-                        agentType: branchMetadata.agentType || 'computer-use',
+                        parentId: branchMetadata?.parentId || toolCallId,
+                        agentType: branchMetadata?.agentType || (firstEvent as any).agentType || 'research',
                         events: branchEvents,
                         status,
                         startTime: firstEvent.timestamp,
-                        endTime: (lastEvent.type === 'complete' || lastEvent.type === 'abort') ? lastEvent.timestamp : undefined,
-                        taskDescription: branchMetadata.taskDescription,
-                        branchLevel: branchMetadata.branchLevel || 1,
+                        endTime: (lastEvent.type === 'complete' || lastEvent.type === 'abort' || (lastEvent as any).type === 'task_complete') ? lastEvent.timestamp : undefined,
+                        taskDescription: branchMetadata?.taskDescription || (firstEvent as any).task || 'Swarm Task',
+                        branchLevel: branchMetadata?.branchLevel || 1,
                         isCollapsed: collapsedBranches.has(branchId)
                     };
 
@@ -2411,15 +2437,20 @@ export const AgentTimeline = ({
                     width: "100%",
                 }}
             >
-                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <div style={{ 
+                    position: "relative", 
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "center",
+                    width: 20 
+                }}>
                     {/* Vertical line connecting to timeline */}
                     {!collapsed && hasContent && (
                         <div style={{
                             position: "absolute",
                             top: 10,
-                            left: 4,
                             width: 2,
-                            height: 12,
+                            height: 18,
                             backgroundColor: "#e8e6d9",
                         }} />
                     )}
@@ -2434,14 +2465,6 @@ export const AgentTimeline = ({
                                 border: "2px solid #faf9f7",
                                 boxShadow: "0 0 0 1px #e8e6d9",
                             }} />
-                            <motion.div
-                                animate={{ scale: [1, 2.5], opacity: [0.6, 0] }}
-                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
-                                style={{
-                                    position: "absolute", inset: -2,
-                                    borderRadius: "50%", backgroundColor: "#6366f1",
-                                }}
-                            />
                         </div>
                     ) : (
                         <div style={{

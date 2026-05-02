@@ -8,10 +8,11 @@ import { acpManager } from '../../main/acp/manager.ts';
 import { PROVIDER_REGISTRY } from '../../main/lib/providers.ts';
 import { Command } from '@langchain/langgraph';
 
-const PROVIDER_MODELS: Record<string, string[]> = {
+const PROVIDER_MODELS: Rec
+ord<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini', 'o3-mini'],
   anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-5', 'claude-haiku-4-5-20251001', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   gemini: ['gemini-3.1-pro-preview', 'gemini-3.1-flash-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
   nvidia: ['google/gemma-4-31b-it', 'meta/llama-3.2-90b-vision-instruct', 'qwen/qwen3.5-122b-a10b', 'meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-70b-instruct', 'mistralai/mistral-small-4-119b-2603', 'nvidia/nemotron-3-super-120b-a12b'],
   ollama: [],
@@ -24,7 +25,7 @@ const PROVIDER_MODELS: Record<string, string[]> = {
 export async function runChat(options: any = {}) {
   let session = options.session || 'default';
   const historyStore = new ChatHistoryStore();
-  
+
   console.clear();
   const header = boxen(
     chalk.green.bold('EverFern 🌿') + ' ' + chalk.dim('Autonomous CLI Agent'),
@@ -34,7 +35,7 @@ export async function runChat(options: any = {}) {
 
   let { runner, client } = await initializeAgent({ ...options, session });
   let totalSessionTokens = 0;
-  
+
   // Load existing history if session exists
   const existingConv = await historyStore.load(session);
   const messages: any[] = existingConv?.messages || [];
@@ -46,11 +47,11 @@ export async function runChat(options: any = {}) {
     const sessionInfo = chalk.bgMagenta.white(` 💬 ${session} `);
     const tokenInfo = chalk.bgBlack.grey(` 📊 Tokens: ${totalSessionTokens.toLocaleString()} `);
     const historyInfo = chalk.bgBlack.grey(` 📚 Hist: ${messages.length} `);
-    
+
     const bar = `${modelInfo} ${providerInfo} ${sessionInfo} ${tokenInfo} ${historyInfo}`;
     const rawBar = ` 🤖 ${client.model}   🔌 ${client.provider}   💬 ${session}   📊 Tokens: ${totalSessionTokens.toLocaleString()}   📚 Hist: ${messages.length} `;
     const padding = Math.max(0, Math.floor((cols - rawBar.length) / 2));
-    
+
     return ' '.repeat(padding) + bar + '\n';
   };
 
@@ -63,7 +64,7 @@ export async function runChat(options: any = {}) {
     const cols = process.stdout.columns || 80;
     const promptText = ' Ask EverFern Anything... ';
     const padding = Math.max(0, Math.floor((cols - promptText.length - 10) / 2));
-    
+
     process.stdout.write('\n' + ' '.repeat(padding));
     process.stdout.write(chalk.bgGrey.white.bold(` ${promptText} `) + '\n');
     process.stdout.write(' '.repeat(padding) + chalk.grey('─'.repeat(promptText.length + 2)) + '\n');
@@ -75,7 +76,7 @@ export async function runChat(options: any = {}) {
 
   rl.on('line', async (line) => {
     const input = line.trim();
-    
+
     if (!input) {
       refreshPrompt();
       return;
@@ -83,7 +84,7 @@ export async function runChat(options: any = {}) {
 
     if (input.startsWith('/')) {
       const [cmd, ...args] = input.slice(1).split(' ');
-      
+
       switch (cmd) {
         case 'help':
           console.log(boxen(
@@ -104,7 +105,7 @@ export async function runChat(options: any = {}) {
           const isDebug = toggleDebugMode();
           console.log(chalk.yellow(`\nDebug mode: ${isDebug ? 'ENABLED' : 'DISABLED'}`));
           break;
-          
+
         case 'model':
           if (args[0]) {
             client.setModel(args[0]);
@@ -114,7 +115,7 @@ export async function runChat(options: any = {}) {
             try {
               let models = await client.listModels();
               spinner.stop();
-              
+
               if (models.length === 0) {
                 models = PROVIDER_MODELS[client.provider as string] || [];
               }
@@ -175,7 +176,7 @@ export async function runChat(options: any = {}) {
                 pageSize: 10
               }
             ]);
-            
+
             const spinner = ora(`Switching to ${selectedProvider}...`).start();
             try {
               acpManager.setProvider({ provider: selectedProvider as any });
@@ -192,7 +193,7 @@ export async function runChat(options: any = {}) {
             rl.resume();
           }
           break;
-          
+
         case 'session':
           session = args[0] || 'default';
           const newConv = await historyStore.load(session);
@@ -200,7 +201,7 @@ export async function runChat(options: any = {}) {
           if (newConv) messages.push(...newConv.messages);
           console.log(chalk.yellow(`\nSwitched to session: ${session}`));
           break;
-          
+
         case 'status':
           const health = await client.healthCheck();
           console.log(boxen(
@@ -229,7 +230,7 @@ export async function runChat(options: any = {}) {
           console.log(chalk.yellow('Goodbye!'));
           process.exit(0);
           break;
-          
+
         default:
           console.log(chalk.red(`Unknown command: /${cmd}`));
       }
@@ -240,14 +241,14 @@ export async function runChat(options: any = {}) {
     // Agent Process
     console.log(chalk.dim('\n' + '─'.repeat(process.stdout.columns || 40)));
     const spinner = ora({ text: chalk.dim('Thinking...'), spinner: 'dots' }).start();
-    
+
     try {
       const userMessage = { role: 'user', content: input };
       const stream = runner.runStream(input, messages, client.model, session);
-      
+
       let fullResponse = '';
       spinner.stop();
-      
+
       let isFirstChunk = true;
       let lastType = '';
 
@@ -261,17 +262,17 @@ export async function runChat(options: any = {}) {
           case 'mission_phase_change':
             console.log(chalk.blue.bold(`\n📍 ${event.phase.toUpperCase()}`));
             break;
-            
+
           case 'mission_step_update':
             if (event.step && event.step.description) {
               console.log(chalk.cyan(`  ▹ ${event.step.description}`));
             }
             break;
-            
+
           case 'thought':
             process.stdout.write(chalk.dim(event.content));
             break;
-            
+
           case 'tool_call_start':
             process.stdout.write(chalk.yellow(`\n  ⚙️  ${event.toolName}...`));
             break;
@@ -279,7 +280,7 @@ export async function runChat(options: any = {}) {
           case 'tool_call_complete':
             process.stdout.write(chalk.green(` ok`));
             break;
-            
+
           case 'chunk':
             if (isFirstChunk) {
               process.stdout.write(chalk.magenta.bold('\nEverFern: '));
@@ -288,7 +289,7 @@ export async function runChat(options: any = {}) {
             process.stdout.write(event.content);
             fullResponse += event.content;
             break;
-            
+
           case 'error':
             console.log(chalk.red.bold(`\n❌ ${event.message}`));
             break;
@@ -297,7 +298,7 @@ export async function runChat(options: any = {}) {
             rl.pause();
             process.stdout.write('\n');
             console.log(boxen(chalk.yellow.bold('⚠️  APPROVAL REQUIRED') + '\n\n' + event.request.message, { padding: 1, borderColor: 'yellow' }));
-            
+
             const { approved } = await inquirer.prompt([
               {
                 type: 'confirm',
@@ -306,13 +307,13 @@ export async function runChat(options: any = {}) {
                 default: true
               }
             ]);
-            
+
             console.log(approved ? chalk.green('✓ Approved. Resuming...') : chalk.red('✗ Rejected. Resuming...'));
-            
+
             // Send the approval/rejection as a hidden command to the agent
             const resumeInput = approved ? '[HITL_APPROVED]' : '[HITL_REJECTED]';
             const resumeStream = runner.runStream(resumeInput, messages, client.model, session);
-            
+
             // Consuming the resume stream (simplified for now by just letting it run)
             for await (const resEvent of resumeStream) {
                // We could recursively handle this, but for now just log chunks
@@ -327,7 +328,7 @@ export async function runChat(options: any = {}) {
             }
             rl.resume();
             break;
-            
+
           case 'mission_complete':
             const isSuccess = !event.timeline?.error && (event.timeline?.status === 'success' || event.timeline?.isComplete);
             console.log(isSuccess ? chalk.green(`\n\n🏁 MISSION SUCCESS`) : chalk.red(`\n\n🏁 MISSION FAILED`));
@@ -340,13 +341,13 @@ export async function runChat(options: any = {}) {
             break;
         }
       }
-      
+
       console.log('\n' + chalk.dim('─'.repeat(process.stdout.columns || 40)));
-      
+
       // Save to history store
       messages.push(userMessage);
       messages.push({ role: 'assistant', content: fullResponse });
-      
+
       await historyStore.save({
         id: session,
         title: input.substring(0, 30),
@@ -355,12 +356,12 @@ export async function runChat(options: any = {}) {
         messages: messages,
         updatedAt: new Date().toISOString()
       } as any);
-      
+
     } catch (err: any) {
       spinner.stop();
       console.error(chalk.red(`\nSystem Error: ${err.message}\n`));
     }
-    
+
     refreshPrompt();
   });
 

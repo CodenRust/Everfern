@@ -214,7 +214,28 @@ const HitlApprovalForm = ({
 
     const renderToolDetails = (tools: any[]) => {
         if (!tools || tools.length === 0) return null;
-        return tools.map((tool, index) => {
+        
+        // Filter out file viewing and skill tools as requested
+        const filteredTools = tools.filter(tool => {
+            const name = (tool.name || tool.toolName || '').toLowerCase();
+            const isViewing = [
+                'read_file', 'list_dir', 'view_file', 'list_screens', 
+                'grep_search', 'read_url_content', 'command_status',
+                'list_projects', 'get_project', 'get_screen', 'list_design_systems',
+                'read_resource', 'list_resources', 'read_browser_page', 'screenshot_browser'
+            ].some(safeTool => name.includes(safeTool));
+            const isSkills = name.includes('skill') || name.includes('mcp') || name.includes('stitch');
+            return !isViewing && !isSkills;
+        });
+
+        if (filteredTools.length === 0) return (
+            <div style={{ backgroundColor: '#f0f4f8', border: '1px solid #d1d5db', borderRadius: 6, padding: 12, fontSize: 13, color: '#495057' }}>
+                <div style={{ marginBottom: 4 }}><strong>Summary:</strong> Background operations (context gathering)</div>
+                <div>These actions are safe and do not modify your files.</div>
+            </div>
+        );
+
+        return filteredTools.map((tool, index) => {
             const parsed: ParsedTool = {
                 name: tool.name || tool.toolName || 'unknown_tool',
                 jsonValue: tool.arguments || tool.args || null,
@@ -228,9 +249,15 @@ const HitlApprovalForm = ({
         <div style={{
             backgroundColor: '#fff3cd',
             border: '1px solid #ffeaa7',
-            borderRadius: 12,
-            padding: 20,
+            borderRadius: 16,
+            padding: 24,
             margin: '16px 0',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+            border: '1px solid #ffeaa7',
+            display: 'flex',
+            flexDirection: 'column'
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, color: '#856404', fontSize: 14, fontWeight: 600 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -396,7 +423,20 @@ const UserQuestionForm = ({
 
     const handleNext = () => { if (currentIndex < total - 1) setCurrentIndex(i => i + 1); };
     const handleBack = () => { if (currentIndex > 0) setCurrentIndex(i => i - 1); };
-    const handleSubmit = () => { if (allAnswered) onSubmit(answers, attachedFiles.length > 0 ? attachedFiles : undefined); };
+    const handleSubmit = () => { 
+        if (allAnswered) {
+            // Map labels to internal [HITL_APPROVED_ALWAYS] and [HITL_APPROVED_PREFIX] tags
+            const processedAnswers = { ...answers };
+            for (const q in processedAnswers) {
+                processedAnswers[q] = processedAnswers[q].map(val => {
+                    if (val === '🚀 Approve & Allow Always — never ask for this specific command again') return '[HITL_APPROVED_ALWAYS]';
+                    if (val === '📂 Approve & Allow Prefix — never ask for commands starting with this base (e.g. npm)') return '[HITL_APPROVED_PREFIX]';
+                    return val;
+                });
+            }
+            onSubmit(processedAnswers, attachedFiles.length > 0 ? attachedFiles : undefined); 
+        }
+    };
 
     if (!current) return null;
 
@@ -487,14 +527,26 @@ const UserQuestionForm = ({
 
                             {/* Scrollable tool cards */}
                             <div style={{
-                                maxHeight: 380,
+                                maxHeight: 420,
                                 overflowY: 'auto',
-                                paddingRight: 2,
+                                paddingRight: 6,
                             }}>
                                 {toolEntries.length > 0 ? (
-                                    toolEntries.map((tool, idx) => (
-                                        <ToolCard key={idx} tool={tool} />
-                                    ))
+                                    toolEntries
+                                        .filter(tool => {
+                                            const name = tool.name.toLowerCase();
+                                            const isViewing = [
+                                                'read_file', 'list_dir', 'view_file', 'list_screens', 
+                                                'grep_search', 'read_url_content', 'command_status',
+                                                'list_projects', 'get_project', 'get_screen', 'list_design_systems',
+                                                'read_resource', 'list_resources', 'read_browser_page', 'screenshot_browser'
+                                            ].some(safeTool => name.includes(safeTool));
+                                            const isSkills = name.includes('skill') || name.includes('mcp') || name.includes('stitch');
+                                            return !isViewing && !isSkills;
+                                        })
+                                        .map((tool, idx) => (
+                                            <ToolCard key={idx} tool={tool} />
+                                        ))
                                 ) : (
                                     // Fallback: raw markdown
                                     <div style={{

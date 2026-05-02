@@ -7,6 +7,7 @@ import { createValidationNode } from './nodes/validation';
 import { createBrainNode } from './nodes/brain';
 import { createJudgeNode } from './nodes/judge';
 import { createDecomposerNode } from './nodes/decomposer';
+import { createSwarmOrchestratorNode } from './nodes/swarm-orchestrator';
 import { loadPrompt } from '../../lib/prompt-sync';
 import {
   createComputerUseNode,
@@ -19,6 +20,7 @@ import { AgentRunner } from './runner';
 import type { MissionTracker } from './mission-tracker';
 import { lightweightCheckpointer } from './custom-checkpointer';
 import { saveHitlRequest } from '../../store/hitl';
+import { toolApprovalStore } from '../../store/tool-approvals';
 import * as crypto from 'crypto';
 
 // Cache compiled graphs for better performance
@@ -60,7 +62,7 @@ export const buildGraph = (
       description: t.description,
       parameters: t.parameters
   })).sort((a, b) => a.name.localeCompare(b.name)));
-  const toolDefsHash = require('crypto').createHash('md5').update(toolDefsStr).digest('hex').substring(0, 8);
+  const toolDefsHash = crypto.createHash('md5').update(toolDefsStr).digest('hex').substring(0, 8);
   const cacheKey = `graph_v8_specialized_${toolDefs.length}_${toolDefsHash}`;
 
   if (graphCache.has(cacheKey)) {
@@ -139,7 +141,12 @@ export const buildGraph = (
         questions: [
           {
             question: `⚠️ High-risk action requires your approval\n\n${reasoning}\n\nActions to execute:\n${toolSummary}`,
-            options: ['✅ Approve — proceed with the action', '❌ Reject — cancel and do not proceed'],
+            options: [
+              '✅ Approve — proceed once', 
+              '🚀 Approve & Allow Always — never ask for this specific command again',
+              '📂 Approve & Allow Prefix — never ask for commands starting with this base (e.g. npm)',
+              '❌ Reject — cancel and do not proceed'
+            ],
             multiSelect: false,
           }
         ]
@@ -184,7 +191,43 @@ export const buildGraph = (
         };
       }
 
-      const isApproved = String(answer).includes('[HITL_APPROVED]');
+      const answerStr = String(answer);
+      const isApproved = answerStr.includes('[HITL_APPROVED]') || 
+                         answerStr.includes('[HITL_APPROVED_ALWAYS]') || 
+                         answerStr.includes('[HITL_APPROVED_PREFIX]');
+
+      if (isApproved && (answerStr.includes('[HITL_APPROVED_ALWAYS]') || answerStr.includes('[HITL_APPROVED_PREFIX]'))) {
+        const type = answerStr.includes('[HITL_APPROVED_ALWAYS]') ? 'exact' : 'prefix';
+        
+        // Register policies for all pending tools
+        for (const tc of state.pendingToolCalls || []) {
+          const args = tc.arguments || {};
+          let pattern = '';
+          
+          const cmdTools = ['terminal_execute', 'executePwsh', 'run_command', 'bash'];
+          if (cmdTools.includes(tc.name)) {
+            const cmd = args.command || args.CommandLine || args.cmd || '';
+            if (type === 'prefix') {
+              // Extract prefix (e.g. "npm install" -> "npm")
+              pattern = cmd.split(' ')[0];
+            } else {
+              pattern = cmd;
+            }
+          } else {
+            // For other tools, we use the tool name as the pattern for now
+            pattern = tc.name;
+          }
+          
+          if (pattern) {
+            toolApprovalStore.addPolicy({
+              type,
+              toolName: tc.name,
+              pattern
+            });
+            runner.telemetry.info(`Registered auto-approval policy: ${type} match for ${tc.name} with pattern "${pattern}"`);
+          }
+        }
+      }
 
       runner.telemetry.info(`HITL response received: ${isApproved ? 'APPROVED' : 'REJECTED'}`);
 
@@ -356,6 +399,15 @@ If a specialized agent failed to complete a step, identify the issue and use you
     return node(state);
   };
 
+  const swarmNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    if (ctx.shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+    const node = createSwarmOrchestratorNode(ctx.runner, ctx.eventQueue);
+    return node(state);
+  };
+
   const compiledGraph = new StateGraph(GraphState)
     .addNode('intent_classifier', triageNode)
     .addNode('task_decomposer', decomposerNode)
@@ -369,13 +421,42 @@ If a specialized agent failed to complete a step, identify the issue and use you
     .addNode('action_validation', validatorNode)
     .addNode('hitl_approval', hitlNode)
     .addNode('multi_tool_orchestrator', orchestratorNode)
+    .addNode('swarm', swarmNode)
     .addNode('judge', judgeNode);
 
   // New Brain-Centric Routing Architecture
   compiledGraph
     .addEdge(START, 'intent_classifier')
     .addEdge('intent_classifier', 'task_decomposer')
-    .addEdge('task_decomposer', 'global_planner')
+    .addConditionalEdges('task_decomposer', (state) => {
+        const plan = state.decomposedTask;
+        const mode = plan?.executionMode || 'sequential';
+        
+        // Detect if the user just approved the plan
+        const lastUserMsg = state.messages.filter((m: any) => m.role === 'user' || m._getType?.() === 'human').pop();
+        const content = typeof (lastUserMsg as any)?.content === 'string' ? (lastUserMsg as any).content : '';
+        const isPlanApproved = content.includes('[PLAN_APPROVED]');
+
+        console.log(`[Graph] 🔀 task_decomposer complete. Mode: ${mode}, Approved: ${isPlanApproved}`);
+        
+        if (mode === 'parallel' || mode === 'hybrid') {
+            console.log(`[Graph] ➡️ Routing to swarm`);
+            return 'swarm';
+        }
+        console.log(`[Graph] ➡️ Routing to global_planner`);
+        return 'global_planner';
+    }, {
+        swarm: 'swarm',
+        global_planner: 'global_planner'
+    })
+    .addConditionalEdges('swarm', (state) => {
+        const phase = state.taskPhase;
+        console.log(`[Graph] 🔀 swarm node complete. taskPhase: ${phase}`);
+        return phase === 'swarm' ? 'swarm' : 'brain';
+    }, {
+        swarm: 'swarm',
+        brain: 'brain'
+    })
     .addEdge('global_planner', 'brain')
 
     // Brain is the central router - it decides whether to handle tasks itself or route to specialists
@@ -411,6 +492,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
         }
 
         // Default to judge for completion assessment
+        console.log('[Graph] ➡️ Defaulting to judge');
         return 'judge';
     }, {
         action_validation: 'action_validation',
@@ -565,9 +647,21 @@ If a specialized agent failed to complete a step, identify the issue and use you
             'update_plan_step', 'create_plan', 'todo_write',
             'memory_save', 'memory_search', 'read_file', 'view_file',
             'list_directory', 'execution_plan',
+            'read', 'find', 'grep', 'ls', 'search_web', 'web_search',
+            'website_crawl', 'skill_tool', 'present_files',
+            'list_mcp_tools', 'search_mcp_registry', 'visualize'
           ]);
           const allSafe = (state.pendingToolCalls || []).every((tc: any) => SAFE_TOOLS.has(tc.name));
           if (allSafe) {
+            return 'multi_tool_orchestrator';
+          }
+
+          // Bypass HITL for auto-approved tools (e.g. commands matching user-defined rules)
+          const allAutoApproved = (state.pendingToolCalls || []).every((tc: any) => 
+            toolApprovalStore.isApproved(tc.name, tc.arguments || {})
+          );
+          if (allAutoApproved) {
+            console.log('[Graph] 🚀 All pending tool calls are auto-approved → bypassing HITL');
             return 'multi_tool_orchestrator';
           }
 
@@ -598,22 +692,21 @@ If a specialized agent failed to complete a step, identify the issue and use you
     // After tool execution, route back to brain for coordination
     // UNLESS we are in the middle of a specialist workflow
     .addConditionalEdges('multi_tool_orchestrator', (state) => {
-        if (state.returningFromSpecialist) {
-            console.log(`[Graph] 🔀 Multi-tool complete → returning to specialist: ${state.returningFromSpecialist}`);
-            switch (state.returningFromSpecialist) {
-                case 'coding_specialist':
-                    return 'coding_specialist';
-                case 'data_analyst':
-                    return 'data_analyst';
-                case 'computer_use_agent':
-                    return 'computer_use_agent';
-                case 'web_explorer':
-                    return 'web_explorer';
-                case 'deep_research':
-                    return 'deep_research';
+        const specialist = state.returningFromSpecialist;
+        console.log(`[Graph] 🔀 multi_tool_orchestrator complete. returningFromSpecialist: ${specialist || 'None'}`);
+        
+        if (specialist) {
+            console.log(`[Graph] ⬅️ Returning to specialist: ${specialist}`);
+            switch (specialist) {
+                case 'coding_specialist': return 'coding_specialist';
+                case 'data_analyst': return 'data_analyst';
+                case 'computer_use_agent': return 'computer_use_agent';
+                case 'web_explorer': return 'web_explorer';
+                case 'deep_research': return 'deep_research';
+                case 'swarm_orchestrator': return 'swarm';
             }
         }
-        console.log('[Graph] 🔀 Multi-tool complete → brain');
+        console.log('[Graph] ➡️ Returning to brain');
         return 'brain';
     }, {
         coding_specialist: 'coding_specialist',
@@ -621,6 +714,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
         computer_use_agent: 'computer_use_agent',
         web_explorer: 'web_explorer',
         deep_research: 'deep_research',
+        swarm: 'swarm',
         brain: 'brain',
     })
 

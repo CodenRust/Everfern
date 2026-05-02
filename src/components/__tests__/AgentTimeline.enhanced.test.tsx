@@ -5,7 +5,7 @@ import { AgentTimeline } from '../AgentTimeline';
 import type { ToolCallDisplay, SubAgentProgressEvent } from '@/app/chat/types';
 
 // Mock framer-motion
-jest.mock('framer-motion', () => ({
+vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
     svg: ({ children, ...props }: any) => <svg {...props}>{children}</svg>,
@@ -86,9 +86,9 @@ describe('AgentTimeline Enhanced Features', () => {
     );
 
     // Should show the computer use subagent branch
-    expect(screen.getByText('Computer Use Subagent')).toBeInTheDocument();
+    expect(screen.getByText(/computer use Subagent/i)).toBeInTheDocument();
     expect(screen.getByText('Automated computer interaction')).toBeInTheDocument();
-    expect(screen.getByText('3 events')).toBeInTheDocument();
+    expect(screen.getByText(/3 events/i)).toBeInTheDocument();
   });
 
   it('allows collapsing and expanding timeline branches', () => {
@@ -102,11 +102,11 @@ describe('AgentTimeline Enhanced Features', () => {
       />
     );
 
-    const branchHeader = screen.getByText('Computer Use Subagent').closest('div');
+    const branchHeader = screen.getByText(/computer use Subagent/i).closest('div');
     expect(branchHeader).toBeInTheDocument();
 
     // Initially expanded - should show events
-    expect(screen.getByText('STEP 1/3')).toBeInTheDocument();
+    expect(screen.getByText(/STEP 1\/3/i)).toBeInTheDocument();
 
     // Click to collapse
     fireEvent.click(branchHeader!);
@@ -153,8 +153,8 @@ describe('AgentTimeline Enhanced Features', () => {
     );
 
     // Should show both agent types
-    expect(screen.getByText('Computer Use Subagent')).toBeInTheDocument();
-    expect(screen.getByText('Web Explorer Subagent')).toBeInTheDocument();
+    expect(screen.getByText(/computer use Subagent/i)).toBeInTheDocument();
+    expect(screen.getByText(/web explorer Subagent/i)).toBeInTheDocument();
   });
 
   it('handles timeline branches without progress events gracefully', () => {
@@ -200,6 +200,6 @@ describe('AgentTimeline Enhanced Features', () => {
     );
 
     // Should show running indicators
-    expect(screen.getByText('1 event')).toBeInTheDocument();
+    expect(screen.getByText(/1 event/i)).toBeInTheDocument();
   });
 });

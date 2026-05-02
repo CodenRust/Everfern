@@ -1,0 +1,8 @@
+
+LineNumber Line                                                                                                        
+---------- ----                                                                                                        
+      1398         const isProject = folderContexts.length > 0 && projects.some(p => p.id === folderContexts[0].id |...
+      1399         const folderContextText = (folderContexts.length > 0 && !isProject) ? `\n\n[Shared folder context...
+      1407         if (!isProject) {                                                                                   
+
+

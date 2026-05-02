@@ -293,6 +293,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     delete: (chatId: string, filename: string)          => ipcRenderer.invoke('plans:delete', chatId, filename),
   },
 
+  // ── Projects ────────────────────────────────────────────────────
+  projects: {
+    list:   () => ipcRenderer.invoke('projects:list'),
+    create: (data: { name: string; instructions?: string; path: string, files?: string[] }) => ipcRenderer.invoke('projects:create', data),
+    delete: (id: string) => ipcRenderer.invoke('projects:delete', id),
+    getDefaultPath: () => ipcRenderer.invoke('projects:getDefaultPath'),
+    selectFolder: () => ipcRenderer.invoke('projects:selectFolder'),
+    selectFiles: () => ipcRenderer.invoke('projects:selectFiles'),
+  },
+
   // ── Sites ─────────────────────────────────────────────────────────
   sites: {
     list:   (chatId?: string)                           => ipcRenderer.invoke('sites:list', chatId),
@@ -490,6 +500,14 @@ export type ElectronAPI = {
     read:   (chatId: string, filename: string) => Promise<string | null>;
     write:  (chatId: string, filename: string, content: string) => Promise<{ success: boolean; error?: string }>;
     delete: (chatId: string, filename: string) => Promise<{ success: boolean }>;
+  };
+  projects: {
+    list:   () => Promise<any[]>;
+    create: (data: { name: string; instructions?: string; path: string, files?: string[] }) => Promise<{ success: boolean; project?: any; error?: string }>;
+    delete: (id: string) => Promise<{ success: boolean; error?: string }>;
+    getDefaultPath: () => Promise<string>;
+    selectFolder: () => Promise<string | null>;
+    selectFiles: () => Promise<string[]>;
   };
   sites: {
     list:   (chatId?: string) => Promise<any[]>;

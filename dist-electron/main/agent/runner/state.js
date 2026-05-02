@@ -76,7 +76,9 @@ exports.GraphState = langgraph_1.Annotation.Root({
     deepResearchComplete: (0, langgraph_1.Annotation)(),
     // Subagent State
     subagentSpawned: (0, langgraph_1.Annotation)(),
+    completedSteps: (0, langgraph_1.Annotation)(),
     // Bugfixes: Routing state persistence
     brainToolsInFlight: (0, langgraph_1.Annotation)(),
     returningFromSpecialist: (0, langgraph_1.Annotation)(),
+    swarmPollCount: (0, langgraph_1.Annotation)(),
 });

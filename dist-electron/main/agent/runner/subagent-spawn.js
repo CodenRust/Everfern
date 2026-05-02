@@ -43,6 +43,7 @@ exports.SubagentSpawner = exports.AGENT_TIMEOUTS = void 0;
 exports.getSubagentSpawner = getSubagentSpawner;
 const crypto = __importStar(require("crypto"));
 const subagent_registry_1 = require("./subagent-registry");
+const swarm_memory_1 = require("./swarm-memory");
 const agent_events_1 = require("../infra/agent-events");
 const session_lifecycle_events_1 = require("../sessions/session-lifecycle-events");
 exports.AGENT_TIMEOUTS = {
@@ -55,11 +56,31 @@ exports.AGENT_TIMEOUTS = {
 class SubagentSpawner {
     runner;
     maxGlobalDepth = 3;
+    activeAgents = 0;
+    MAX_CONCURRENT_AGENTS = 2; // Limit parallel LLM calls to prevent Ollama 502s
+    queue = [];
     setRunner(runner) {
         this.runner = runner;
     }
+    async acquireSlot() {
+        if (this.activeAgents < this.MAX_CONCURRENT_AGENTS) {
+            this.activeAgents++;
+            return;
+        }
+        return new Promise(resolve => this.queue.push(resolve));
+    }
+    releaseSlot() {
+        this.activeAgents--;
+        if (this.queue.length > 0) {
+            const next = this.queue.shift();
+            if (next) {
+                this.activeAgents++;
+                next();
+            }
+        }
+    }
     async spawn(options) {
-        const { parentSessionId, task, agentType = 'generic', systemPrompt, context, model, mode = 'run', workspaceDir, maxDepth = 3, parentHistory = [] } = options;
+        const { parentSessionId, task, agentType = 'generic', systemPrompt, context, model, mode = 'run', workspaceDir, projectId, maxDepth = 3, parentHistory = [] } = options;
         if (!this.runner) {
             console.warn('[SubagentSpawner] No runner configured. Spawning failed.');
             throw new Error('SubagentSpawner: No runner configured');
@@ -85,6 +106,7 @@ class SubagentSpawner {
             mode,
             status: 'pending',
             workspaceDir,
+            projectId,
             maxDepth,
             currentDepth
         });
@@ -94,11 +116,12 @@ class SubagentSpawner {
             agentId,
             sessionKey,
             agentType,
-            task: enrichedTask.substring(0, 100)
+            task: (enrichedTask || '').substring(0, 100)
         });
         console.log(`[SubagentSpawner] Spawned ${agentId} (${agentType}) for parent ${parentSessionId} (depth: ${currentDepth})`);
         const spawnedAgent = {
             agentId,
+            parentSessionId,
             sessionKey,
             task: enrichedTask,
             agentType,
@@ -110,10 +133,20 @@ class SubagentSpawner {
     }
     async runSubagent(agent, model, systemPrompt, parentHistory = []) {
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
+        const swarm = (0, swarm_memory_1.getSwarmMemory)();
         registry.update(agent.agentId, { status: 'running' });
         agent.status = 'running';
+        await this.acquireSlot();
+        console.log(`[SubagentSpawner] 🎰 Agent ${agent.agentId} acquired execution slot. Active: ${this.activeAgents}`);
+        // SWARM SYNC: Subscribe to real-time memory updates from sibling agents
+        // This ensures the agent is aware of what its "army" peers are finding
+        const swarmMessages = [];
+        const unsubscribe = swarm.subscribe(agent.parentSessionId, agent.agentId, (fact) => {
+            console.log(`[Subagent] 🧠 ${agent.agentId} received swarm update: ${fact.type}`);
+            swarmMessages.push(`[SYNC FROM SWARM]: ${fact.content}`);
+        });
         (0, session_lifecycle_events_1.sessionCreated)(agent.sessionKey, {
-            parentSessionId: registry.get(agent.agentId)?.parentSessionId,
+            parentSessionId: agent.parentSessionId,
             task: agent.task
         });
         (0, agent_events_1.emitTool)(agent.sessionKey, 'agent_start', {
@@ -121,16 +154,106 @@ class SubagentSpawner {
             agentType: agent.agentType,
             task: agent.task
         });
+        const parentEvents = (0, agent_events_1.getAgentEvents)(agent.parentSessionId);
         try {
             const cappedHistory = parentHistory.slice(-40).map((msg) => ({
                 role: msg.role || (msg._getType?.() === 'human' ? 'user' : 'assistant'),
                 content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
             }));
-            const result = await this.runner.run(agent.task, cappedHistory, model, systemPrompt);
-            registry.complete(agent.agentId, result.response);
+            // SWARM SYNC: Prepend existing swarm knowledge to the task
+            const existingMemory = swarm.getMemory(agent.parentSessionId)
+                .filter(f => f.sourceAgentId !== agent.agentId)
+                .map(f => `[PRIOR SWARM KNOWLEDGE]: ${f.content}`)
+                .join('\n');
+            const finalTask = existingMemory ? `${existingMemory}\n\n${agent.task}` : agent.task;
+            let finalResponse = '';
+            let toolCalls = [];
+            let retries = 0;
+            const MAX_RETRIES = 2;
+            while (retries <= MAX_RETRIES) {
+                try {
+                    if (this.runner?.runStream) {
+                        console.log(`[SubagentSpawner] ⚡ Attempt ${retries + 1}: Using runStream for ${agent.agentId} to enable real-time piping`);
+                        const entry = registry.get(agent.agentId);
+                        const stream = this.runner.runStream(finalTask, cappedHistory, model, agent.parentSessionId, systemPrompt, entry?.projectId);
+                        for await (const event of stream) {
+                            if (event.type === 'done')
+                                break;
+                            if (event.type === 'chunk')
+                                finalResponse += event.content;
+                            if (event.type === 'tool_call')
+                                toolCalls.push(event.toolCall);
+                            // Pipe progress events to the parent session for the timeline
+                            if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_call') {
+                                const progressType = event.type === 'thought' ? 'reasoning' : 'action';
+                                parentEvents.emit('subagent-progress', progressType, {
+                                    toolCallId: agent.agentId, // Use agentId as toolCallId for grouping
+                                    timestamp: new Date().toISOString(),
+                                    content: event.type === 'thought' ? event.content : `Running tool: ${event.toolName || event.toolCall?.toolName}`,
+                                    metadata: { agentId: agent.agentId, agentType: agent.agentType, attempt: retries + 1 },
+                                    // Add timelineBranch for the nested visualization
+                                    timelineBranch: {
+                                        sessionId: agent.sessionKey,
+                                        parentId: agent.parentSessionId,
+                                        agentType: agent.agentType,
+                                        taskDescription: agent.task,
+                                        branchStatus: 'running'
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    else {
+                        console.log(`[SubagentSpawner] 🐢 Attempt ${retries + 1}: Using standard run for ${agent.agentId}`);
+                        const entry = registry.get(agent.agentId);
+                        const result = await this.runner.run(finalTask, cappedHistory, model, agent.parentSessionId, systemPrompt, entry?.projectId);
+                        finalResponse = result.response;
+                        toolCalls = result.toolCalls;
+                    }
+                    // If success, break out of retry loop
+                    break;
+                }
+                catch (err) {
+                    const is502 = String(err).includes('502') || String(err).includes('Bad Gateway');
+                    if (is502 && retries < MAX_RETRIES) {
+                        retries++;
+                        const delay = 2000 * retries;
+                        console.warn(`[SubagentSpawner] ⚠️ Agent ${agent.agentId} hit 502/Gateway error. Retrying in ${delay}ms... (Attempt ${retries + 1})`);
+                        parentEvents.emit('subagent-progress', 'error', {
+                            toolCallId: agent.agentId,
+                            content: `Connection error (502). Retrying in ${delay / 1000}s... (Attempt ${retries + 1})`,
+                            metadata: { agentId: agent.agentId, retry: true }
+                        });
+                        await new Promise(r => setTimeout(r, delay));
+                        finalResponse = '';
+                        toolCalls = [];
+                        continue;
+                    }
+                    throw err; // Out of retries or not a 502
+                }
+            }
+            registry.complete(agent.agentId, finalResponse);
+            // Notify parent of completion
+            parentEvents.emit('subagent-progress', 'complete', {
+                toolCallId: agent.agentId,
+                timestamp: new Date().toISOString(),
+                timelineBranch: {
+                    sessionId: agent.sessionKey,
+                    branchStatus: 'completed'
+                }
+            });
+            // SWARM SYNC: Broadcast findings to the rest of the army
+            if (finalResponse && finalResponse.length > 50) {
+                swarm.broadcast({
+                    sourceAgentId: agent.agentId,
+                    sessionId: agent.parentSessionId,
+                    type: 'fact',
+                    content: `Agent ${agent.agentId} (${agent.agentType}) findings: ${(finalResponse || '').substring(0, 500)}${finalResponse.length > 500 ? '...' : ''}`
+                });
+            }
             (0, session_lifecycle_events_1.sessionCompleted)(agent.sessionKey, {
-                responseLength: result.response.length,
-                toolCalls: result.toolCalls.length
+                responseLength: finalResponse.length,
+                toolCalls: toolCalls.length
             });
             (0, agent_events_1.emitTool)(agent.sessionKey, 'agent_end', {
                 agentId: agent.agentId,
@@ -141,6 +264,15 @@ class SubagentSpawner {
         catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
             registry.complete(agent.agentId, undefined, errMsg);
+            // Notify parent of error
+            parentEvents.emit('subagent-progress', 'error', {
+                toolCallId: agent.agentId,
+                content: errMsg,
+                timelineBranch: {
+                    sessionId: agent.sessionKey,
+                    branchStatus: 'failed'
+                }
+            });
             (0, session_lifecycle_events_1.sessionFailed)(agent.sessionKey, { error: errMsg });
             (0, agent_events_1.emitTool)(agent.sessionKey, 'agent_end', {
                 agentId: agent.agentId,
@@ -148,6 +280,11 @@ class SubagentSpawner {
                 error: errMsg
             });
             console.error(`[SubagentSpawner] Agent ${agent.agentId} failed:`, error);
+        }
+        finally {
+            this.releaseSlot();
+            console.log(`[SubagentSpawner] 🏁 Agent ${agent.agentId} released execution slot. Active: ${this.activeAgents}`);
+            unsubscribe();
         }
     }
     async spawnMultiple(parentSessionId, tasks, options = {}) {
@@ -162,7 +299,7 @@ class SubagentSpawner {
                 spawned.push(agent);
             }
             catch (error) {
-                console.error(`[SubagentSpawner] Failed to spawn agent for task "${task.substring(0, 50)}...":`, error);
+                console.error(`[SubagentSpawner] Failed to spawn agent for task "${(task || '').substring(0, 50)}...":`, error);
             }
         }
         return spawned;

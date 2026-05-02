@@ -43,7 +43,7 @@ export async function runOnboarding() {
           openai: 'gpt-4o',
           anthropic: 'claude-3-5-sonnet-20241022',
           ollama: 'llama3',
-          deepseek: 'deepseek-chat',
+          deepseek: 'deepseek-v4-pro',
           gemini: 'gemini-1.5-pro',
           nvidia: 'meta/llama-3.1-8b-instruct',
           openrouter: 'anthropic/claude-3.5-sonnet'

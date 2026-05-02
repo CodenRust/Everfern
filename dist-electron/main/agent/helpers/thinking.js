@@ -18,7 +18,7 @@ exports.getThinkLevelFromString = getThinkLevelFromString;
 const EXTRA_BODY_THINKING_MODELS = [
     'nvidia/nemotron',
     'qwen',
-    'deepseek-reasoner',
+    'deepseek-v4-pro',
     'gemma',
 ];
 // Models with native thinking support

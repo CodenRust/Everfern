@@ -52,30 +52,31 @@ const VALID_TASK_TYPES = [
     'coding', 'research', 'build', 'fix', 'analyze', 'automate', 'task', 'conversation'
 ];
 async function classifyTaskTypeWithAI(userInput, client) {
-    const prompt = `Classify the following user request into exactly one task type.
+    const prompt = `Analyze the following user request. Classify it into exactly one task type and extract any specific entities (products, companies, topics) that need to be researched or processed independently.
 
 USER REQUEST: "${userInput.slice(0, 500)}"
 
 Task types:
-- "coding"       — writing, editing, or refactoring code (functions, classes, APIs, components)
-- "research"     — searching the web, looking up information, investigating topics, answering questions
-- "build"        — creating a new project, app, or scaffold from scratch
-- "fix"          — debugging, repairing errors, fixing bugs or crashes
-- "analyze"      — processing data, generating charts, CSV/Excel analysis, dashboards
-- "automate"     — GUI automation, clicking UI elements, desktop app interaction, screen control
-- "task"         — running commands, installing packages, file operations, deployments
-- "conversation" — casual chat, greetings, opinions, no action required
+- "coding"       — writing, editing, or refactoring code
+- "research"     — searching the web, investigating topics, comparing products
+- "build"        — creating new projects from scratch
+- "fix"          — debugging and repairing errors
+- "analyze"      — processing data, charts, CSV analysis
+- "automate"     — GUI automation, screen control
+- "task"         — running commands, file operations
+- "conversation" — casual chat
 
-Rules:
-- "automate" is ONLY for tasks that require physically clicking/interacting with a desktop GUI or native app screen.
-- "research" covers any web search, information lookup, or question answering — even if the query mentions product names like Discord, Spotify, Chrome.
-- Respond with JSON only: {"taskType": "<one of the types above>"}`;
+Respond with JSON only:
+{
+  "taskType": "<type>",
+  "entities": ["entity1", "entity2", ...]
+}`;
     try {
         const response = await client.chat({
             messages: [{ role: 'user', content: prompt }],
             responseFormat: 'json',
             temperature: 0,
-            maxTokens: 30,
+            maxTokens: 150,
         });
         let content = typeof response.content === 'string'
             ? response.content
@@ -83,13 +84,19 @@ Rules:
         content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         const parsed = JSON.parse(content);
         if (VALID_TASK_TYPES.includes(parsed.taskType)) {
-            return parsed.taskType;
+            return {
+                type: parsed.taskType,
+                entities: Array.isArray(parsed.entities) ? parsed.entities : []
+            };
         }
     }
     catch (err) {
-        console.warn('[TaskDecomposer] AI classification failed, using regex fallback:', err instanceof Error ? err.message : String(err));
+        console.warn('[TaskDecomposer] AI classification failed:', err instanceof Error ? err.message : String(err));
     }
-    return classifyTaskTypeSync(userInput.toLowerCase());
+    return {
+        type: classifyTaskTypeSync(userInput.toLowerCase()),
+        entities: []
+    };
 }
 // ── Tool Dependency Map ───────────────────────────────────────────────────
 const TOOL_DEPENDENCY_MAP = {
@@ -119,12 +126,18 @@ function analyzeStructure(userInput) {
         if (p.test(text))
             sequentialScore++;
     const actionVerbs = (text.match(/\b(analyze?|research|find|search|create?|generate|build|make|edit|modify|update|delete|run|execute|download|install|read|fetch|compare|test|verify|check|process|convert)\b/gi) || []);
+    // Detect entities for swarm weighting
+    const entities = userInput.match(/\b[A-Z][a-z]{2,}\b/g) || [];
+    const uniqueEntities = new Set(entities.filter(e => !['The', 'This', 'That', 'These', 'Those', 'And', 'But', 'Use', 'For', 'Find', 'Official'].includes(e))).size;
+    if (uniqueEntities >= 2)
+        parallelScore += 2;
     const uniqueActions = new Set(actionVerbs.map(v => v.toLowerCase())).size;
+    const effectiveActions = uniqueActions + (uniqueEntities > 1 ? uniqueEntities : 0);
     const wordCount = text.split(/\s+/).length;
-    const complexity = (wordCount > 80 || uniqueActions > 5) ? 'complex' :
-        (wordCount > 25 || uniqueActions > 2) ? 'moderate' : 'simple';
-    const canParallelize = parallelScore > sequentialScore && uniqueActions >= 2;
-    const suggestedApproach = canParallelize && uniqueActions > 3 ? 'hybrid' :
+    const complexity = (wordCount > 80 || effectiveActions > 5) ? 'complex' :
+        (wordCount > 25 || effectiveActions > 2) ? 'moderate' : 'simple';
+    const canParallelize = (parallelScore > sequentialScore || uniqueEntities >= 2) && effectiveActions >= 2;
+    const suggestedApproach = canParallelize && effectiveActions > 3 ? 'hybrid' :
         canParallelize ? 'parallel' : 'sequential';
     const nonDataText = text.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
     const requiresExternalData = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(nonDataText);
@@ -134,7 +147,7 @@ function analyzeStructure(userInput) {
         complexity,
         canParallelize,
         suggestedApproach,
-        estimatedSteps: Math.max(2, Math.min(uniqueActions + 1, 12)),
+        estimatedSteps: Math.max(2, Math.min(effectiveActions + 1, 12)),
         requiresExternalData,
         requiresFileOps,
         requiresCommandExecution,
@@ -148,6 +161,7 @@ function analyzeStructure(userInput) {
 function analyzeTask(userInput) {
     return {
         taskType: classifyTaskTypeSync(userInput.toLowerCase()),
+        entities: [],
         ...analyzeStructure(userInput),
     };
 }
@@ -156,12 +170,19 @@ function analyzeTask(userInput) {
  * back to regex if the model call fails or no client is provided.
  */
 async function analyzeTaskWithAI(userInput, client) {
-    const taskType = client
+    const { type: taskType, entities } = client
         ? await classifyTaskTypeWithAI(userInput, client)
-        : classifyTaskTypeSync(userInput.toLowerCase());
+        : { type: classifyTaskTypeSync(userInput.toLowerCase()), entities: [] };
+    const structure = analyzeStructure(userInput);
+    // Favor parallel execution if multiple entities are found
+    if (entities.length >= 2) {
+        structure.canParallelize = true;
+        structure.suggestedApproach = entities.length > 3 ? 'hybrid' : 'parallel';
+    }
     return {
+        ...structure,
         taskType,
-        ...analyzeStructure(userInput),
+        entities,
     };
 }
 // ── Decomposition ─────────────────────────────────────────────────────────
@@ -182,7 +203,6 @@ function buildSteps(userInput, analysis) {
     const nonDataLines = userInput.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
     const urls = (nonDataLines.match(/https?:\/\/[^\s"',]+/g) || []);
     const filePaths = (nonDataLines.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
-    const topics = (nonDataLines.match(/"([^"]+)"|'([^']+)'/g) || []).map(s => s.replace(/['"]/g, ''));
     // Phase 0: Skill reading
     if (['analyze', 'coding', 'build'].includes(analysis.taskType)) {
         steps.push(mk('Read relevant skill file(s)', 'skill', [], false, 'low', 'critical'));
@@ -197,12 +217,18 @@ function buildSteps(userInput, analysis) {
                 gatherIds.push(s.id);
             }
         }
-        else if (topics.length > 0) {
-            for (const topic of topics.slice(0, 3)) {
-                const s = mk(`Search: ${topic}`, 'web_search', [], true, 'low', 'normal', 1);
+        else if (analysis.entities.length > 1) {
+            // SWARM: Research each entity in parallel
+            for (const entity of analysis.entities.slice(0, 5)) {
+                const s = mk(`Research and investigate: ${entity}`, 'web_search', [], true, 'medium', 'normal', 1);
                 steps.push(s);
                 gatherIds.push(s.id);
             }
+        }
+        else if (analysis.entities.length === 1) {
+            const s = mk(`Search for: ${analysis.entities[0]}`, 'web_search', [], true, 'low', 'normal', 1);
+            steps.push(s);
+            gatherIds.push(s.id);
         }
         else {
             const s = mk('Web search for required information', 'web_search', [], true, 'low', 'normal', 1);

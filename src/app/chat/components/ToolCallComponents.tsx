@@ -416,6 +416,15 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                             style={{ fontFamily: "'Matter', sans-serif" }}>
                             {tc.displayName || tc.label || tc.toolName}
                         </span>
+                        {tc.toolName === 'spawn_agent' && tc.args && (
+                            <div className="text-xs text-[#6b7280] font-mono overflow-hidden text-ellipsis whitespace-nowrap mt-0.5 bg-[#f3f4f6] px-1.5 py-1 rounded border border-[#e5e7eb]">
+                                <span className="text-[#6366f1] font-bold">spawn_agent</span>(
+                                <span className="text-[#059669]">task</span>="
+                                <span className="text-[#4b5563]">{(tc.args.task as string)?.substring(0, 50)}{(tc.args.task as string)?.length > 50 ? '...' : ''}</span>", 
+                                <span className="text-[#059669] ml-1">agent_type</span>="
+                                <span className="text-[#4b5563] font-bold">{tc.args.agent_type || 'generic'}</span>")
+                            </div>
+                        )}
                         {isTerminal && cmdStr && (
                             <div className="text-xs text-[#6b7280] font-mono overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
                                 $ {cmdStr.length > 60 ? cmdStr.substring(0, 57) + '...' : cmdStr}

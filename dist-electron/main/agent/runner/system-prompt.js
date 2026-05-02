@@ -40,6 +40,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os_1 = require("os");
 const skills_loader_1 = require("./skills-loader");
+const projects_1 = require("../../store/projects/projects");
 class SystemPromptCache {
     cache = new Map();
     maxAge = 300000; // 5 minutes
@@ -101,7 +102,7 @@ setInterval(() => promptCache.cleanup(), 120000);
  * @param sessionCreatedPaths - Session created paths
  * @param preloadedSkills - Optional pre-loaded skills to avoid loading them again
  */
-async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sessionCreatedPaths = [], preloadedSkills) {
+async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sessionCreatedPaths = [], preloadedSkills, projectId) {
     const safeConvId = conversationId && typeof conversationId === 'string' ? conversationId : 'current';
     const homedir = (0, os_1.homedir)();
     const homedirNorm = homedir.replace(/\\/g, '/');
@@ -170,6 +171,25 @@ async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sess
         .replace(/{{USER_NAME}}/g, user.username)
         .replace(/{{USER_EMAIL}}/g, 'noreply@everfern.com')
         .replace(/{{OTHER_TOOLS}}/g, '');
+    // Add project-specific context if projectId or conversationId matches a project
+    const targetProjectId = projectId || conversationId;
+    if (targetProjectId) {
+        const project = await projects_1.projectsStore.get(targetProjectId);
+        if (project) {
+            console.log(`[SystemPrompt] 📁 Injecting context for project: ${project.name}`);
+            const projectContext = `
+## PROJECT CONTEXT
+You are currently working in the context of a specific project.
+- **Project Name**: ${project.name}
+- **Project Path**: ${project.path}
+${project.instructions ? `- **Project Instructions**: ${project.instructions}` : ''}
+
+When the user asks you to perform tasks, assume they are related to this project unless specified otherwise.
+Always prioritize the project path for file operations.
+`;
+            finalPrompt += "\n" + projectContext;
+        }
+    }
     return finalPrompt;
 }
 /**
@@ -189,6 +209,12 @@ function getSlimSystemPrompt(platform = 'win32', conversationId, sessionCreatedP
     if (cached) {
         return cached;
     }
+    // Look up project context if conversationId is a project ID
+    // Note: Since this is synchronous, we use a trick or just accept that it might miss the first time
+    // Actually, better to fetch it in getSlimSystemPromptAsync and pass it here, 
+    // but let's try to handle it here if possible. 
+    // Actually, getSlimSystemPrompt is used in buildSystemMessages which is used in AgentRunner.runStream.
+    // AgentRunner.runStream is async! So I should update getSlimSystemPrompt to be async or handle it in AgentRunner.
     const homedir = (0, os_1.homedir)();
     const homedirNorm = homedir.replace(/\\/g, '/');
     const user = (0, os_1.userInfo)();
@@ -269,8 +295,14 @@ function getSlimSystemPrompt(platform = 'win32', conversationId, sessionCreatedP
  *
  * @param preloadedPrompt - Optional pre-loaded prompt content to skip file I/O
  */
-function buildSystemMessages(history, userInput, platform = 'win32', conversationId, sessionCreatedPaths = [], preloadedPrompt) {
-    const systemPrompt = getSlimSystemPrompt(platform, conversationId, sessionCreatedPaths, preloadedPrompt);
+async function buildSystemMessages(history, userInput, platform = 'win32', conversationId, sessionCreatedPaths = [], preloadedPrompt, projectId) {
+    let systemPrompt = '';
+    if (preloadedPrompt) {
+        systemPrompt = preloadedPrompt;
+    }
+    else {
+        systemPrompt = await getSlimSystemPromptAsync(platform, conversationId, sessionCreatedPaths, undefined, projectId);
+    }
     return {
         messages: [
             { role: 'system', content: systemPrompt },
