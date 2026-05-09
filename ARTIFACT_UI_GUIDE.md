@@ -1,6 +1,6 @@
 # Artifact Display UI Implementation
 
-## Overview
+## Overviewa
 You now have a complete artifact display system that matches your design specifications. The system includes:
 
 1. **FileIcon Component** - SVG-based file type icons
