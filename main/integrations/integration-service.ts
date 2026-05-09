@@ -25,12 +25,19 @@ export interface IntegrationServiceConfig {
   telegram: {
     enabled: boolean;
     botToken: string;
+    webhookUrl?: string;
+    connected?: boolean;
+    model?: string;
+    provider?: string;
   };
   discord: {
     enabled: boolean;
     botToken: string;
     applicationId: string;
     webhookUrl?: string;
+    connected?: boolean;
+    model?: string;
+    provider?: string;
   };
   security: {
     enableMonitoring: boolean;

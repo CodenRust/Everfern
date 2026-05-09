@@ -103,3 +103,4 @@ const SurfaceItem: React.FC<{ component: SurfaceComponent; onAction?: (id: strin
       return null;
   }
 };
+export default SurfaceCanvas;

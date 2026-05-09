@@ -5,10 +5,10 @@ import { listSites, readSiteFile, writeSiteFile, deleteSite } from '../store/sit
 
 export function registerStoreHandlers() {
   // Artifacts
-  ipcMain.handle('artifacts:list', (_e, chatId?: string) => listArtifacts(chatId));
-  ipcMain.handle('artifacts:read', (_e, chatId: string, filename: string) => readArtifact(chatId, filename));
-  ipcMain.handle('artifacts:write', (_e, chatId: string, filename: string, content: string) => writeArtifact(chatId, filename, content));
-  ipcMain.handle('artifacts:delete', (_e, chatId: string, filename: string) => deleteArtifact(chatId, filename));
+  ipcMain.handle('artifacts:list', (_e, chatId?: string, projectPath?: string) => listArtifacts(chatId, projectPath));
+  ipcMain.handle('artifacts:read', (_e, chatId: string, filename: string, projectPath?: string) => readArtifact(chatId, filename, projectPath));
+  ipcMain.handle('artifacts:write', (_e, chatId: string, filename: string, content: string, projectPath?: string) => writeArtifact(chatId, filename, content, projectPath));
+  ipcMain.handle('artifacts:delete', (_e, chatId: string, filename: string, projectPath?: string) => deleteArtifact(chatId, filename, projectPath));
 
   // Plans
   ipcMain.handle('plans:list', (_e, chatId: string) => listPlans(chatId));

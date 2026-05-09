@@ -32,6 +32,7 @@ interface AgentTimelineProps {
     currentNode?: string;
     planSteps?: Array<{ id: string; description: string; tool?: string }> | null;
     planTitle?: string | null;
+    generatedTitle?: string;
     subAgentProgress?: Map<string, SubAgentProgressEvent[]>;
     timelineBranches?: Map<string, TimelineBranch>;
 }
@@ -43,6 +44,7 @@ import type { SubAgentProgressEvent } from "@/app/chat/types";
 interface TimelineBranch {
     id: string;
     parentId: string;
+    parentSessionKey?: string;
     agentType: 'web-explorer' | 'navis' | 'browser-use' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
     events: SubAgentProgressEvent[];
     status: 'running' | 'completed' | 'failed' | 'aborted';
@@ -51,6 +53,7 @@ interface TimelineBranch {
     taskDescription?: string;
     branchLevel: number;
     isCollapsed?: boolean;
+    childBranches?: TimelineBranch[];
 }
 
 interface TimelineRenderer {
@@ -1213,59 +1216,49 @@ const SubAgentProgressItem = ({
     if (event.type === 'abort') {
         return (
             <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
-                {/* Timeline line */}
                 <div style={{
-                    width: 20,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    paddingTop: 0,
+                    width: 20, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 0,
                 }}>
-                    {/* Vertical line before dot */}
+                    <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
                     <div style={{
-                        width: 2,
-                        height: 8,
-                        backgroundColor: "#e8e6d9",
+                        width: 10, height: 10, borderRadius: "50%", backgroundColor: "#ef4444",
+                        border: "2px solid #faf9f7", boxShadow: "0 0 0 1px #e8e6d9", flexShrink: 0,
                     }} />
-
-                    {/* Abort dot */}
-                    <div style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        backgroundColor: "#ef4444",
-                        border: "2px solid #faf9f7",
-                        boxShadow: "0 0 0 1px #e8e6d9",
-                        flexShrink: 0,
-                    }} />
-
-                    {/* Vertical line after dot */}
                     {!isLast && (
-                        <div style={{
-                            position: "absolute",
-                            top: 18,
-                            bottom: -20,
-                            width: 2,
-                            backgroundColor: "#e8e6d9",
-                        }} />
+                        <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
                     )}
                 </div>
-
-                {/* Abort content */}
                 <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
-                    <div style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "2px 0",
-                    }}>
-                        <span style={{
-                            fontSize: 12,
-                            color: "#ef4444",
-                            fontWeight: 600,
-                            fontFamily: "'Figtree', system-ui, sans-serif",
-                        }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                        <span style={{ fontSize: 12, color: "#ef4444", fontWeight: 600, fontFamily: "'Figtree', system-ui, sans-serif" }}>
                             ⊗ Aborted by user
+                        </span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Error event type
+    if (event.type === 'error') {
+        return (
+            <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
+                <div style={{
+                    width: 20, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 0,
+                }}>
+                    <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
+                    <div style={{
+                        width: 10, height: 10, borderRadius: "50%", backgroundColor: "#f97316",
+                        border: "2px solid #faf9f7", boxShadow: "0 0 0 1px #e8e6d9", flexShrink: 0,
+                    }} />
+                    {!isLast && (
+                        <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
+                    )}
+                </div>
+                <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                        <span style={{ fontSize: 12, color: "#f97316", fontWeight: 600, fontFamily: "'Figtree', system-ui, sans-serif" }}>
+                            ⚠️ {event.content || 'Error occurred'}
                         </span>
                     </div>
                 </div>
@@ -1553,10 +1546,27 @@ const TimelineBranchItem = ({
                                     <div key={`${event.toolCallId}-${event.timestamp}-${idx}`} style={{ marginBottom: 8 }}>
                                         <SubAgentProgressItem
                                             event={event}
-                                            isLast={idx === branch.events.length - 1}
+                                            isLast={idx === branch.events.length - 1 && (!branch.childBranches || branch.childBranches.length === 0)}
                                         />
                                     </div>
                                 ))}
+
+                                {/* Render nested child branches */}
+                                {branch.childBranches && branch.childBranches.length > 0 && (
+                                    <div style={{ marginTop: 8 }}>
+                                        {branch.childBranches.map((child, idx) => (
+                                            <TimelineBranchItem
+                                                key={child.id}
+                                                branch={child}
+                                                isLast={idx === (branch.childBranches?.length || 0) - 1}
+                                                onToggleCollapse={onToggleCollapse}
+                                                onShowTooltip={onShowTooltip}
+                                                onHideTooltip={onHideTooltip}
+                                                onViewTimeline={onViewTimeline}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     )}
@@ -2204,7 +2214,7 @@ const SubAgentTimelineView = ({
 };
 
 export const AgentTimeline = ({
-    toolCalls, thought, isLive, currentNode, planSteps, planTitle, subAgentProgress, timelineBranches,
+    toolCalls, thought, isLive, currentNode, planSteps, planTitle, subAgentProgress, timelineBranches, generatedTitle
 }: AgentTimelineProps) => {
     const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
     const [collapsed, setCollapsed] = useState(false);
@@ -2220,7 +2230,6 @@ export const AgentTimeline = ({
     const buildTimelineBranches = useMemo((): Map<string, TimelineBranch> => {
         const branches = new Map<string, TimelineBranch>();
 
-        // Use provided timeline branches if available
         if (timelineBranches) {
             timelineBranches.forEach((branch, id) => {
                 branches.set(id, {
@@ -2231,12 +2240,11 @@ export const AgentTimeline = ({
             return branches;
         }
 
-        // Otherwise, build branches from subagent progress events
+        // Build flat branches from subagent progress events
         if (subAgentProgress) {
             subAgentProgress.forEach((events, toolCallId) => {
                 if (events.length === 0) return;
 
-                // Group events by timeline branch metadata
                 const branchGroups = new Map<string, SubAgentProgressEvent[]>();
 
                 events.forEach(event => {
@@ -2247,7 +2255,6 @@ export const AgentTimeline = ({
                         }
                         branchGroups.get(branchId)!.push(event);
                     } else if ((event as any).swarmId) {
-                        // Support for the new Swarm Memory synchronization events
                         const swarmId = (event as any).swarmId;
                         if (!branchGroups.has(swarmId)) {
                             branchGroups.set(swarmId, []);
@@ -2256,7 +2263,6 @@ export const AgentTimeline = ({
                     }
                 });
 
-                // Create timeline branches from grouped events
                 branchGroups.forEach((branchEvents, branchId) => {
                     if (branchEvents.length === 0) return;
 
@@ -2264,7 +2270,6 @@ export const AgentTimeline = ({
                     const lastEvent = branchEvents[branchEvents.length - 1];
                     const branchMetadata = firstEvent.timelineBranch || (firstEvent as any).swarmMetadata;
 
-                    // Determine branch status
                     let status: TimelineBranch['status'] = 'running';
                     if (lastEvent.type === 'complete' || (lastEvent as any).type === 'task_complete') status = 'completed';
                     else if (lastEvent.type === 'abort') status = 'aborted';
@@ -2273,6 +2278,7 @@ export const AgentTimeline = ({
                     const branch: TimelineBranch = {
                         id: branchId,
                         parentId: branchMetadata?.parentId || toolCallId,
+                        parentSessionKey: branchMetadata?.parentSessionKey,
                         agentType: branchMetadata?.agentType || (firstEvent as any).agentType || 'research',
                         events: branchEvents,
                         status,
@@ -2288,18 +2294,42 @@ export const AgentTimeline = ({
             });
         }
 
-        return branches;
+        // Nest branches by branchLevel for hierarchical display
+        const sorted = [...branches.values()]
+            .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+        const nested = new Map<string, TimelineBranch>();
+        const lastAtLevel: Record<number, TimelineBranch> = {};
+
+        sorted.forEach(branch => {
+            if (branch.branchLevel <= 1) {
+                const top = { ...branch, childBranches: [] };
+                nested.set(branch.id, top);
+                lastAtLevel[1] = top;
+            } else {
+                const parentLevel = branch.branchLevel - 1;
+                const parent = lastAtLevel[parentLevel];
+                if (parent) {
+                    if (!parent.childBranches) parent.childBranches = [];
+                    parent.childBranches.push(branch);
+                    lastAtLevel[branch.branchLevel] = branch;
+                } else {
+                    const orphan = { ...branch, childBranches: [] };
+                    nested.set(branch.id, orphan);
+                }
+            }
+        });
+
+        return nested;
     }, [subAgentProgress, timelineBranches, collapsedBranches]);
 
     // Build unified timeline with thoughts interspersed in chronological order
     const timelineItems = useMemo((): TimelineItem[] => {
         const items: TimelineItem[] = [];
 
-        // Filter hidden tools
         const hidden = ["write_file"];
         const visibleTools = toolCalls.filter(tc => !hidden.includes(tc.toolName));
 
-        // Add global thought at the beginning if present
         if (thought && thought.trim()) {
             items.push({
                 type: "thought",
@@ -2307,7 +2337,6 @@ export const AgentTimeline = ({
             });
         }
 
-        // Add plan if present
         if (planSteps && planSteps.length > 0) {
             items.push({
                 type: "plan",
@@ -2315,49 +2344,45 @@ export const AgentTimeline = ({
             });
         }
 
-        // Add tools and their timeline branches in chronological order
+        const toolNestedBranchIds = new Set<string>();
+
         visibleTools.forEach(tc => {
-            // Add tool-specific thought before the tool if it exists
             if (tc.thought && tc.thought.trim()) {
                 items.push({
                     type: "thought",
-                    data: {
-                        id: `thought-${tc.id}`,
-                        content: tc.thought,
-                        isLive: tc.status === "running"
-                    }
+                    data: { id: `thought-${tc.id}`, content: tc.thought, isLive: tc.status === "running" }
                 });
             }
 
-            // Add the tool
-            items.push({
-                type: "tool",
-                data: tc
-            });
+            items.push({ type: "tool", data: tc });
 
-            // Add timeline branches for this tool
             buildTimelineBranches.forEach(branch => {
                 if (branch.parentId === tc.id) {
-                    items.push({
-                        type: "timeline-branch",
-                        data: branch
-                    });
+                    items.push({ type: "timeline-branch", data: branch });
+                    toolNestedBranchIds.add(branch.id);
                 }
             });
 
-            // Add individual sub-agent progress events that don't belong to branches
             if (subAgentProgress && subAgentProgress.has(tc.id)) {
                 const progressEvents = subAgentProgress.get(tc.id) || [];
                 progressEvents.forEach(event => {
-                    // Only add events that don't have timeline branch metadata (standalone events)
                     if (!event.timelineBranch) {
-                        items.push({
-                            type: "subagent-progress",
-                            data: event
-                        });
+                        items.push({ type: "subagent-progress", data: event });
                     }
                 });
             }
+        });
+
+        // Add standalone branches (not nested under any tool) in chronological order
+        const standaloneBranches: TimelineBranch[] = [];
+        buildTimelineBranches.forEach(branch => {
+            if (!toolNestedBranchIds.has(branch.id)) {
+                standaloneBranches.push(branch);
+            }
+        });
+        standaloneBranches.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        standaloneBranches.forEach(branch => {
+            items.push({ type: "timeline-branch", data: branch });
         });
 
         return items;
@@ -2406,9 +2431,9 @@ export const AgentTimeline = ({
         ? currentNode
             ? currentNode.replace(/_/g, " ")
             : "Working"
-        : totalSteps > 0
+        : planTitle || generatedTitle || (totalSteps > 0
             ? `Completed · ${totalSteps} step${totalSteps !== 1 ? "s" : ""}`
-            : "Completed";
+            : "Completed");
 
     return (
         <motion.div

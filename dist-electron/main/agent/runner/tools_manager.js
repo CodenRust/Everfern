@@ -51,6 +51,10 @@ const mcp_registry_tool_1 = require("../tools/mcp-registry-tool");
 const create_artifact_1 = require("../tools/create-artifact");
 const edit_artifact_1 = require("../tools/edit-artifact");
 const visualize_1 = require("../tools/visualize");
+const pptx_generator_1 = require("../tools/pptx-generator");
+const batch_write_1 = require("../tools/batch-write");
+const messaging_1 = require("../tools/messaging");
+const scheduled_tasks_1 = require("../tools/scheduled-tasks");
 const mcp_1 = require("../tools/mcp");
 const navis_1 = require("../tools/navis/navis");
 const os = __importStar(require("os"));
@@ -89,7 +93,7 @@ const getBaseTools = (runner) => {
         console.error('[ToolsManager] Failed to create computer_use tool:', error instanceof Error ? error.message : String(error));
     }
     // Add remaining static tools
-    tools.push(system_files_1.systemFilesTool, memory_save_1.memorySaveTool, memory_search_1.memorySearchTool, web_search_1.webSearchTool, todo_write_1.todoWriteTool, ask_user_1.askUserTool, skill_tool_1.skillTool, present_files_1.presentFilesTool, website_crawl_1.websiteCrawlTool, ...(runner.client ? [(0, navis_1.createNavisTool)(runner.client)] : []), (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission), control_plane_1.allowFileDeleteTool, mcp_registry_tool_1.searchMcpRegistryTool, mcp_registry_tool_1.connectMcpServerTool, mcp_registry_tool_1.listMcpToolsTool, create_artifact_1.createArtifactTool, edit_artifact_1.editArtifactTool, create_artifact_1.createSiteTool, visualize_1.visualizeTool);
+    tools.push(system_files_1.systemFilesTool, memory_save_1.memorySaveTool, memory_search_1.memorySearchTool, web_search_1.webSearchTool, todo_write_1.todoWriteTool, ask_user_1.askUserTool, skill_tool_1.skillTool, present_files_1.presentFilesTool, website_crawl_1.websiteCrawlTool, ...(runner.client ? [(0, navis_1.createNavisTool)(runner.client)] : []), (0, control_plane_1.createWorkspaceRequestTool)(config.requestPermission), control_plane_1.allowFileDeleteTool, mcp_registry_tool_1.searchMcpRegistryTool, mcp_registry_tool_1.connectMcpServerTool, mcp_registry_tool_1.listMcpToolsTool, batch_write_1.batchWriteTool, (0, create_artifact_1.createArtifactTool)(runner), (0, edit_artifact_1.editArtifactTool)(runner), visualize_1.visualizeTool, pptx_generator_1.pptxGeneratorTool, messaging_1.sendDiscordMessageTool, messaging_1.sendTelegramMessageTool, scheduled_tasks_1.createScheduledTaskTool, scheduled_tasks_1.listScheduledTasksTool, scheduled_tasks_1.deleteScheduledTaskTool);
     // Add dynamically connected MCP tools
     const mcpTools = mcp_1.mcpRegistry.listAllTools().map(name => mcp_1.mcpRegistry.getTool(name)).filter(Boolean);
     tools.push(...mcpTools);

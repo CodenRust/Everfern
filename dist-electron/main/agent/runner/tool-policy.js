@@ -84,6 +84,24 @@ exports.builtInPolicies = {
             name: 'owner_only',
             priority: 80,
             check: (ctx) => {
+                // High-risk command patterns for terminal/bash
+                const dangerousCommands = [
+                    'del ', 'rm ', 'rmdir ', 'rd ', 'format ', 'mkfs ', 'dd ',
+                    '> /dev/', 'shred ', 'wipe ', 'mount ', 'umount '
+                ];
+                const isDangerousTerminal = (cmd) => {
+                    const lower = cmd.toLowerCase();
+                    return dangerousCommands.some(d => lower.includes(d));
+                };
+                // Smart check for terminal/bash tools
+                if (['terminal_execute', 'executePwsh', 'bash', 'exec'].includes(ctx.toolName)) {
+                    const command = String(ctx.args.command || ctx.args.code || ctx.args.script || '');
+                    if (isDangerousTerminal(command)) {
+                        console.log(`[ToolPolicy] Dangerous command detected: "${command}" → Requiring approval`);
+                        return 'owner_only';
+                    }
+                    return 'allow';
+                }
                 if (ownerOnlyTools.includes(ctx.toolName)) {
                     return 'owner_only';
                 }
@@ -134,8 +152,9 @@ function createDefaultPolicyPipeline() {
     pipeline.addPolicy(exports.builtInPolicies.createDenyPolicy([
         'rm_rf', 'format', 'drop_database', 'delete_all'
     ]));
+    // Updated: edit and write require approval, but terminal is now "smart" (only dangerous cmds)
     pipeline.addPolicy(exports.builtInPolicies.createOwnerOnlyPolicy([
-        'delete', 'bash', 'exec', 'apply_patch', 'system_files'
+        'edit', 'write', 'write_file', 'write_to_file', 'apply_patch', 'system_files', 'delete'
     ]));
     return pipeline;
 }

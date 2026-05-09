@@ -15,6 +15,7 @@ export type SubAgentProgressEventType =
   | 'screenshot' // Screenshot captured
   | 'complete'   // Sub-agent completed
   | 'abort'      // Sub-agent aborted
+  | 'error'      // Sub-agent error
   | 'branch_start'    // Timeline branch started
   | 'branch_update'   // Timeline branch progress update
   | 'branch_complete' // Timeline branch completed
@@ -67,6 +68,8 @@ export interface SubAgentProgressEvent {
   timelineBranch?: {
     /** Parent agent/tool call ID that spawned this subagent */
     parentId?: string;
+    /** Parent session key for nesting hierarchy */
+    parentSessionKey?: string;
     /** Agent type for visual styling */
     agentType?: 'web-explorer' | 'navis' | 'computer-use' | 'research' | 'coding-specialist' | 'data-analyst';
     /** Branch level in hierarchy (0 = root, 1 = first level subagent, etc.) */

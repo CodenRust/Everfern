@@ -39,7 +39,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createSiteTool = exports.createArtifactTool = void 0;
+exports.createArtifactTool = void 0;
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -111,7 +111,7 @@ function wrapInHtml(spec) {
 </body>
 </html>`;
 }
-exports.createArtifactTool = {
+const createArtifactTool = (runner) => ({
     name: 'create_artifact',
     description: 'Create HTML artifacts (dashboards, reports, charts, galleries) that display in the UI. ' +
         'The tool auto-injects Tailwind CSS, Figtree font, and Chart.js — DO NOT include these CDN links yourself. ' +
@@ -137,8 +137,19 @@ exports.createArtifactTool = {
     },
     async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
-            const sessionId = 'default';
-            const artifactsDir = ensureArtifactsDir(sessionId);
+            const sessionId = runner?.currentConversationId || 'default';
+            // If we have a project context, save to the project's .everfern/artifacts folder
+            // otherwise fallback to the global ~/.everfern/artifacts folder
+            let artifactsDir;
+            if (runner?.workspaceDir) {
+                artifactsDir = path.join(runner.workspaceDir, '.everfern', 'artifacts');
+                console.log(`[CreateArtifact] Saving to project directory: ${artifactsDir}`);
+            }
+            else {
+                artifactsDir = path.join(ARTIFACTS_DIR(), sessionId);
+                console.log(`[CreateArtifact] Saving to global artifacts directory: ${artifactsDir}`);
+            }
+            fs.mkdirSync(artifactsDir, { recursive: true });
             const htmlContent = wrapInHtml({
                 html: String(args.html || ''),
                 title: String(args.title || ''),
@@ -177,75 +188,5 @@ exports.createArtifactTool = {
             };
         }
     }
-};
-exports.createSiteTool = {
-    name: 'create_site',
-    description: 'Create full websites from templates. ' +
-        'Faster than manually creating files - uses templates for common site types.',
-    parameters: {
-        type: 'object',
-        properties: {
-            name: {
-                type: 'string',
-                description: 'Name/slug for the site.'
-            },
-            type: {
-                type: 'string',
-                enum: ['portfolio', 'blog', 'landing', 'dashboard', 'docs'],
-                description: 'Type of site to create.'
-            },
-            title: {
-                type: 'string',
-                description: 'Site title.'
-            },
-            description: {
-                type: 'string',
-                description: 'Site description.'
-            }
-        },
-        required: ['name', 'type']
-    },
-    async execute(args, onUpdate, emitEvent, toolCallId) {
-        try {
-            const sessionId = 'default';
-            const name = String(args.name || 'site');
-            const type = String(args.type || 'landing');
-            const title = String(args.title || name);
-            const description = String(args.description || '');
-            const sitesDir = path.join(os.homedir(), '.everfern', 'sites', sessionId, name);
-            fs.mkdirSync(sitesDir, { recursive: true });
-            const baseHtml = (content) => `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>body{font-family:'Inter',sans-serif}</style>
-</head>
-<body>${content}</body>
-</html>`;
-            const templates = {
-                blank: baseHtml(`<div class="min-h-screen flex items-center justify-center"><h1 class="text-2xl text-gray-400">Empty Page - Specialized design required</h1></div>`),
-                dashboard: baseHtml(`<div class="flex min-h-screen bg-gray-50"><div class="flex-1 p-8 text-center"><h1 class="text-xl text-gray-400">Dashboard Skeleton Generated. Please use a sub-agent to populate with real data and creative UI components.</h1></div></div>`),
-                landing: baseHtml(`<div class="min-h-screen flex items-center justify-center bg-gray-900 text-white"><h1 class="text-4xl font-bold">New Project: ${title}</h1></div>`)
-            };
-            const content = templates[type] || templates.landing;
-            const indexPath = path.join(sitesDir, 'index.html');
-            fs.writeFileSync(indexPath, content, 'utf-8');
-            onUpdate?.(`🌐 Created ${type} site: ${name}`);
-            return {
-                success: true,
-                output: `✅ Site created: **${name}** (${type})\n📁 Location: \`${sitesDir}\`\n🎁 Auto-presented to user.`,
-                data: { type: 'create_site', path: sitesDir, name, siteType: type }
-            };
-        }
-        catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return { success: false, output: `Failed to create site: ${msg}`, error: msg };
-        }
-    }
-};
+});
+exports.createArtifactTool = createArtifactTool;

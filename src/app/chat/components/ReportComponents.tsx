@@ -4,6 +4,8 @@ import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 
+import { InlineLink } from "./MarkdownComponents";
+
 // ── Report Link (inline trigger for report pane) ───────────────────────────────
 const ReportLink = ({ content, onOpen }: { content: string; onOpen: (label: string, path: string) => void }) => {
     const computerLinkPattern = /\[([^\]]+)\]\(computer:\/\/\/([^)]+)\)/g;
@@ -34,6 +36,43 @@ const ReportLink = ({ content, onOpen }: { content: string; onOpen: (label: stri
     );
 };
 
+// ── Helper for rendering labels with markdown links and basic styles ─────────
+const RenderLabel = ({ label }: { label: string }) => {
+    const inlineRender = (text: string, key: string): React.ReactNode => {
+        const parts: React.ReactNode[] = [];
+        let remaining = text;
+        let idx = 0;
+
+        const patterns: [RegExp, (m: RegExpMatchArray, k: string) => React.ReactNode][] = [
+            [/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/, (m, k) => <InlineLink key={k} href={m[2]} label={m[1]} />],
+            [/\*\*(.+?)\*\*/, (m, k) => <strong key={k} className="font-bold text-[#111111]">{inlineRender(m[1], k)}</strong>],
+            [/\*([^*]+)\*/, (m, k) => <em key={k} className="italic text-[#4a4846]">{inlineRender(m[1], k)}</em>],
+        ];
+
+        while (remaining.length > 0) {
+            let earliest = -1, bestMatch: RegExpMatchArray | null = null, bestRenderer: ((m: RegExpMatchArray, k: string) => React.ReactNode) | null = null;
+            
+            for (const [regex, renderer] of patterns) {
+                const match = remaining.match(regex);
+                if (match && match.index !== undefined) {
+                    if (earliest === -1 || match.index < earliest) {
+                        earliest = match.index; bestMatch = match; bestRenderer = renderer;
+                    }
+                }
+            }
+
+            if (!bestMatch || bestRenderer === null) { parts.push(remaining); break; }
+            if (earliest > 0) parts.push(remaining.slice(0, earliest));
+            parts.push(bestRenderer(bestMatch, `${key}-${idx++}`));
+            remaining = remaining.slice(earliest + bestMatch[0].length);
+        }
+
+        return <React.Fragment key={key}>{parts}</React.Fragment>;
+    };
+
+    return <>{inlineRender(label, "label")}</>;
+};
+
 // ── Report Preview Pane ────────────────────────────────────────────────────────
 const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose: () => void; label: string; path: string }) => {
     const isHtml = /\.(html?|htm)$/i.test(path);
@@ -52,20 +91,29 @@ const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose
                     {/* Header */}
                     <div className="px-7 py-5 border-b border-[#f0ede8] flex items-center justify-between bg-[#faf9f7]">
                         <div className="flex items-center gap-3.5">
-                            <div className="w-10 h-10 rounded-xl bg-[rgba(99,102,241,0.1)] flex items-center justify-center">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <div className="w-10 h-10 rounded-xl bg-[#f5f4f0] flex items-center justify-center border border-[#e8e6d9]">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#201e24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
                                     <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
                                 </svg>
                             </div>
                             <div>
-                                <h2 className="text-[17px] font-semibold text-[#201e24] m-0">{label}</h2>
+                                <h2 className="text-[17px] font-semibold text-[#201e24] m-0">
+                                    <RenderLabel label={label} />
+                                </h2>
                                 <p className="text-xs text-[#8a8886] mt-0.5 font-mono">{path.split(/[/\\]/).pop()}</p>
                             </div>
                         </div>
                         <div className="flex gap-2.5">
                             <button
-                                onClick={() => window.open(fileUrl, '_blank')}
+                                onClick={() => {
+                                    const api = (window as any).electronAPI;
+                                    if (api?.system?.openExternal) {
+                                        api.system.openExternal(fileUrl);
+                                    } else {
+                                        window.open(fileUrl, '_blank');
+                                    }
+                                }}
                                 className="px-4 py-2 rounded-[10px] border border-[#e0ded9] bg-transparent text-[#4a4846] text-[13px] font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-150 hover:bg-[#f4f3ef]"
                             >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -103,8 +151,15 @@ const ReportPane = ({ isOpen, onClose, label, path }: { isOpen: boolean; onClose
                                     <p className="text-[13px] text-[#8a8886]">Open in browser to view this file</p>
                                 </div>
                                 <button
-                                    onClick={() => window.open(fileUrl, '_blank')}
-                                    className="px-[22px] py-2.5 rounded-[10px] border-none bg-[#6366f1] text-white text-[13px] font-semibold cursor-pointer"
+                                    onClick={() => {
+                                        const api = (window as any).electronAPI;
+                                        if (api?.system?.openExternal) {
+                                            api.system.openExternal(fileUrl);
+                                        } else {
+                                            window.open(fileUrl, '_blank');
+                                        }
+                                    }}
+                                    className="px-[22px] py-2.5 rounded-[10px] border-none bg-[#201e24] text-white text-[13px] font-semibold cursor-pointer"
                                 >
                                     Open in Browser
                                 </button>
@@ -134,49 +189,82 @@ const ReportContainer = ({ content, onView }: ReportContainerProps) => {
     if (links.length === 0) return null;
 
     return (
-        <div className="flex flex-col gap-2.5 mt-3">
+        <div className="flex flex-col gap-4 mt-6">
             {links.map((link, idx) => {
                 const ext = link.path.split('.').pop()?.toUpperCase() || 'FILE';
+                const isCode = ['HTML', 'JSON', 'JS', 'TS', 'TSX', 'CSS', 'PY'].includes(ext);
+                
                 return (
                     <motion.div
                         key={idx}
-                        initial={{ opacity: 0, y: 8 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.25, delay: idx * 0.05 }}
-                        className="flex items-center justify-between px-[18px] py-[14px] rounded-2xl bg-[#f4f3ef] border border-[#e8e6d9] transition-all duration-200 hover:bg-[#eceae4] hover:border-[#ddd9ce]"
+                        transition={{ duration: 0.4, delay: idx * 0.08, ease: "easeOut" }}
+                        className="flex items-center justify-between px-8 py-6 rounded-[24px] bg-white border border-[#e8e6d9] shadow-[0_2px_12px_rgba(0,0,0,0.02)] transition-all duration-300 hover:border-[#b4b2af] hover:shadow-[0_12px_30px_rgba(0,0,0,0.06)] group"
+                        onClick={() => onView(link.label, link.path)}
                     >
-                        {/* Left — icon + label */}
-                        <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                            <div className="w-11 h-11 rounded-[10px] bg-[rgba(99,102,241,0.1)] flex items-center justify-center shrink-0">
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                    <polyline points="14 2 14 8 20 8" />
-                                    <line x1="16" y1="13" x2="8" y2="13" />
-                                    <line x1="16" y1="17" x2="8" y2="17" />
-                                    <polyline points="10 9 9 9 8 9" />
-                                </svg>
+                        {/* Left — Thumbnail & Info */}
+                        <div className="flex items-center gap-8 flex-1 min-w-0">
+                            {/* Premium Tilted Thumbnail */}
+                            <div className="relative w-[64px] h-[80px] shrink-0">
+                                <div className="absolute inset-0 bg-white border border-[#efefeb] rounded-xl transform -rotate-[6deg] translate-x-[-4px] translate-y-[2px] shadow-sm opacity-60"></div>
+                                <div className="absolute inset-0 bg-white border border-[#e8e6d9] rounded-xl shadow-md flex items-center justify-center overflow-hidden z-10 transition-transform duration-300 group-hover:scale-105">
+                                    {isCode ? (
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8a8886" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-70">
+                                            <polyline points="16 18 22 12 16 6" />
+                                            <polyline points="8 6 2 12 8 18" />
+                                        </svg>
+                                    ) : (
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8a8886" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-70">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                    )}
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="text-[14px] font-semibold text-[#201e24] whitespace-nowrap overflow-hidden text-ellipsis">
-                                    {link.label}
+
+                            {/* Label Content */}
+                            <div className="flex flex-col gap-1 min-w-0">
+                                <span className="text-[18px] font-bold text-[#111111] leading-tight tracking-tight truncate">
+                                    <RenderLabel label={link.label} />
                                 </span>
-                                <span className="text-[11px] text-[#8a8886] font-mono">
-                                    {ext}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[11px] text-[#86847F] font-bold uppercase tracking-widest leading-none">
+                                        {ext} REPORT
+                                    </span>
+                                    <div className="w-1 h-1 bg-[#DEDAD5] rounded-full" />
+                                    <span className="text-[13px] text-[#86847F] font-medium leading-none">
+                                        Generated File
+                                    </span>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Right — View button */}
-                        <button
-                            onClick={() => onView(link.label, link.path)}
-                            className="px-[18px] py-2 rounded-[10px] bg-transparent border-[1.5px] border-[#c9c6be] text-[#4a4846] text-[13px] font-semibold cursor-pointer flex items-center gap-1.5 transition-all duration-150 shrink-0 hover:bg-[#201e24] hover:border-[#201e24] hover:text-white"
-                        >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                <circle cx="12" cy="12" r="3" />
-                            </svg>
-                            View
-                        </button>
+                        {/* Right — Standardized Split Button */}
+                        <div className="flex items-center shrink-0">
+                            <div className="flex items-center bg-white border border-[#e8e6d9] rounded-xl h-[42px] shadow-sm hover:shadow-md transition-all duration-200">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onView(link.label, link.path);
+                                    }}
+                                    className="flex items-center gap-2.5 px-4 h-full border-r border-[#e8e6d9] text-[14px] font-bold text-[#111111] hover:bg-[#fafafa] active:bg-[#f0f0f0] transition-all"
+                                >
+                                    <div className="w-[18px] h-[18px] bg-[#111] rounded-[4px] flex items-center justify-center">
+                                        <span className="text-white text-[10px] font-black font-mono">V</span>
+                                    </div>
+                                    View
+                                </button>
+                                <button
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex items-center justify-center w-[38px] h-full text-[#888888] hover:text-[#111] hover:bg-[#fafafa] transition-all"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="6 9 12 15 18 9" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
                     </motion.div>
                 );
             })}

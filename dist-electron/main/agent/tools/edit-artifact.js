@@ -46,7 +46,7 @@ const artifact_parser_1 = require("./artifact-parser");
 const artifact_editor_1 = require("./artifact-editor");
 const artifacts_1 = require("../../store/artifacts");
 const cheerio = __importStar(require("cheerio"));
-exports.editArtifactTool = {
+const editArtifactTool = (runner) => ({
     name: 'edit_artifact',
     description: 'Edit existing HTML artifacts (dashboards, reports, charts, galleries). ' +
         'Reference artifacts naturally ("the artifact", "sales dashboard") or by exact filename. ' +
@@ -103,7 +103,8 @@ exports.editArtifactTool = {
     },
     async execute(args, onUpdate, emitEvent, toolCallId) {
         try {
-            const sessionId = 'default';
+            const sessionId = runner?.currentConversationId || 'default';
+            const projectPath = runner?.workspaceDir;
             const operations = {
                 reference: args.reference ? String(args.reference) : undefined,
                 filename: args.filename ? String(args.filename) : undefined,
@@ -136,7 +137,7 @@ exports.editArtifactTool = {
             const resolver = new artifact_resolver_1.ArtifactResolver();
             let artifactRef;
             try {
-                artifactRef = resolver.resolve(sessionId, operations.reference, operations.filename);
+                artifactRef = resolver.resolve(sessionId, operations.reference, operations.filename, projectPath);
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -147,7 +148,7 @@ exports.editArtifactTool = {
                 };
             }
             if (!artifactRef) {
-                const available = resolver.listArtifacts(sessionId);
+                const available = resolver.listArtifacts(sessionId, projectPath);
                 const availableList = available.length > 0
                     ? '\n\nAvailable artifacts:\n' + available.map(a => `- ${a.title || a.filename}`).join('\n')
                     : '\n\nNo artifacts found in this session.';
@@ -159,7 +160,11 @@ exports.editArtifactTool = {
             }
             // Phase 2: Loading and Parsing
             onUpdate?.(`📖 Loading artifact: ${artifactRef.title || artifactRef.filename}...`);
-            const htmlContent = (0, artifacts_1.readArtifact)(sessionId, artifactRef.filename);
+            // Determine which path to use (project vs global)
+            const isProjectArtifact = artifactRef.chatId === 'project';
+            const effectiveChatId = isProjectArtifact ? 'project' : sessionId;
+            const effectiveProjectPath = isProjectArtifact ? projectPath : undefined;
+            const htmlContent = (0, artifacts_1.readArtifact)(effectiveChatId, artifactRef.filename, effectiveProjectPath);
             if (!htmlContent) {
                 return {
                     success: false,
@@ -224,7 +229,7 @@ exports.editArtifactTool = {
                 };
             }
             // Write atomically
-            const writeResult = (0, artifacts_1.writeArtifactAtomic)(sessionId, artifactRef.filename, updatedHTML);
+            const writeResult = (0, artifacts_1.writeArtifactAtomic)(effectiveChatId, artifactRef.filename, updatedHTML, effectiveProjectPath);
             if (!writeResult.success) {
                 return {
                     success: false,
@@ -234,7 +239,7 @@ exports.editArtifactTool = {
                 };
             }
             // Update timestamp
-            (0, artifacts_1.updateArtifactTimestamp)(sessionId, artifactRef.filename);
+            (0, artifacts_1.updateArtifactTimestamp)(effectiveChatId, artifactRef.filename, effectiveProjectPath);
             // Update most recent artifact
             resolver.setMostRecent(sessionId, artifactRef.filename);
             // Phase 5: Feedback and Presentation
@@ -271,4 +276,5 @@ exports.editArtifactTool = {
             };
         }
     }
-};
+});
+exports.editArtifactTool = editArtifactTool;

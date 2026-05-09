@@ -89,7 +89,7 @@ Respond with JSON:
         const response = await client.chat({
             messages: [{ role: 'user', content: prompt }],
             responseFormat: 'json',
-            temperature: 0.1,
+            temperature: 0.3,
             maxTokens: 150
         });
         let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
@@ -140,7 +140,7 @@ Respond with JSON:
         const response = await client.chat({
             messages: [{ role: 'user', content: prompt }],
             responseFormat: 'json',
-            temperature: 0.1,
+            temperature: 0.3,
             maxTokens: 150
         });
         let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);

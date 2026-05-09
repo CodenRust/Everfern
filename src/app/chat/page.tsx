@@ -57,14 +57,17 @@ import ArtifactsPanel from './ArtifactsPanel';
 import ArtifactsList from './ArtifactsList';
 import PlanViewerPanel from './PlanViewerPanel';
 import TasksPanel from './TasksPanel';
+import ScheduledTasksPanel from './components/ScheduledTasksPanel';
+import ScheduledTaskModal from './components/ScheduledTaskModal';
 import SitePreview from './SitePreview';
 import SettingsPage from './SettingsPage';
 import CustomizeModal from './CustomizeModal';
 import FileArtifact from './FileArtifact';
+import FileViewerPane from './FileViewerPane';
 import VoiceAssistantUI from './VoiceAssistantUI';
-import { SurfaceCanvas } from './SurfaceCanvas';
+import SurfaceCanvas from './SurfaceCanvas';
 import ProjectsPage from '../components/ProjectsPage';
-import CreateProjectModal from '../components/CreateProjectModal';
+import IDEMode from '../../components/IDEMode';
 
 // Extracted components
 import {
@@ -142,8 +145,23 @@ export default function ChatPage() {
     const [showDirectoryModal, setShowDirectoryModal] = useState(false);
     const [showIntegrationSettings, setShowIntegrationSettings] = useState(false);
     const [showProjectsPage, setShowProjectsPage] = useState(false);
+    const [showCodingMode, setShowCodingMode] = useState(false);
     const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
+    const [showScheduledTaskModal, setShowScheduledTaskModal] = useState(false);
+    const [scheduledTasksRefreshTrigger, setScheduledTasksRefreshTrigger] = useState(0);
+
+    const handleSaveScheduledTask = async (task: { name?: string; description: string; cron: string; prompt: string; startsAt?: string; endsAt?: string }) => {
+        try {
+            await (window as any).electronAPI.scheduledTasks.save({
+                ...task,
+                projectId: folderContexts[0]?.path || null
+            });
+            setScheduledTasksRefreshTrigger(prev => prev + 1);
+        } catch (err) {
+            console.error('Failed to save scheduled task:', err);
+        }
+    };
     const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [randomGreeting, setRandomGreeting] = useState("");
@@ -390,7 +408,6 @@ export default function ChatPage() {
     const [currentPhase, setCurrentPhase] = useState<"triage" | "planning" | "execution" | "validation" | "completion" | undefined>(undefined);
     const [activeContextTab, setActiveContextTab] = useState<'Overview' | 'Resources' | 'Permissions' | 'History'>('Overview');
     const [instructionsExpanded, setInstructionsExpanded] = useState(true);
-    const [scheduledExpanded, setScheduledExpanded] = useState(false);
     const [contextExpanded, setContextExpanded] = useState(true);
     const [instructions, setInstructions] = useState('');
 
@@ -490,6 +507,8 @@ export default function ChatPage() {
     const toolCallMap = useRef<Map<string, string>>(new Map());
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const chatScrollRef = useRef<HTMLDivElement>(null);
+    const [isScrolledUp, setIsScrolledUp] = useState(false);
     const modelSelectorRef = useRef<HTMLDivElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioStreamRef = useRef<MediaStream | null>(null);
@@ -500,7 +519,7 @@ export default function ChatPage() {
     const isHandlingPlanRef = useRef(false);
 
     const isEmpty = messages.length === 0;
-    const isProjectLocked = folderContexts.length > 0 && projects.some(p => p.id === folderContexts[0].id || p.path === folderContexts[0].path);
+    const isProjectLocked = !isEmpty && folderContexts.length > 0 && projects.some(p => p.id === folderContexts[0].id || p.path === folderContexts[0].path);
     const displayName = (config?.userName || onboardingName || "there").toString();
 
     useEffect(() => {
@@ -643,6 +662,21 @@ export default function ChatPage() {
     }, [inputValue]);
 
     useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+    useEffect(() => {
+        const el = chatScrollRef.current;
+        if (!el) return;
+        const handleScroll = () => {
+            const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            setIsScrolledUp(distFromBottom > 160);
+        };
+        el.addEventListener('scroll', handleScroll, { passive: true });
+        return () => el.removeEventListener('scroll', handleScroll);
+    }, []);
+
+    const scrollToBottom = () => {
+        chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+    };
 
     // Debug: Log when activeUserQuestions changes
     useEffect(() => {
@@ -1003,6 +1037,8 @@ export default function ChatPage() {
                     setActiveSurface({ surfaceId: data.surfaceId, catalogId: data.catalogId, components: data.components });
                 } else if (data.action === 'delete') {
                     setActiveSurface(null);
+                } else if (data.action === 'coding_mode') {
+                    setShowCodingMode(data.active !== false);
                 }
             });
 
@@ -1085,7 +1121,7 @@ export default function ChatPage() {
             // HITL requests and other global listeners below...
 
             // Simplified mission complete handler without timeline
-            acpApi.onMissionComplete(({ thinkingDuration }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number } }) => {
+            acpApi.onMissionComplete(({ thinkingDuration, title }: { timeline?: any; steps?: any[]; thinkingDuration?: { startTime: number; endTime?: number; duration?: number }; title?: string }) => {
                 const receiveTime = Date.now();
 
                 // CRITICAL: Check __activeHitl flag BEFORE processing mission_complete
@@ -1114,6 +1150,7 @@ export default function ChatPage() {
                                 thinkingDuration: durationMs,
                                 timestamp: new Date(),
                                 toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                                generatedTitle: title,
                             };
                             setLiveToolCalls([]);
                             setStreamingToolCalls([]);
@@ -1193,6 +1230,7 @@ export default function ChatPage() {
                             thinkingDuration: durationMs,
                             timestamp: new Date(),
                             toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                            generatedTitle: title,
                         };
                         // Commit to messages list but keep streamingContent visible
                         // so the AI message doesn't disappear while the form is shown.
@@ -1226,6 +1264,7 @@ export default function ChatPage() {
                         thinkingDuration: durationMs,
                         timestamp: new Date(),
                         toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                        generatedTitle: title,
                     };
 
                     setStreamingContent("");
@@ -1355,6 +1394,7 @@ export default function ChatPage() {
                 toolCalls: m.toolCalls ? m.toolCalls.map(({ icon, ...rest }) => rest) : undefined
             })),
             provider: config?.provider || "everfern",
+            projectId: folderContexts.length > 0 ? folderContexts[0].id : undefined,
             createdAt: msgs[0].timestamp.toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -1367,7 +1407,7 @@ export default function ChatPage() {
                 (window as any).electronAPI?.chat?.generateTitle?.(id, firstUserMsg.content);
             }
         }
-    }, [activeConversationId, config?.provider]);
+    }, [activeConversationId, config?.provider, folderContexts]);
 
     const handlePlayVoiceResponse = useCallback(async (text: string) => {
         if (!voiceOutputEnabled || !voiceProvider || !voiceElevenlabsKey) return;
@@ -1400,12 +1440,12 @@ export default function ChatPage() {
         setMessages(newMessages);
         if (typeof overrideValue !== 'string') setInputValue("");
         setAttachments([]);
-        
+
         // Keep project context if it exists
         if (!isProject) {
             setFolderContexts([]);
         }
-        
+
         setIsLoading(true);
         setLiveToolCalls([]);
         setStreamingToolCalls([]);
@@ -1455,8 +1495,8 @@ export default function ChatPage() {
                     console.log('[Frontend] Current liveToolCalls length BEFORE adding:', liveToolCallsRef.current.length);
                     console.log('[Frontend] Current liveToolCalls:', liveToolCallsRef.current.map(tc => ({ id: tc.id, toolName: tc.toolName, status: tc.status })));
 
-                    if (toolName === 'ask_user_question') {
-                        console.log('[Frontend] Received ask_user_question tool_start:', JSON.stringify({ toolName, toolArgs }, null, 2));
+                    if (toolName === 'ask_user_question' || toolName === 'approve_actions') {
+                        console.log(`[Frontend] Received ${toolName} tool_start:`, JSON.stringify({ toolName, toolArgs }, null, 2));
                     }
                     if (toolName === 'computer_use') {
                         setIsComputerUseActive(true);
@@ -1494,8 +1534,8 @@ export default function ChatPage() {
                     console.log('[Frontend] Total tools AFTER adding:', liveToolCallsRef.current.length);
                     console.log('[Frontend] Updated liveToolCalls:', liveToolCallsRef.current.map(tc => ({ id: tc.id, toolName: tc.toolName, label: tc.label, status: tc.status })));
 
-                    // Handle ask_user_question tool start - questions are set in onToolCall
-                    if (toolName === 'ask_user_question') {
+                    // Handle ask_user_question or approve_actions tool start - questions are set in onToolCall
+                    if (toolName === 'ask_user_question' || toolName === 'approve_actions') {
                         // Set the flag immediately so mission_complete doesn't clear the form
                         activeUserQuestionRef.current = true;
                     }
@@ -1516,6 +1556,8 @@ export default function ChatPage() {
                         setActiveSurface({ surfaceId: data.surfaceId, catalogId: data.catalogId, components: data.components });
                     } else if (data.action === 'delete') {
                         setActiveSurface(null);
+                    } else if (data.action === 'coding_mode') {
+                        setShowCodingMode(data.active !== false);
                     }
                 });
 
@@ -1524,17 +1566,17 @@ export default function ChatPage() {
 
                 api.onToolCall((record: any) => {
                     // Debug: Log the tool call structure
-                    if (record.toolName === 'ask_user_question') {
-                        console.log('[Frontend] 📥 Received ask_user_question tool call');
+                    if (record.toolName === 'ask_user_question' || record.toolName === 'approve_actions') {
+                        console.log(`[Frontend] 📥 Received ${record.toolName} tool call`);
                         console.log('[Frontend] Tool call data:', JSON.stringify(record, null, 2));
                         console.log('[Frontend] Current activeUserQuestions length:', activeUserQuestions.length);
                         console.log('[Frontend] Current __activeUserQuestion flag:', (window as any).__activeUserQuestion);
                     }
 
-                    // CRITICAL: Handle ask_user_question FIRST, before checking existingId
+                    // CRITICAL: Handle ask_user_question or approve_actions FIRST, before checking existingId
                     // HITL approval sends tool_call without tool_start, so existingId won't exist
-                    if (record.toolName === 'ask_user_question' && record.result?.success && record.result?.data) {
-                        console.log('[Frontend] ✅ Processing ask_user_question (HITL or regular)');
+                    if ((record.toolName === 'ask_user_question' || record.toolName === 'approve_actions') && record.result?.success && record.result?.data) {
+                        console.log(`[Frontend] ✅ Processing ${record.toolName} (HITL or regular)`);
                         console.log('[Frontend] Result data:', JSON.stringify(record.result.data, null, 2));
 
                         // CRITICAL: Set flag IMMEDIATELY to prevent race condition with mission_complete
@@ -1588,10 +1630,10 @@ export default function ChatPage() {
                             activeUserQuestionRef.current = false;
                         }
 
-                        // Don't process further for ask_user_question - it doesn't need timeline display
-                        console.log('[Frontend] Returning early from ask_user_question handler');
+                        // Don't process further for ask_user_question or approve_actions - it doesn't need timeline display
+                        console.log(`[Frontend] Returning early from ${record.toolName} handler`);
                         return;
-                    } else if (record.toolName === 'ask_user_question') {
+                    } else if (record.toolName === 'ask_user_question' || record.toolName === 'approve_actions') {
                         console.error('[Frontend] ❌ ask_user_question tool_call missing required data');
                         console.error('[Frontend] Record:', JSON.stringify(record, null, 2));
                     }
@@ -1703,6 +1745,12 @@ export default function ChatPage() {
 
                     setExecutionPlan({ content });
                     setIsExecutionPlanPaneOpen(true);
+
+                    // Automatically close other containers to give space to the plan
+                    setContextExpanded(false);
+                    setProgressExpanded(false);
+                    setInstructionsExpanded(false);
+
                     if (activeConversationId) {
                         localStorage.setItem(`everfern_execution_plan_${activeConversationId}`, JSON.stringify({ content }));
                         localStorage.removeItem(`everfern_exec_pane_closed_${activeConversationId}`);
@@ -2140,20 +2188,20 @@ export default function ChatPage() {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
     }, [handleSend]);
 
-    const handleNewChat = () => { 
+    const handleNewChat = () => {
         setShowArtifacts(false);
         setShowSettings(false);
         setShowIntegrationSettings(false);
         setShowProjectsPage(false);
-        setMessages([]); 
-        setInputValue(""); 
-        setAttachments([]); 
-        activeConversationIdRef.current = null; 
-        setActiveConversationId(null); 
-        setCurrentPlan(null); 
-        setContextItems([]); 
-        setExecutionPlan(null); 
-        setIsExecutionPlanPaneOpen(false); 
+        setMessages([]);
+        setInputValue("");
+        setAttachments([]);
+        activeConversationIdRef.current = null;
+        setActiveConversationId(null);
+        setCurrentPlan(null);
+        setContextItems([]);
+        setExecutionPlan(null);
+        setIsExecutionPlanPaneOpen(false);
         // Clear live states
         setStreamingContent("");
         setStreamingThought("");
@@ -2166,17 +2214,20 @@ export default function ChatPage() {
         setMissionComplete(false);
         setActivePlanSteps(null);
         setActivePlanTitle(null);
+        setPanelTasks([]);
+        setShowTasksPanel(false);
+        setInstructions("");
     };
 
     const handleSelectConversation = async (id: string) => {
         if (!id) return;
-        
+
         setShowArtifacts(false);
         setShowSettings(false);
         setShowIntegrationSettings(false);
         setShowProjectsPage(false);
         setSidebarOpen(false); // auto-collapse on mobile/small screens
-        
+
         try {
             if ((window as any).electronAPI?.history?.load) {
                 const conv = await (window as any).electronAPI.history.load(id);
@@ -2193,9 +2244,29 @@ export default function ChatPage() {
                     setMissionComplete(false);
                     setActivePlanSteps(null);
                     setActivePlanTitle(null);
+                    setPanelTasks([]);
+                    setShowTasksPanel(false);
+                    setInstructions("");
 
                     activeConversationIdRef.current = id;
                     setActiveConversationId(id);
+
+                    // Restore project context
+                    if (conv.projectId) {
+                        // Find project in the current projects list
+                        // Note: projects state is updated every 5s, so it should be there
+                        const project = (projects || []).find((p: any) => p.id === conv.projectId);
+                        if (project) {
+                            setFolderContexts([{ id: project.id, path: project.path, name: project.name }]);
+                        } else {
+                            // Fallback if projects list hasn't loaded yet or project was deleted
+                            // We can't easily fetch it by ID here without a new IPC call,
+                            // so we just clear it for now or wait for projects to load.
+                            setFolderContexts([]);
+                        }
+                    } else {
+                        setFolderContexts([]);
+                    }
 
                     setMessages(conv.messages.map((m: any) => ({ id: m.id || crypto.randomUUID(), role: m.role, content: m.content, thought: m.thought, thinkingDuration: m.thinkingDuration, toolCalls: m.toolCalls, attachments: m.attachments || [], timestamp: new Date(conv.updatedAt) })));
                     setCurrentPlan(null);
@@ -2363,6 +2434,26 @@ export default function ChatPage() {
                 </AnimatePresence>
             </div>
 
+            {/* Code Mode Toggle Button */}
+            <button type="button"
+                onClick={() => setShowCodingMode(!showCodingMode)}
+                title={showCodingMode ? "Exit Coding Mode" : "Enable Coding Mode (IDE panel for code editing)"}
+                style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: showCodingMode ? "#1e1e1e" : "transparent",
+                    border: showCodingMode ? "1px solid #3e3e42" : "1px solid #e8e6d9",
+                    borderRadius: 14,
+                    color: showCodingMode ? "#ffffff" : "#8a8886",
+                    cursor: "pointer", padding: "6px 14px", fontSize: 13, fontWeight: 500,
+                    transition: "0.2s"
+                }}
+                onMouseEnter={e => { if (!showCodingMode) { e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.04)"; e.currentTarget.style.color = "#111111"; } }}
+                onMouseLeave={e => { if (!showCodingMode) { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#8a8886"; } }}
+            >
+                <CommandLineIcon width={15} height={15} />
+                {showCodingMode ? "Coding" : "Code"}
+            </button>
+
             <div style={{ position: 'relative' }}>
                 <button type="button"
                     onClick={() => !isProjectLocked && setShowProjectDropdown(!showProjectDropdown)}
@@ -2394,9 +2485,9 @@ export default function ChatPage() {
                             >
                                 No Project
                             </button>
-                            
+
                             {projects.length > 0 && <div style={{ height: 1, backgroundColor: '#f4f4f4', margin: '4px 0' }} />}
-                            
+
                             {projects.map(p => (
                                 <button
                                     key={p.id}
@@ -2736,9 +2827,9 @@ export default function ChatPage() {
             `}</style>
             <div style={{ height: "100vh", backgroundColor: "#f5f4f0", color: "#201e24", fontFamily: "var(--font-sans)", display: "flex", overflow: "hidden" }}>
                 <PermissionDialog />
-                <ArtifactsPanel isOpen={showArtifacts} onClose={() => { setShowArtifacts(false); setSelectedArtifactName(null); }} activeChatId={activeConversationId} selectedFileName={selectedArtifactName} />
+                <ArtifactsPanel isOpen={showArtifacts} onClose={() => { setShowArtifacts(false); setSelectedArtifactName(null); }} activeChatId={activeConversationId} selectedFileName={selectedArtifactName} projectPath={folderContexts[0]?.path} />
                 <PlanViewerPanel isOpen={showPlanViewer} onClose={() => setShowPlanViewer(false)} content={planViewerContent} onApprove={handleApprovePlan} />
-                <TasksPanel isOpen={showTasksPanel} onClose={() => setShowTasksPanel(false)} tasks={panelTasks} path={tasksFilePath} />
+
                 <VoiceAssistantUI
                     isOpen={showVoiceAssistant}
                     onClose={() => setShowVoiceAssistant(false)}
@@ -2787,7 +2878,7 @@ export default function ChatPage() {
                                     View Plan
                                 </button>
                             )}
-                            {/* Project Tasks button removed as it is now in the sidebar */}
+
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, WebkitAppRegion: "no-drag" } as any}>
                             <button type="button" style={{ position: "relative", background: "transparent", border: "none", color: "#73716e", cursor: "pointer", display: "flex", alignItems: "center", padding: 4 }} onMouseEnter={e => e.currentTarget.style.color = "#111111"} onMouseLeave={e => e.currentTarget.style.color = "#73716e"}>
@@ -2811,9 +2902,9 @@ export default function ChatPage() {
                                         setActiveConversationId(project.id);
                                         activeConversationIdRef.current = project.id;
                                         setFolderContexts([{ id: project.id, path: project.path, name: project.name }]);
-                                        setContextItems([{ 
-                                            id: crypto.randomUUID(), 
-                                            type: 'folder' as any, 
+                                        setContextItems([{
+                                            id: crypto.randomUUID(),
+                                            type: 'folder' as any,
                                             label: project.name,
                                             path: project.path
                                         } as any]);
@@ -2823,7 +2914,7 @@ export default function ChatPage() {
                             </div>
                         ) : (
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-                            <div style={{ flex: 1, overflowY: "auto", padding: "16px 0 32px" }}>
+                            <div ref={chatScrollRef} style={{ flex: 1, overflowY: "auto", padding: "16px 0 32px" }}>
                                 <div style={{ maxWidth: 800, margin: "0 auto", padding: "0 32px" }}>
 
                                     {/* ── Empty / Home State ── */}
@@ -3029,11 +3120,8 @@ export default function ChatPage() {
                                                 layout
                                                 style={{ marginBottom: 28, display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}
                                             >
-                                                <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8886", letterSpacing: "0.02em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase" }}>
-                                                    {msg.role === "assistant" && <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.6, filter: 'invert(1)' }} />}
-                                                    {msg.role === "user" ? "You" : "Fern"}
-                                                </div>
-                                                <div style={{ maxWidth: msg.role === "user" ? "80%" : "100%", padding: msg.role === "user" ? "12px 18px" : "0", borderRadius: msg.role === "user" ? 16 : 0, borderTopRightRadius: msg.role === "user" ? 4 : 0, background: msg.role === "user" ? "#f5f4f0" : "transparent", border: msg.role === "user" ? "1px solid #e8e6d9" : "none", fontSize: 15, lineHeight: 1.7 }}>
+
+                                                <div style={{ maxWidth: msg.role === "user" ? "80%" : "100%", padding: msg.role === "user" ? "12px 18px" : "0", borderRadius: msg.role === "user" ? 16 : 0, borderTopRightRadius: msg.role === "user" ? 4 : 0, background: msg.role === "user" ? "#f5f4f0" : "transparent", border: "none", fontSize: 15, lineHeight: 1.7 }}>
                                                     {msg.role === "user" ? (
                                                         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                                                             {msg.attachments && msg.attachments.length > 0 && (
@@ -3094,6 +3182,7 @@ export default function ChatPage() {
                                                                 currentPhase={currentPhase}
                                                                 currentNode={currentNode}
                                                                 subAgentProgress={subAgentProgress}
+                                                                generatedTitle={msg.generatedTitle}
                                                             />
                                                             {msg.stopped && (
                                                                 <div style={{
@@ -3194,10 +3283,7 @@ export default function ChatPage() {
                                         !(messages.length > 0 && messages[messages.length - 1].role === "assistant" && streamingContent && messages[messages.length - 1].content?.trim() === streamingContent?.trim())
                                     ) && (
                                         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 32, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8886", letterSpacing: "0.08em", marginBottom: 8, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
-                                                <Image unoptimized src="/images/logos/black-logo-withoutbg.png" alt="" width={14} height={14} style={{ opacity: 0.5, filter: 'invert(1)' }} />
-                                                Fern
-                                            </div>
+
                                             <div style={{ width: "100%" }}>
                                                 <AgentTimeline
                                                     key={activeConversationId || 'new'}
@@ -3291,6 +3377,59 @@ export default function ChatPage() {
                                     <div ref={messagesEndRef} />
                                 </div>
                             </div>
+
+                            {/* ── Progressive blur + morphing scroll-to-bottom button ── */}
+                            {!isEmpty && (
+                                <div className="relative pointer-events-none h-0">
+                                    {/* Progressive blur above the composer */}
+                                    <div
+                                        className="absolute bottom-0 left-0 right-0 pointer-events-none h-24 z-10"
+                                        style={{
+                                            background: 'linear-gradient(to bottom, transparent, rgba(255,255,255,0.98) 75%)',
+                                        }}
+                                    />
+                                    {/* Morphing scroll-to-bottom button */}
+                                    <AnimatePresence>
+                                        {isScrolledUp && (
+                                            <motion.button
+                                                key="scroll-to-bottom"
+                                                type="button"
+                                                onClick={() => { scrollToBottom(); }}
+                                                initial={{ opacity: 0, scale: 0.5, y: 20 }}
+                                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                exit={{ opacity: 0, scale: 0.8, y: 10, filter: 'blur(8px)' }}
+                                                transition={{
+                                                    type: 'spring',
+                                                    stiffness: 400,
+                                                    damping: 25,
+                                                }}
+                                                whileHover={{ scale: 1.15, backgroundColor: '#000000' }}
+                                                whileTap={{ scale: 0.9 }}
+                                                className="pointer-events-auto absolute left-1/2 -translate-x-1/2 z-20 w-11 h-11 rounded-full flex items-center justify-center cursor-pointer shadow-2xl backdrop-blur-md"
+                                                style={{
+                                                    bottom: 24,
+                                                    backgroundColor: '#111111',
+                                                    border: '1px solid rgba(255,255,255,0.15)',
+                                                    boxShadow: '0 8px 30px rgba(0,0,0,0.28)',
+                                                }}
+                                            >
+                                                <svg
+                                                    width={22}
+                                                    height={22}
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="#ffffff"
+                                                    strokeWidth={2.5}
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                >
+                                                    <path d="M12 5v14M5 12l7 7 7-7" />
+                                                </svg>
+                                            </motion.button>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            )}
 
                             {/* ── Non-empty bottom composer ── */}
                             {!isEmpty && (
@@ -3572,16 +3711,16 @@ export default function ChatPage() {
                         )}
 
                         {/* Right Sidebar — always-visible cards */}
-                        <div style={{ width: 260, flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto", padding: "16px 12px", gap: 10 }}>
+                        <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", overflowY: "auto", padding: "16px 16px", gap: 16 }}>
 
                             {/* Instructions card */}
-                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 10, overflow: "hidden", boxShadow: '0 1px 4px rgba(0,0,0,0.02)' }}>
                                 <button
                                     type="button"
                                     onClick={() => setInstructionsExpanded(!instructionsExpanded)}
-                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "none", border: "none", cursor: "pointer" }}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px", background: "none", border: "none", cursor: "pointer" }}
                                 >
-                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>Instructions</span>
+                                    <span style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", fontFamily: 'var(--font-sans)', letterSpacing: '0.01em' }}>Instructions</span>
                                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: instructionsExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
@@ -3596,13 +3735,13 @@ export default function ChatPage() {
                                             transition={{ duration: 0.2 }}
                                             style={{ overflow: "hidden" }}
                                         >
-                                            <div style={{ padding: "0 14px 14px" }}>
+                                            <div style={{ padding: "0 20px 20px" }}>
                                                 <textarea
                                                     value={instructions}
                                                     onChange={(e) => setInstructions(e.target.value)}
                                                     placeholder="Add tone, formatting, or rules to guide how EverFern works."
                                                     rows={3}
-                                                    style={{ width: "100%", resize: "none", border: "none", outline: "none", fontSize: 12, color: instructions ? "#374151" : "#9ca3af", lineHeight: 1.6, background: "transparent", fontFamily: "var(--font-sans)", fontStyle: instructions ? "normal" : "italic" }}
+                                                    style={{ width: "100%", resize: "none", border: "none", outline: "none", fontSize: 13, color: instructions ? "#374151" : "#9ca3af", lineHeight: 1.6, background: "transparent", fontFamily: "var(--font-sans)", fontStyle: instructions ? "normal" : "italic" }}
                                                 />
                                             </div>
                                         </motion.div>
@@ -3611,43 +3750,24 @@ export default function ChatPage() {
                             </div>
 
                             {/* Scheduled card */}
-                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
-                                <button
-                                    type="button"
-                                    onClick={() => setScheduledExpanded(!scheduledExpanded)}
-                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "none", border: "none", cursor: "pointer" }}
-                                >
-                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>Scheduled</span>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: scheduledExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
-                                    </div>
-                                </button>
-                                <AnimatePresence>
-                                    {scheduledExpanded && (
-                                        <motion.div
-                                            initial={{ height: 0, opacity: 0 }}
-                                            animate={{ height: "auto", opacity: 1 }}
-                                            exit={{ height: 0, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            style={{ overflow: "hidden" }}
-                                        >
-                                            <div style={{ padding: "0 14px 14px" }}>
-                                                <p style={{ fontSize: 12, color: "#9ca3af", margin: 0, fontStyle: "italic", lineHeight: 1.6 }}>Set up recurring tasks for this project.</p>
-                                            </div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
+                            <ScheduledTasksPanel
+                                projectId={folderContexts[0]?.path}
+                                onAddTask={() => setShowScheduledTaskModal(true)}
+                                refreshTrigger={scheduledTasksRefreshTrigger}
+                            />
+                            {/* Project Tasks card */}
+
+                            <TasksPanel tasks={panelTasks} path={tasksFilePath} />
+
 
                             {/* Context card */}
-                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                            <div style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 10, overflow: "hidden", boxShadow: '0 1px 4px rgba(0,0,0,0.02)' }}>
                                 <button
                                     type="button"
                                     onClick={() => setContextExpanded(!contextExpanded)}
-                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "none", border: "none", cursor: "pointer" }}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px", background: "none", border: "none", cursor: "pointer" }}
                                 >
-                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>Context</span>
+                                    <span style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", fontFamily: 'var(--font-sans)', letterSpacing: '0.01em' }}>Context</span>
                                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: contextExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
@@ -3662,7 +3782,7 @@ export default function ChatPage() {
                                             transition={{ duration: 0.2 }}
                                             style={{ overflow: "hidden" }}
                                         >
-                                            <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                                            <div style={{ padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
                                                 {/* Project context row */}
                                                 {folderContexts.length > 0 ? (
                                                     <div>
@@ -3746,26 +3866,26 @@ export default function ChatPage() {
                                     });
                                     const shouldShowApproveButton = !isLoading && !isPlanAlreadyApproved;
                                     return (
-                                        <motion.div key="exec-plan" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden" }}>
+                                        <motion.div key="exec-plan" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} style={{ backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, overflow: "hidden", minHeight: 480, width: "100%" }}>
                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: "12px 14px", borderBottom: '1px solid #f4f4f4' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                    <div style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <div style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                         {isLoading ? (
-                                                            <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><circle cx="12" cy="12" r="10" stroke="#c7d2fe" strokeWidth="4"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="#6366f1" stroke="none"/></svg>
+                                                            <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#201e24" strokeWidth="2"><circle cx="12" cy="12" r="10" stroke="#e8e6d9" strokeWidth="4"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="#201e24" stroke="none"/></svg>
                                                         ) : (
-                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#201e24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                                                         )}
                                                     </div>
-                                                    <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Execution Plan</span>
+                                                    <span style={{ fontSize: 13, fontWeight: 600, color: "#201e24" }}>Execution Plan</span>
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 6 }}>
                                                     {shouldShowApproveButton && (
-                                                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsExecutionPlanPaneOpen(false); if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true"); const msg = `[PLAN_APPROVED]\nI have reviewed and approved your execution plan. Please proceed with the execution as planned.`; setInputValue(msg); setTimeout(() => { const sendBtn = document.querySelector('button[title="Send"]') as HTMLButtonElement; if (sendBtn) sendBtn.click(); }, 100); }} style={{ fontSize: 11, fontWeight: 600, color: "#ffffff", backgroundColor: "#22c55e", padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>Approve</button>
+                                                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsExecutionPlanPaneOpen(false); if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true"); const msg = `[PLAN_APPROVED]\nI have reviewed and approved your execution plan. Please proceed with the execution as planned.`; setInputValue(msg); setTimeout(() => { const sendBtn = document.querySelector('button[title="Send"]') as HTMLButtonElement; if (sendBtn) sendBtn.click(); }, 100); }} style={{ fontSize: 11, fontWeight: 600, color: "#ffffff", backgroundColor: "#201e24", padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", boxShadow: "none" }}>Approve</button>
                                                     )}
                                                     <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsExecutionPlanPaneOpen(false); if (activeConversationId) localStorage.setItem(`everfern_exec_pane_closed_${activeConversationId}`, "true"); }} style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.05)', border: 'none', borderRadius: 6, cursor: 'pointer' }} title="Close"><XMarkIcon width={14} height={14} color="#6b7280" /></button>
                                                 </div>
                                             </div>
-                                            <div style={{ padding: "12px 14px", maxHeight: 280, overflowY: 'auto', fontSize: 12, fontFamily: 'SFMono-Regular, Consolas, monospace', color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                            <div style={{ padding: "12px 14px", maxHeight: 600, overflowY: 'auto', fontSize: 12, fontFamily: "'Figtree', system-ui, sans-serif", color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                                                 <MarkdownRenderer content={executionPlan.content} />
                                             </div>
                                         </motion.div>
@@ -3774,7 +3894,7 @@ export default function ChatPage() {
                             </AnimatePresence>
 
                             {/* Mission Progress card */}
-                            <MissionProgressCard 
+                            <MissionProgressCard
                                 timeline={missionTimeline}
                                 isRunning={isLoading && !missionComplete}
                                 isExpanded={progressExpanded}
@@ -3789,187 +3909,31 @@ export default function ChatPage() {
                 {integrationSettingsModalNode}
                 <DirectoryModal isOpen={showDirectoryModal} onClose={() => setShowDirectoryModal(false)} />
 
-                {/* Projects Feature is now rendered in main chat area */}
-                <CreateProjectModal 
-                    isOpen={showCreateProjectModal} 
-                    onClose={() => setShowCreateProjectModal(false)} 
-                    onCreated={(project) => {
-                        setShowCreateProjectModal(false);
-                        // ProjectsPage handles refreshing via polling
-                    }}
-                />
-
                 <CustomizeModal
                     isOpen={showCustomizeModal}
                     onClose={() => setShowCustomizeModal(false)}
                 />
+                <ScheduledTaskModal
+                    isOpen={showScheduledTaskModal}
+                    onClose={() => setShowScheduledTaskModal(false)}
+                    onSave={handleSaveScheduledTask}
+                />
 
-                {onboardingModalNode}
-
-                {/* Permission Modal */}
-                <AnimatePresence>
-                    {showPermissionModal && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.3 }}
-                            style={{ position: "fixed", inset: 0, zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,252,240,0.85)", backdropFilter: "blur(20px)" }}
-                        >
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.8, y: 50 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                                transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                                whileHover={{ boxShadow: '0 40px 80px -20px rgba(239, 68, 68, 0.15)' }}
-                                style={{ width: "100%", maxWidth: 460, backgroundColor: "#ffffff", border: "1px solid #fecaca", borderRadius: 28, padding: "52px 36px", textAlign: "center", boxShadow: "0 25px 60px -15px rgba(239, 68, 68, 0.2)" }}
-                            >
-                                <motion.div
-                                    initial={{ scale: 0, rotate: -180 }}
-                                    animate={{ scale: 1, rotate: 0 }}
-                                    transition={{ type: "spring", stiffness: 400, damping: 20, delay: 0.1 }}
-                                    style={{ width: 72, height: 72, borderRadius: 24, margin: "0 auto 28px", background: "linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.03) 100%)", border: "1px solid rgba(239, 68, 68, 0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}
-                                >
-                                    <motion.svg
-                                        width="36"
-                                        height="36"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="#ef4444"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        animate={{ scale: [1, 1.1, 1] }}
-                                        transition={{ repeat: Infinity, duration: 2 }}
-                                    >
-                                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                                    </motion.svg>
-                                </motion.div>
-                                <motion.h2
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: 0.15 }}
-                                    style={{ fontFamily: "var(--font-serif)", fontSize: 30, fontWeight: 500, margin: "0 0 14px", color: "#201e24" }}
-                                >
-                                    Fern needs permission
-                                </motion.h2>
-                                <motion.p
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: 0.2 }}
-                                    style={{ fontSize: 15, color: "#71717a", marginBottom: 36, lineHeight: 1.6 }}
-                                >
-                                    The AI requested to execute a system command or modify files on your computer.
-                                </motion.p>
-                                <motion.div
-                                    initial={{ opacity: 0, y: 15 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: 0.25 }}
-                                    style={{ display: "flex", gap: "14px", flexDirection: "column" }}
-                                >
-                                    <motion.button
-                                        onClick={() => { setShowPermissionModal(false); (window as any).electronAPI?.acp?.agentPermissionResponse?.(true); }}
-                                        whileHover={{ scale: 1.02, boxShadow: '0 8px 30px -10px rgba(0,0,0,0.3)' }}
-                                        whileTap={{ scale: 0.98 }}
-                                        style={{ width: "100%", padding: "20px", backgroundColor: "#201e24", color: "#ffffff", borderRadius: 20, fontWeight: 600, fontSize: 16, border: "none", cursor: "pointer", boxShadow: '0 4px 20px -5px rgba(0,0,0,0.2)' }}
-                                    >
-                                        Allow Access
-                                    </motion.button>
-                                    <motion.button
-                                        onClick={() => { setShowPermissionModal(false); (window as any).electronAPI?.acp?.agentPermissionResponse?.(false); }}
-                                        whileHover={{ scale: 1.02, backgroundColor: "#fef2f2", color: "#dc2626" }}
-                                        whileTap={{ scale: 0.98 }}
-                                        style={{ width: "100%", padding: "20px", backgroundColor: "transparent", color: "#71717a", borderRadius: 20, fontWeight: 500, fontSize: 16, border: "1px solid #e8e6d9", cursor: "pointer", transition: "all 0.2s" }}
-                                    >
-                                        Deny
-                                    </motion.button>
-                                </motion.div>
-                            </motion.div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Global Tooltip */}
-                <AnimatePresence>
-                    {tooltipState.visible && (
-                        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={{ duration: 0.15 }}
-                            style={{ position: 'fixed', top: tooltipState.y + 15, left: tooltipState.x + 15, backgroundColor: '#ffffff', color: '#201e24', padding: '6px 14px', borderRadius: '99px', fontSize: 12, fontWeight: 500, pointerEvents: 'none', zIndex: 9999, border: '1px solid #3A3A3A', whiteSpace: 'nowrap', maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {tooltipState.content}
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Motion Blur Cursor */}
-                {settingsMotionBlur && (
-                    <motion.div animate={{ x: mousePos.x - 150, y: mousePos.y - 150 }} transition={{ type: "spring", damping: 30, stiffness: 200, mass: 0.5 }}
-                        style={{ position: 'fixed', top: 0, left: 0, width: 300, height: 300, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 70%)', pointerEvents: 'none', zIndex: 0, filter: 'blur(40px)' }} />
+                {/* Coding Mode Panel */}
+                {showCodingMode && (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                        width: '50%',
+                        zIndex: 1000,
+                        backgroundColor: '#1e1e1e',
+                        borderLeft: '1px solid #333',
+                    }}>
+                        <IDEMode visible={showCodingMode} onClose={() => setShowCodingMode(false)} />
+                    </div>
                 )}
-
-                {/* JSON Viewer Modal */}
-                <AnimatePresence>
-                    {isJsonViewerOpen && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            onClick={() => setIsJsonViewerOpen(false)}
-                            style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}>
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                style={{ width: "90%", maxWidth: 900, maxHeight: "80vh", backgroundColor: "#1a1a1a", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                                {/* Header */}
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #333", backgroundColor: "#252525" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                                        <span style={{ padding: "4px 10px", backgroundColor: "#3b82f6", color: "#fff", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>{lastEventType}</span>
-                                        <span style={{ fontSize: 13, color: "#9ca3af" }}>Last Event JSON</span>
-                                        <span style={{ fontSize: 11, color: "#6b7280" }}>({lastEventJson.length} chars)</span>
-                                    </div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                        <button
-                                            onClick={() => { navigator.clipboard.writeText(lastEventJson); }}
-                                            style={{ padding: "6px 12px", backgroundColor: "#374151", color: "#fff", borderRadius: 6, fontSize: 12, fontWeight: 500, border: "none", cursor: "pointer" }}
-                                        >
-                                            Copy
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                const blob = new Blob([lastEventJson], { type: "application/json" });
-                                                const url = URL.createObjectURL(blob);
-                                                const a = document.createElement("a");
-                                                a.href = url;
-                                                a.download = `everfern-event-${lastEventType}-${Date.now()}.json`;
-                                                a.click();
-                                                URL.revokeObjectURL(url);
-                                            }}
-                                            style={{ padding: "6px 12px", backgroundColor: "#374151", color: "#fff", borderRadius: 6, fontSize: 12, fontWeight: 500, border: "none", cursor: "pointer" }}
-                                        >
-                                            Download
-                                        </button>
-                                        <button
-                                            onClick={() => setIsJsonViewerOpen(false)}
-                                            style={{ padding: "6px", backgroundColor: "transparent", color: "#9ca3af", borderRadius: 6, fontSize: 16, border: "none", cursor: "pointer" }}
-                                        >
-                                            ✕
-                                        </button>
-                                    </div>
-                                </div>
-                                {/* Content */}
-                                <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-                                    <pre style={{ margin: 0, fontSize: 11, fontFamily: "'JetBrains Mono', 'Fira Code', monospace", color: "#e5e5e5", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                        {lastEventJson}
-                                    </pre>
-                                </div>
-                                {/* Footer */}
-                                <div style={{ padding: "8px 16px", borderTop: "1px solid #333", fontSize: 11, color: "#6b7280", backgroundColor: "#252525" }}>
-                                    Press <kbd style={{ padding: "2px 6px", backgroundColor: "#374151", borderRadius: 4, color: "#fff" }}>Ctrl+Shift+J</kbd> or click outside to close
-                                </div>
-                            </motion.div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
             </div>
         </>
     );

@@ -28,6 +28,7 @@ export interface Message {
     toolCalls?: ToolCallDisplay[];
     attachments?: FileAttachment[];
     stopped?: boolean; // True if the agent was stopped by the user
+    generatedTitle?: string;
 }
 
 export interface FileAttachment {

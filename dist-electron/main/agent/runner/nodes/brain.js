@@ -40,7 +40,7 @@ Respond with JSON only:
             runner.client.chat({
                 messages: [{ role: 'user', content: prompt }],
                 responseFormat: 'json',
-                temperature: 0.1,
+                temperature: 0.3,
                 maxTokens: 120,
             }),
             timeoutPromise,
@@ -92,15 +92,6 @@ async function determineRouting(runner, state, responseContent, eventQueue) {
                 : JSON.stringify(lastUserMsg.content))
             : '';
         const conversationHistory = state.messages?.slice(-3) || []; // Last 3 messages for context
-        // Deterministic pre-check: force route_web_explorer for web-research tasks
-        // Skip if web explorer has already completed its work
-        const WEB_RESEARCH_PRE_CHECK = /\[RESEARCH TASK\]|\b(search|find|look up|research|browse|fetch|crawl)\b.*\b(online|web|internet|google|news|articles?|bots?|tools?|products?)\b|\b(compile.*list|top \d+|find the best|comprehensive list|compare.*options)\b/i;
-        if (!state.webExplorerComplete && (WEB_RESEARCH_PRE_CHECK.test(userRequest) || WEB_RESEARCH_PRE_CHECK.test(responseContent))) {
-            if (!state.currentIntent || state.currentIntent === 'research' || state.currentIntent === 'task') {
-                console.log('[Brain] Deterministic pre-check: web-research keywords detected → route_web_explorer');
-                return { decision: 'route_web_explorer', explanation: 'Deterministic pre-check: task contains web-research keywords' };
-            }
-        }
         // Emit analysis phase
         eventQueue?.push({
             type: 'thought',
@@ -112,7 +103,8 @@ async function determineRouting(runner, state, responseContent, eventQueue) {
                     ? `Because the triage intent is "research", the ONLY valid routing decisions are: "route_web_explorer", "continue_brain", or "complete_task". You MUST NOT route to "route_computer_use".\n`
                     : '')
             : '';
-        const prompt = `You are the EverFern Brain - the central orchestrator. Analyze the user request and current state to determine the best routing decision.
+        const prompt = `You are the EverFern Brain - the central orchestrator. Analyze the user request and determine the best routing decision.
+
 ${intentConstraint}
 USER REQUEST: "${userRequest.slice(0, 400)}"
 YOUR CURRENT RESPONSE: "${responseContent.slice(0, 300)}"
@@ -120,19 +112,21 @@ CONVERSATION CONTEXT: ${JSON.stringify(conversationHistory).slice(0, 200)}
 
 Available routing options:
 - "continue_brain"     — Continue handling this yourself with general capabilities (conversation, simple tasks)
-- "route_coding"       — Route to Coding Specialist for software development, code writing, debugging
+- "route_coding"       — Route to Coding Specialist for software development, code writing, debugging, PROJECT CREATION
 - "route_data_analyst" — Route to Data Analyst for data processing, CSV/Excel analysis, charts
-- "route_computer_use" — Route to Computer Use agent ONLY for GUI automation (clicking UI elements, desktop apps, filling forms on screen). NEVER use for web research or searching the internet.
-- "route_web_explorer" — Route to Web Explorer for ANY web research, searching the internet, finding information online, fetching URLs, looking up facts, news, products, bots, tools, etc.
+- "route_computer_use" — Route to Computer Use agent ONLY for DESKTOP GUI automation (clicking desktop UI elements, desktop apps, filling forms in native Windows/macOS/Linux apps). NEVER use for web research, searching the internet, visiting websites, or filling forms on websites.
+- "route_web_explorer" — Route to Web Explorer for ANY web research, searching the internet, finding information online, fetching URLs, looking up facts, news, products, bots, tools, AND for any task involving visiting/logging into/filling forms on websites (those should use navis, not computer_use).
 - "complete_task"      — Task is complete, no further routing needed
 
-CRITICAL ROUTING RULES:
-1. If the task involves searching the web, finding information, researching topics, looking up news, finding tools/bots/products → ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for web research.
-2. "route_computer_use" is ONLY for tasks that require clicking on desktop GUI elements, interacting with native apps, or automating screen interactions. It is NOT for web browsing or research.
-3. If web_search AND navis tools were already called successfully and returned comprehensive results, THEN consider "complete_task".
-4. Do NOT re-route to web_explorer if both web_search and navis have already completed successfully.
-5. NEVER run web_search yourself and then claim the task is complete — the web_explorer must fetch the actual page content from the URLs found.
-6. For ANY web research task (searching, finding information online, looking up websites), use "route_web_explorer" NOT "route_computer_use".
+CRITICAL ROUTING RULES FOR PROJECT CREATION:
+1. If user asks to "create a project", "build an app", "scaffold a website", "make a React app", "create a Next.js app" → ALWAYS use "route_coding" (Coding Specialist handles project creation)
+2. If user asks to "create a full-stack app", "build a website", "make a dashboard" → ALWAYS use "route_coding"
+3. For project creation tasks, the Coding Specialist has access to project_creator tool and can scaffold full applications
+4. "route_computer_use" is ONLY for tasks that require clicking on desktop GUI elements, interacting with native apps, or automating screen interactions. It is NOT for web browsing or research.
+5. If web_search AND navis tools were already called successfully and returned comprehensive results, THEN consider "complete_task".
+6. Do NOT re-route to web_explorer if both web_search and navis have already completed successfully.
+7. For ANY web research task (searching, finding information online, looking up websites), use "route_web_explorer" NOT "route_computer_use".
+8. CRITICAL: If the user asks to "open [a website/URL]", "go to [a website]", "login to [a website/dashboard]", "visit [a URL]", "navigate to [a URL]" — this is a WEB BROWSING task. ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for visiting websites or filling forms in browsers — those need navis browser automation, not computer_use screen automation.
 
 Respond with JSON only:
 {
@@ -144,7 +138,7 @@ Respond with JSON only:
         const response = await runner.client.chat({
             messages: [{ role: 'user', content: prompt }],
             responseFormat: 'json',
-            temperature: 0.2,
+            temperature: 0.3,
             maxTokens: 150,
         });
         const duration = Date.now() - startTime;
@@ -267,16 +261,6 @@ const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbo
                 ? firstUserMsg.content
                 : JSON.stringify(firstUserMsg.content))
             : '';
-        // Bug 7: Narrower regex for web research early pre-check
-        // Requires explicit web intent alongside broad nouns to avoid false positives in coding tasks
-        const WEB_RESEARCH_EARLY_CHECK = /\[RESEARCH TASK\]|\b(search|find|look up|research|browse|fetch|crawl)\b.*\b(online|web|internet|google|news|articles?|bots?|tools?|products?)\b|\b(compile.*list|top \d+|find the best|comprehensive list|compare.*options)\b/i;
-        const isResearchIntent = !state.currentIntent || state.currentIntent === 'research' || state.currentIntent === 'task';
-        // Bug 1, 6, 10: Early deterministic short-circuit logic
-        // Skip if: not research intent OR iterations > 0 OR returning from tool call OR returning from specialist
-        const isFirstEntry = (state.iterations === 0 || !state.iterations) && !state.brainToolsInFlight && !state.returningFromSpecialist;
-        const plan = state.decomposedTask;
-        const hasParallelPlan = plan && (plan.executionMode === 'parallel' || plan.executionMode === 'hybrid');
-        const isPlanApproval = originalRequest.includes('[PLAN_APPROVED]');
         // Strict Routing: If we just returned from a specialist, we MUST evaluate if they should continue
         // This prevents the brain from taking over and looping on tools itself.
         if (state.returningFromSpecialist) {
@@ -291,19 +275,6 @@ const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbo
                     returningFromSpecialist: null
                 };
             }
-        }
-        // SWARM FIX: Never use the deterministic early pre-check if we have a parallel/hybrid swarm plan or plan approval!
-        if (isFirstEntry && isResearchIntent && WEB_RESEARCH_EARLY_CHECK.test(originalRequest) && !hasParallelPlan && !isPlanApproval) {
-            console.log('[Brain] Early pre-check: web-research keywords in user request → route_web_explorer immediately');
-            eventQueue?.push({ type: 'thought', content: '🧭 BRAIN: Routing to web explorer (research task detected)' });
-            return {
-                messages: state.messages,
-                routingDecision: { decision: 'route_web_explorer', explanation: 'Early pre-check: research task detected before LLM call' },
-                completionSignal: null,
-                taskPhase: 'specialized_agent',
-                brainToolsInFlight: false,
-                returningFromSpecialist: null
-            };
         }
         const result = await integrator.wrapNode('brain', () => (0, agent_runtime_1.runAgentStep)(state, {
             runner,
@@ -349,6 +320,15 @@ const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbo
         }
         // If routing to a specialized agent, set the routing decision
         if (routingDecision && routingDecision.decision.startsWith('route_')) {
+            // Auto-enable Coding Mode UI when routing to coding specialist
+            if (routingDecision.decision === 'route_coding') {
+                eventQueue?.push({
+                    type: 'surface_action',
+                    action: 'coding_mode',
+                    active: true,
+                    surfaceId: 'coding-mode'
+                });
+            }
             return {
                 ...result,
                 routingDecision: routingDecision,

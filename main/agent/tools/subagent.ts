@@ -18,6 +18,10 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
                     type: 'string', 
                     description: 'The self-contained task description for the sub-agent.' 
                 },
+                agent_type: {
+                    type: 'string',
+                    description: 'The type of sub-agent to spawn: "web-explorer" for web research/browsing/website navigation, "coding-specialist" for code tasks, "data-analyst" for data analysis, "computer-use" for desktop GUI automation (NOT for websites). Default: "web-explorer" if the task involves visiting/looking up websites, otherwise "generic".'
+                },
                 agent_id: { 
                     type: 'string', 
                     description: 'Resume an existing agent by ID.' 
@@ -32,6 +36,7 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
 
         async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
             const task = args.task as string;
+            const agentType = (args.agent_type as string) || 'generic';
             const agentId = args.agent_id as string | undefined;
             const maxDepth = (args.max_depth as number) || 3;
 
@@ -43,7 +48,9 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
 
                 const options: SpawnOptions = {
                     parentSessionId: 'main', // Will be overridden by actual parent
+                    sponsorSessionKey: runner.currentAgentSessionKey,
                     task,
+                    agentType: agentType as any,
                     maxDepth
                 };
 

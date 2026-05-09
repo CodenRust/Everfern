@@ -18,7 +18,7 @@ interface SimpleFileNotificationProps {
 
 const AntigravityIcon = () => (
     <div className="w-[18px] h-[18px] bg-[#111] rounded-[5px] flex items-center justify-center shadow-sm">
-        <span className="text-white text-[10px] font-black font-sans leading-none" style={{ transform: 'translateY(-0.5px)' }}>A</span>
+        <span className="text-white text-[10px] font-black font-sans leading-none" style={{ transform: 'translateY(-0.5px)' }}>V</span>
     </div>
 );
 
@@ -63,7 +63,7 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
   onViewFile,
   onCopyContent,
   onOpenInEditor,
-  appName = "Antigravity",
+  appName = "View",
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -114,7 +114,7 @@ export const SimpleFileNotification: React.FC<SimpleFileNotificationProps> = ({
             <motion.div 
               animate={{ opacity: [0.4, 1, 0.4], scale: [1, 1.3, 1] }}
               transition={{ duration: 1.5, repeat: Infinity }}
-              className="absolute top-0 left-4 w-3.5 h-3.5 bg-blue-500 rounded-full border-[3px] border-[#F5F4F0] z-20 shadow-sm" 
+              className="absolute top-0 left-4 w-3.5 h-3.5 bg-[#201e24] rounded-full border-[3px] border-[#F5F4F0] z-20 shadow-sm" 
             />
           )}
       </div>

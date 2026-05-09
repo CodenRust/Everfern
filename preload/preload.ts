@@ -65,7 +65,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeOllamaListeners: () => {
       ipcRenderer.removeAllListeners('system:ollama-install-line');
       ipcRenderer.removeAllListeners('system:ollama-pull-line');
-    }
+    },
+    openExternal: (url: string) => ipcRenderer.invoke('system:open-external', url),
   },
 
   // ── System Tray ──────────────────────────────────────────────────
@@ -258,6 +259,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // ── Scheduled Tasks ─────────────────────────────────────────────
+  scheduledTasks: {
+    list:   (projectId?: string) => ipcRenderer.invoke('scheduled-tasks:list', projectId),
+    get:    (id: string)        => ipcRenderer.invoke('scheduled-tasks:get', id),
+    save:   (task: any)          => ipcRenderer.invoke('scheduled-tasks:save', task),
+    delete: (id: string)        => ipcRenderer.invoke('scheduled-tasks:delete', id),
+  },
+
   // ── Chat History ───────────────────────────────────────────────
   history: {
     list:   ()                => ipcRenderer.invoke('history:list'),
@@ -408,6 +417,7 @@ export type ElectronAPI = {
     ollamaPull:          (modelName: string) => Promise<{ success: boolean; code: number }>;
     onOllamaInstallLine: (cb: (data: { line: string, type: 'stdout'|'stderr' }) => void) => void;
     removeOllamaListeners: () => void;
+    openExternal: (url: string) => Promise<void>;
   };
   tray: {
     showWindow:   () => Promise<{ success: boolean }>;
@@ -475,6 +485,12 @@ export type ElectronAPI = {
     onToolCallChunk:       (cb: (data: { index: number; argumentsDelta: string }) => void) => void;
     onToolCallComplete:    (cb: (data: { index: number; toolName: string; arguments: Record<string, unknown> }) => void) => void;
     removeStreamListeners: () => void;
+  };
+  scheduledTasks: {
+    list:   (projectId?: string) => Promise<any[]>;
+    get:    (id: string)        => Promise<any | null>;
+    save:   (task: any)          => Promise<any>;
+    delete: (id: string)        => Promise<{ success: boolean; error?: string }>;
   };
   history: {
     list:   () => Promise<any[]>;

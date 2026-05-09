@@ -328,7 +328,7 @@ export function registerAgentHandlers() {
         } else if (streamEvent.type === 'subagent-progress') {
           safeSend('acp:sub-agent-progress', streamEvent.data);
         } else {
-          safeSend(`acp:${streamEvent.type}`, streamEvent);
+          safeSend(`acp:${streamEvent.type.replace(/_/g, '-')}`, streamEvent);
         }
       }
     } catch (error) {

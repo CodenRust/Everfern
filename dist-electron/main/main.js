@@ -458,8 +458,11 @@ async function autoStartEnabledBots() {
 const voice_overlay_1 = require("./voice-overlay");
 let voiceOverlayManager;
 const extension_server_1 = require("./lib/extension-server");
+const scheduler_service_1 = require("./integrations/scheduler-service");
 electron_1.app.whenReady().then(async () => {
     console.log('[App] App ready, starting initialization...');
+    // Start the scheduler service
+    scheduler_service_1.schedulerService.start();
     // Start the extension bridge server (localhost:4001)
     extension_server_1.bridgeServer.start();
     // ── Initialize Prompt Synchronization System ──────────────────────

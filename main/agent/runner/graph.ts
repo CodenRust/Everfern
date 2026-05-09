@@ -129,10 +129,10 @@ export const buildGraph = (
         saveHitlRequest(approvalRequest);
       }
 
-      // Emit tool_start for ask_user_question so frontend knows to expect a result
+      // Emit tool_start for approve_actions so frontend knows to expect a result
       eventQueue?.push({
         type: 'tool_start',
-        toolName: 'ask_user_question',
+        toolName: 'approve_actions',
         toolArgs: { questions: reasoning }
       });
 
@@ -140,7 +140,7 @@ export const buildGraph = (
       const hitlResult = await askUserTool.execute({
         questions: [
           {
-            question: `⚠️ High-risk action requires your approval\n\n${reasoning}\n\nActions to execute:\n${toolSummary}`,
+            question: `⚠️ Security Check Required\n\n${reasoning}\n\nActions to execute:\n${toolSummary}`,
             options: [
               '✅ Approve — proceed once', 
               '🚀 Approve & Allow Always — never ask for this specific command again',
@@ -155,7 +155,7 @@ export const buildGraph = (
       eventQueue?.push({
         type: 'tool_call',
         toolCall: {
-          toolName: 'ask_user_question',
+          toolName: 'approve_actions',
           args: { questions: (hitlResult.data as any)?.questions },
           result: hitlResult,
         },
@@ -165,8 +165,6 @@ export const buildGraph = (
         type: 'hitl_request',
         request: approvalRequest,
       } as any);
-
-      await new Promise(resolve => setTimeout(resolve, 300));
 
       runner.telemetry.info('HITL approval required — ending turn, user must respond');
       if (missionTracker) missionTracker.completeStep('step:hitl');

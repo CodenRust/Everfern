@@ -4,10 +4,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { IntegrationServiceConfig } from '../integrations/integration-service';
 
 describe('IntegrationConfig Interface', () => {
   it('should accept model and provider fields for telegram', () => {
-    const config = {
+    const config: Partial<IntegrationServiceConfig> = {
       telegram: {
         enabled: true,
         botToken: 'test-token',
@@ -24,12 +25,12 @@ describe('IntegrationConfig Interface', () => {
       },
     };
 
-    expect(config.telegram.model).toBe('claude-sonnet-4-20250514');
-    expect(config.telegram.provider).toBe('anthropic');
+    expect(config.telegram?.model).toBe('claude-sonnet-4-20250514');
+    expect(config.telegram?.provider).toBe('anthropic');
   });
 
   it('should accept model and provider fields for discord', () => {
-    const config = {
+    const config: Partial<IntegrationServiceConfig> = {
       telegram: {
         enabled: false,
         botToken: '',
@@ -45,12 +46,12 @@ describe('IntegrationConfig Interface', () => {
       },
     };
 
-    expect(config.discord.model).toBe('gpt-4o');
-    expect(config.discord.provider).toBe('openai');
+    expect(config.discord?.model).toBe('gpt-4o');
+    expect(config.discord?.provider).toBe('openai');
   });
 
   it('should allow optional model and provider fields', () => {
-    const config = {
+    const config: Partial<IntegrationServiceConfig> = {
       telegram: {
         enabled: true,
         botToken: 'test-token',
@@ -64,15 +65,15 @@ describe('IntegrationConfig Interface', () => {
       },
     };
 
-    expect(config.telegram.model).toBeUndefined();
-    expect(config.telegram.provider).toBeUndefined();
-    expect(config.discord.model).toBeUndefined();
-    expect(config.discord.provider).toBeUndefined();
+    expect(config.telegram?.model).toBeUndefined();
+    expect(config.telegram?.provider).toBeUndefined();
+    expect(config.discord?.model).toBeUndefined();
+    expect(config.discord?.provider).toBeUndefined();
   });
 
   it('should support backward compatibility with old configs', () => {
     // Simulate loading an old config without model/provider fields
-    const oldConfig = {
+    const oldConfig: any = {
       telegram: {
         enabled: true,
         botToken: 'old-token',
@@ -87,7 +88,7 @@ describe('IntegrationConfig Interface', () => {
     };
 
     // Merge with defaults (simulating loadIntegrationConfig behavior)
-    const defaults = {
+    const defaults: any = {
       telegram: {
         enabled: false,
         botToken: '',
@@ -102,7 +103,7 @@ describe('IntegrationConfig Interface', () => {
       },
     };
 
-    const merged = {
+    const merged: Partial<IntegrationServiceConfig> = {
       telegram: {
         ...defaults.telegram,
         ...oldConfig.telegram,
@@ -113,9 +114,9 @@ describe('IntegrationConfig Interface', () => {
       },
     };
 
-    expect(merged.telegram.enabled).toBe(true);
-    expect(merged.telegram.botToken).toBe('old-token');
-    expect(merged.telegram.model).toBeUndefined();
-    expect(merged.telegram.provider).toBeUndefined();
+    expect(merged.telegram?.enabled).toBe(true);
+    expect(merged.telegram?.botToken).toBe('old-token');
+    expect(merged.telegram?.model).toBeUndefined();
+    expect(merged.telegram?.provider).toBeUndefined();
   });
 });

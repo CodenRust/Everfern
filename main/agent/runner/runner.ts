@@ -55,6 +55,8 @@ export class AgentRunner {
   public skills: Skill[] = [];
   public completionGateRetries: number = 0;
   public currentConversationId?: string;
+  /** Session key of the currently executing sub-agent (set by subagent-spawn.ts for depth tracking). */
+  public currentAgentSessionKey?: string;
   public workspaceDir?: string;
   public projectId?: string;
   public telemetry: TelemetryLogger;
@@ -233,6 +235,7 @@ export class AgentRunner {
 
           const spawnedAgent = await spawner.spawn({
             parentSessionId: this.currentConversationId || 'default',
+            sponsorSessionKey: this.currentAgentSessionKey,
             task,
             agentType: agentType as any,
             context,
@@ -359,6 +362,7 @@ export class AgentRunner {
     conversationId?: string,
     systemPromptOverride?: string,
     projectId?: string,
+    isSubagent?: boolean,
   ): AsyncGenerator<StreamEvent, void, unknown> {
     if (model) this.client.setModel(model);
     this.telemetry.setAgentId(this.client.model);
@@ -502,8 +506,8 @@ export class AgentRunner {
         // Reconstruct full message history including tool calls/results
         const priorMessages = reconstructFullHistory(fullConversation.messages, userInput);
 
-        // Apply context window cap: limit to most recent 20 turns to prevent unbounded growth
-        const maxMessages = 20;
+        // Apply context window cap: limit to most recent 50 turns for better context retention
+        const maxMessages = 50;
         const limitedPriorMessages = priorMessages.slice(-maxMessages);
 
         // Replace initialMessages with: [system] + priorMessages + [new user msg]
@@ -531,19 +535,31 @@ export class AgentRunner {
     globalAbortManager.reset();
 
     // SWARM SYNC: Listen for sub-agent progress events to forward to the stream
-    const { getAgentEvents } = await import('../infra/agent-events');
-    const swarmEvents = getAgentEvents(convId);
-    
-    // onStream returns a cleanup function
-    const removeProgressListener = swarmEvents.onStream('subagent-progress', (event: any) => {
-        console.log(`[AgentRunner] 🛰️ Forwarding subagent progress: ${event.type}`);
-        eventQueue.push({
-            type: 'subagent-progress',
-            toolCallId: event.data.toolCallId,
-            timestamp: event.data.timestamp || new Date().toISOString(),
-            data: { ...event.data, type: event.type }
-        } as any);
-    });
+    // NOTE: Only the ROOT agent sets up this listener. Sub-agents pass isSubagent=true
+    // to prevent the infinite loop where a sub-agent's own listener re-catches events
+    // emitted by parentEvents.emit('subagent-progress', ...) in subagent-spawn.ts
+    // and re-pushes them to its own eventQueue → infinite cycle.
+    let removeProgressListener: (() => void) | undefined;
+    if (!isSubagent) {
+        const { getAgentEvents } = await import('../infra/agent-events');
+        const swarmEvents = getAgentEvents(convId);
+        
+        removeProgressListener = swarmEvents.onStream('subagent-progress', (event: any) => {
+            console.log(`[AgentRunner] 🛰️ Forwarding subagent progress: ${event.type}`);
+            eventQueue.push({
+                type: 'subagent-progress',
+                toolCallId: event.data.toolCallId,
+                timestamp: event.data.timestamp || new Date().toISOString(),
+                data: { ...event.data, type: event.type }
+            } as any);
+        });
+    }
+    // For sub-agents (isSubagent=true), the listener is NOT set up. This is correct
+    // because ALL sub-agents call parentEvents.emit('subagent-progress', ...) on
+    // getAgentEvents(parentSessionId) which is the ROOT's conversation ID. The ROOT's
+    // listener catches ALL sub-agent progress events and pushes them to the ROOT's
+    // eventQueue, which yields them to the IPC/frontend layer. No self-loop occurs
+    // because sub-agents don't listen on the agent-events stream.
 
     try {
         // Create shouldAbort callback for graph nodes
@@ -712,12 +728,27 @@ export class AgentRunner {
     // Calculate thinking duration
     const thinkingDuration = durationTracker.onMissionComplete();
 
+    // Generate a summary title for the timeline from task description
+    let timelineTitle: string = 'Working...';
+    try {
+      // Use task description directly instead of LLM call
+      const steps = missionTracker.getSteps().map(s => s.name).join(', ');
+      const taskDesc = typeof textInput === 'string' ? textInput.substring(0, 50) : 'Agent task';
+      timelineTitle = taskDesc.length > 5 ? taskDesc + '...' : 'Completed';
+      if (steps) {
+        timelineTitle = steps.split(',')[0]?.trim() || timelineTitle;
+      }
+    } catch (err) {
+      timelineTitle = 'Completed';
+    }
+
     // Emit final mission completion event with thinking duration
     yield {
       type: 'mission_complete',
       timeline: missionTracker.getTimeline(),
       steps: missionTracker.getSteps(),
       thinkingDuration,
+      title: timelineTitle,
     };
 
     // Reset duration tracker for next mission
@@ -725,7 +756,7 @@ export class AgentRunner {
 
     yield { type: 'done' };
     } finally {
-        removeProgressListener();
+        removeProgressListener?.();
         console.log('[AgentRunner] 🏁 Stream finished and listener removed');
     }
   }

@@ -212,4 +212,18 @@ export function registerSystemHandlers() {
       return { success: false, error: err.message };
     }
   });
-}
+
+  ipcMain.handle('system:open-external', async (_event, url: string) => {
+    if (url) {
+      try {
+        await shell.openExternal(url);
+        return { success: true };
+      } catch (err: any) {
+        console.error('[IPC] Error in system:open-external:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    return { success: false, error: 'No URL provided' };
+  });
+  }
+

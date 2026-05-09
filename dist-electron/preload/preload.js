@@ -37,7 +37,8 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         removeOllamaListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('system:ollama-install-line');
             electron_1.ipcRenderer.removeAllListeners('system:ollama-pull-line');
-        }
+        },
+        openExternal: (url) => electron_1.ipcRenderer.invoke('system:open-external', url),
     },
     // ── System Tray ──────────────────────────────────────────────────
     tray: {
@@ -220,6 +221,13 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:tool-call-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:tool-call-complete');
         },
+    },
+    // ── Scheduled Tasks ─────────────────────────────────────────────
+    scheduledTasks: {
+        list: (projectId) => electron_1.ipcRenderer.invoke('scheduled-tasks:list', projectId),
+        get: (id) => electron_1.ipcRenderer.invoke('scheduled-tasks:get', id),
+        save: (task) => electron_1.ipcRenderer.invoke('scheduled-tasks:save', task),
+        delete: (id) => electron_1.ipcRenderer.invoke('scheduled-tasks:delete', id),
     },
     // ── Chat History ───────────────────────────────────────────────
     history: {

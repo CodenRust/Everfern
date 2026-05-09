@@ -255,9 +255,22 @@ export class AIClient {
       this.openaiClient = new OpenAI({
         apiKey: this.config.apiKey || 'dummy-key',
         baseURL: this.config.baseUrl,
-        timeout: 60000, // 60 second timeout
+        timeout: 60000,
         maxRetries: 3,
-        defaultHeaders: headers
+        defaultHeaders: headers,
+        // Disable keep-alive to avoid Node 22 undici "invalid keep-alive header" errors
+        // from NVIDIA NIM and other providers that may send malformed keep-alive responses.
+        fetch: (url: RequestInfo | URL, init?: RequestInit) => {
+          const safeInit = { ...init, keepalive: false };
+          if (safeInit.headers) {
+            const h = safeInit.headers as Record<string, string>;
+            delete h['connection'];
+            delete h['Connection'];
+            delete h['keep-alive'];
+            delete h['Keep-Alive'];
+          }
+          return fetch(url, safeInit);
+        }
       });
     }
   }
@@ -389,9 +402,10 @@ export class AIClient {
       for (let i = 0; i < processedMessages.length; i++) {
         let m = processedMessages[i];
         
-        // Collect images from tool messages
+        // Collect images from tool messages and remove the internal tag
         if (m.role === 'tool' && m._images) {
           pendingImages.push(...m._images);
+          delete m._images;
         }
 
         if (m.role === 'assistant') {
@@ -560,6 +574,21 @@ export class AIClient {
       }
 
       processedMessages = syncMessages;
+    }
+
+    // NVIDIA NIM (and OpenAI-compatible HF-templated endpoints) require that the
+    // last message is NOT from the assistant, otherwise the server-side HF chat
+    // template raises: "Cannot set add_generation_prompt to True when the last
+    // message is from the assistant."
+    if (this.config.provider === 'nvidia' && processedMessages.length > 0) {
+      const last = processedMessages[processedMessages.length - 1];
+      if (last.role === 'assistant' && (!last.tool_calls || last.tool_calls.length === 0)) {
+        console.warn('[AIClient] Stripping trailing assistant message for NVIDIA NIM HF template compatibility');
+        processedMessages.pop();
+      }
+      if (processedMessages.length === 0) {
+        processedMessages.push({ role: 'user', content: 'Please continue.' });
+      }
     }
 
     return processedMessages;
@@ -822,15 +851,13 @@ export class AIClient {
         const enhancedOptions: RequestInit = {
           ...options,
           signal: controller.signal,
-          // Add keep-alive and proper headers for connection reuse
           headers: {
             ...options.headers,
-            'Connection': 'keep-alive',
-            'Keep-Alive': 'timeout=30, max=100',
             'User-Agent': 'EverFern/1.0'
           },
-          // Add keepalive flag for Node.js fetch
-          keepalive: true
+          // Disable keep-alive to avoid Node 22 undici "invalid keep-alive header" errors
+          // from NVIDIA NIM and other providers that may send malformed keep-alive responses.
+          keepalive: false
         };
 
         try {
@@ -901,7 +928,14 @@ export class AIClient {
 
   private async _openAICompatChat(req: ChatRequest): Promise<ChatResponse> {
     const isStreaming = !!req.onStreamChunk;
-    const processedMessages = this._mapMessagesForOpenAI(req.messages);
+    let processedMessages = this._mapMessagesForOpenAI(req.messages);
+
+    // Local providers (LM Studio, everfern) use HuggingFace chat templates which reject
+    // conversations ending with an assistant message.
+    const isLocalProvider = this.config.provider === 'lmstudio' || this.config.provider === 'everfern';
+    if (isLocalProvider) {
+      processedMessages = this._sanitizeForLocalProvider(processedMessages);
+    }
 
     const body: Record<string, unknown> = {
       model: req.model ?? this.config.model,
@@ -1128,7 +1162,13 @@ export class AIClient {
   }
 
   private async *_openAICompatStream(req: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
-    const messages = this._mapMessagesForOpenAI(req.messages);
+    let messages = this._mapMessagesForOpenAI(req.messages);
+
+    // Local providers use HuggingFace chat templates that reject trailing assistant messages.
+    const isLocalProvider = this.config.provider === 'lmstudio' || this.config.provider === 'everfern';
+    if (isLocalProvider) {
+      messages = this._sanitizeForLocalProvider(messages);
+    }
 
     const streamBody: Record<string, unknown> = {
       model: req.model ?? this.config.model,
@@ -1280,7 +1320,7 @@ export class AIClient {
 
   private async _openAICompatListModels(): Promise<string[]> {
     try {
-      const res = await fetch(`${this.config.baseUrl}/models`, { headers: this._oaiHeaders });
+      const res = await this._fetchWithRetry(`${this.config.baseUrl}/models`, { headers: this._oaiHeaders }, 2);
       if (!res.ok) return [];
       const data = await res.json();
       return (data.data as any[]).map((m: any) => m.id as string);
@@ -1376,7 +1416,7 @@ export class AIClient {
 
     console.log('[AIClient] Gemini Native Request:', JSON.stringify(body, null, 2).slice(0, 1000) + '...');
     const startTime = Date.now();
-    const res = await fetch(url, {
+    const res = await this._fetchWithRetry(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1489,8 +1529,15 @@ export class AIClient {
       }));
     }
 
-    const res = await fetch(`${this.config.baseUrl}/v1/messages`, {
-      method: 'POST', headers: this._anthropicHeaders, body: JSON.stringify(body),
+    const headers = this._anthropicHeaders;
+    if (isStreaming) {
+      headers['Accept'] = 'text/event-stream';
+    }
+
+    const res = await this._fetchWithRetry(`${this.config.baseUrl}/v1/messages`, {
+      method: 'POST', 
+      headers, 
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const txt = await res.text();
@@ -1585,6 +1632,7 @@ export class AIClient {
 
   private async *_anthropicStream(req: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
     const { system, msgs } = this._splitSystemMessages(req.messages);
+    const isStreaming = !!req.onStreamChunk;
     const body: Record<string, unknown> = {
       model: req.model ?? this.config.model,
       max_tokens: req.maxTokens ?? this.config.maxTokens,
@@ -1593,8 +1641,15 @@ export class AIClient {
     };
     if (system) body['system'] = system;
 
-    const res = await fetch(`${this.config.baseUrl}/v1/messages`, {
-      method: 'POST', headers: this._anthropicHeaders, body: JSON.stringify(body),
+    const headers = this._anthropicHeaders;
+    if (isStreaming) {
+      headers['Accept'] = 'text/event-stream';
+    }
+
+    const res = await this._fetchWithRetry(`${this.config.baseUrl}/v1/messages`, {
+      method: 'POST', 
+      headers, 
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`[anthropic] Stream HTTP ${res.status}`);
 
@@ -1639,8 +1694,31 @@ export class AIClient {
 
   // ── Ollama Native API ────────────────────────────────────────────
 
+  /**
+   * Strips trailing assistant messages from a message list.
+   * Required for local HuggingFace-templated endpoints (Ollama, LM Studio, EverFern)
+   * that raise: "Cannot set add_generation_prompt to True when the last message is from the assistant."
+   *
+   * Also drops assistant messages that have tool_calls but no following tool response
+   * when they end up at the tail — they are incomplete turns.
+   */
+  private _sanitizeForLocalProvider(messages: any[]): any[] {
+    let sanitized = [...messages];
+    // Drop trailing assistant messages
+    while (sanitized.length > 0 && sanitized[sanitized.length - 1].role === 'assistant') {
+      console.warn('[AIClient] Dropping trailing assistant message to satisfy local HF chat template.');
+      sanitized.pop();
+    }
+    // If we stripped everything, return at minimum a single user message
+    if (sanitized.length === 0) {
+      return [{ role: 'user', content: 'Continue.' }];
+    }
+    return sanitized;
+  }
+
   private _mapOllamaMessages(messages: ChatMessage[]): any[] {
-    return messages.map(m => {
+    const sanitized = this._sanitizeForLocalProvider(messages);
+    return sanitized.map((m: any) => {
       let content = '';
       const images: string[] = [];
 
@@ -1651,7 +1729,6 @@ export class AIClient {
           if (part.type === 'text') {
             content += part.text;
           } else if (part.type === 'image_url') {
-            // Ollama expects just the base64 string, not the data: URI
             const b64 = part.image_url.url.split(',')[1] || part.image_url.url;
             images.push(b64);
           }
@@ -1703,9 +1780,14 @@ export class AIClient {
       }));
     }
 
-    const res = await fetch(`${this.config.baseUrl}/api/chat`, {
+    const headers = this._ollamaHeaders;
+    if (isStreaming) {
+      headers['Accept'] = 'text/event-stream';
+    }
+
+    const res = await this._fetchWithRetry(`${this.config.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: this._ollamaHeaders,
+      headers,
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -1823,9 +1905,9 @@ export class AIClient {
   }
 
   private async *_ollamaStream(req: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
-    const res = await fetch(`${this.config.baseUrl}/api/chat`, {
+    const res = await this._fetchWithRetry(`${this.config.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: this._ollamaHeaders,
+      headers: { ...this._ollamaHeaders, 'Accept': 'text/event-stream' },
       body: JSON.stringify({
         model: req.model ?? this.config.model,
         messages: this._mapOllamaMessages(req.messages),
@@ -1884,7 +1966,7 @@ export class AIClient {
 
   private async _ollamaListModels(): Promise<string[]> {
     try {
-      const res = await fetch(`${this.config.baseUrl}/api/tags`, { headers: this._ollamaHeaders });
+      const res = await this._fetchWithRetry(`${this.config.baseUrl}/api/tags`, { headers: this._ollamaHeaders }, 2);
       if (!res.ok) return [];
       const data = await res.json();
       return (data.models || []).map((m: any) => m.name as string);

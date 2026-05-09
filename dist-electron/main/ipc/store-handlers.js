@@ -7,10 +7,10 @@ const plans_1 = require("../store/plans");
 const sites_1 = require("../store/sites");
 function registerStoreHandlers() {
     // Artifacts
-    electron_1.ipcMain.handle('artifacts:list', (_e, chatId) => (0, artifacts_1.listArtifacts)(chatId));
-    electron_1.ipcMain.handle('artifacts:read', (_e, chatId, filename) => (0, artifacts_1.readArtifact)(chatId, filename));
-    electron_1.ipcMain.handle('artifacts:write', (_e, chatId, filename, content) => (0, artifacts_1.writeArtifact)(chatId, filename, content));
-    electron_1.ipcMain.handle('artifacts:delete', (_e, chatId, filename) => (0, artifacts_1.deleteArtifact)(chatId, filename));
+    electron_1.ipcMain.handle('artifacts:list', (_e, chatId, projectPath) => (0, artifacts_1.listArtifacts)(chatId, projectPath));
+    electron_1.ipcMain.handle('artifacts:read', (_e, chatId, filename, projectPath) => (0, artifacts_1.readArtifact)(chatId, filename, projectPath));
+    electron_1.ipcMain.handle('artifacts:write', (_e, chatId, filename, content, projectPath) => (0, artifacts_1.writeArtifact)(chatId, filename, content, projectPath));
+    electron_1.ipcMain.handle('artifacts:delete', (_e, chatId, filename, projectPath) => (0, artifacts_1.deleteArtifact)(chatId, filename, projectPath));
     // Plans
     electron_1.ipcMain.handle('plans:list', (_e, chatId) => (0, plans_1.listPlans)(chatId));
     electron_1.ipcMain.handle('plans:read', (_e, chatId, filename) => (0, plans_1.readPlan)(chatId, filename));

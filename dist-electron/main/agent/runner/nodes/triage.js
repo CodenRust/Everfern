@@ -31,14 +31,8 @@ const createTriageNode = (runner, eventQueue, missionTracker, shouldAbort) => {
             }
             catch (connErr) {
                 const msg = connErr instanceof Error ? connErr.message : String(connErr);
-                const isConnectionError = msg.includes('ECONNREFUSED') || msg.includes('fetch failed') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND');
-                if (isConnectionError) {
-                    console.warn('[Triage] AI provider unreachable, using fallback classification:', msg);
-                    classification = (0, triage_1.classifyIntentFallback)(content, state.messages);
-                }
-                else {
-                    throw connErr;
-                }
+                console.warn('[Triage] AI classification failed:', msg);
+                classification = { intent: 'task', confidence: 0.5, reasoning: `Classification unavailable: ${msg}` };
             }
             runner.telemetry.info(`Intent identified: ${classification.intent.toUpperCase()} (${Math.round(classification.confidence * 100)}% confidence)`);
             if (classification.reasoning) {

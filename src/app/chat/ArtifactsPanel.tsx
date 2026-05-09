@@ -18,6 +18,7 @@ interface ArtifactsPanelProps {
     activeChatId?: string | null;
     onApprovePlan?: (planContent: string) => void;
     selectedFileName?: string | null;
+    projectPath?: string | null;
 }
 
 // Syntax highlighting helper
@@ -156,7 +157,7 @@ export const SyntaxHighlighter = ({ code, language }: { code: string; language: 
     );
 };
 
-export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprovePlan, selectedFileName }: ArtifactsPanelProps) {
+export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprovePlan, selectedFileName, projectPath }: ArtifactsPanelProps) {
     const [activeTab, setActiveTab] = useState<'inspiration' | 'yours' | 'sites' | 'terminal'>('yours');
     const [artifacts, setArtifacts] = useState<Artifact[]>([]);
     const [sites, setSites] = useState<{id: string; chatId: string; name: string; lastEdited: number; size: number; path: string}[]>([]);
@@ -226,7 +227,9 @@ export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprov
             }
             
             // Get the artifact path
-            const path = `~/.everfern/artifacts/${selectedCode.chatId}/${selectedCode.name}`;
+            const path = projectPath 
+                ? `${projectPath}/.everfern/artifacts/${selectedCode.name}`
+                : `~/.everfern/artifacts/${selectedCode.chatId}/${selectedCode.name}`;
             setArtifactPath(path);
         }
     }, [selectedCode]);
@@ -240,7 +243,7 @@ export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprov
 
     const handleSelectArtifactByName = async (name: string) => {
         if (!activeChatId) return;
-        const content = await (window as any).electronAPI.artifacts.read(activeChatId, name);
+        const content = await (window as any).electronAPI.artifacts.read(activeChatId, name, projectPath);
         if (content !== null) {
             setSelectedCode({ name, content, chatId: activeChatId });
             setActiveTab('yours');
@@ -249,7 +252,7 @@ export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprov
 
     const loadArtifacts = async () => {
         try {
-            const results = await (window as any).electronAPI.artifacts.list(); // No chatId = load all
+            const results = await (window as any).electronAPI.artifacts.list(undefined, projectPath); // No chatId = load all for this project/global
             // Filter out exec/ temp files (Python scripts, shell scripts, JS/TS temp files)
             const EXEC_EXTS = ['.py', '.sh', '.bat', '.ps1', '.js', '.ts', '.tsx', '.jsx'];
             const filtered = (results || []).filter((a: any) => {
@@ -301,7 +304,7 @@ export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprov
 
     const handleReadArtifact = async (chatId: string, name: string) => {
         try {
-            const content = await (window as any).electronAPI.artifacts.read(chatId, name);
+            const content = await (window as any).electronAPI.artifacts.read(chatId, name, projectPath);
             if (content) {
                 setSelectedCode({ name, content, chatId });
                 setSaveSuccess(false);
@@ -315,7 +318,7 @@ export default function ArtifactsPanel({ isOpen, onClose, activeChatId, onApprov
         if (!selectedCode) return;
         setIsSaving(true);
         try {
-            await (window as any).electronAPI.artifacts.write(selectedCode.chatId, selectedCode.name, editedContent);
+            await (window as any).electronAPI.artifacts.write(selectedCode.chatId, selectedCode.name, editedContent, projectPath);
             setSelectedCode(prev => prev ? { ...prev, content: editedContent } : null);
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 2000);

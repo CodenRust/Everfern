@@ -17,7 +17,7 @@ interface FileCreationNotificationProps {
 
 const AntigravityIcon = () => (
     <div className="w-[18px] h-[18px] bg-[#111] rounded-[4px] flex items-center justify-center">
-        <span className="text-white text-[10px] font-[900] font-mono">A</span>
+        <span className="text-white text-[10px] font-[900] font-mono">V</span>
     </div>
 );
 
@@ -128,7 +128,7 @@ export const FileCreationNotification: React.FC<FileCreationNotificationProps> =
                         className="flex items-center gap-[8px] px-[14px] h-full border-r border-[#e8e6d9] cursor-pointer"
                     >
                         <AntigravityIcon />
-                        <span className="text-[13px] font-semibold text-[#111]">Antigravity</span>
+                        <span className="text-[13px] font-semibold text-[#111]">View</span>
                     </div>
                     
                     <div 
@@ -155,7 +155,7 @@ export const FileCreationNotification: React.FC<FileCreationNotificationProps> =
                                 className="flex items-center gap-[10px] p-[8px_10px] rounded-[8px] cursor-pointer transition-colors duration-200 text-[13px] font-medium text-[#111] hover:bg-[#f5f4f0]"
                             >
                                 <AntigravityIcon />
-                                Open in Antigravity
+                                Open in View
                             </div>
                             <div 
                                 onClick={(e) => { e.stopPropagation(); setShowDropdown(false); }}

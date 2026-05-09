@@ -101,6 +101,7 @@
     "@livekit/components-react": "^2.9.20",
     "@mariozechner/pi-coding-agent": "^0.63.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openuidev/react-lang": "^0.2.4",
     "@types/sqlite3": "^3.1.11",
     "ansi-to-react": "^6.2.6",
     "better-sqlite3": "^12.8.0",

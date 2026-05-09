@@ -41,6 +41,7 @@ const path = __importStar(require("path"));
 const os_1 = require("os");
 const skills_loader_1 = require("./skills-loader");
 const projects_1 = require("../../store/projects/projects");
+const integration_service_1 = require("../../integrations/integration-service");
 class SystemPromptCache {
     cache = new Map();
     maxAge = 300000; // 5 minutes
@@ -153,6 +154,16 @@ async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sess
     const pluginsTable = '_All skills are loaded dynamically above._';
     // State Context
     const workspaceMounted = 'false';
+    // Project context - lookup before replacements for {{PROJECT_PATH}} injection
+    const targetProjectId = projectId || conversationId;
+    let projectPath = '';
+    let activeProject = null;
+    if (targetProjectId) {
+        activeProject = await projects_1.projectsStore.get(targetProjectId);
+        if (activeProject) {
+            projectPath = activeProject.path;
+        }
+    }
     // Replace placeholders
     let finalPrompt = promptMd
         .replace(/{{OS_INFO}}/g, osInfo)
@@ -163,6 +174,7 @@ async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sess
         .replace(/{{ARTIFACT_PATH}}/g, artifactPath)
         .replace(/{{SITE_PATH}}/g, sitePath)
         .replace(/{{UPLOADS_PATH}}/g, uploadsPath)
+        .replace(/{{PROJECT_PATH}}/g, projectPath || execPath)
         .replace(/{{SESSION_FILES}}/g, sessionRegistry)
         .replace(/{{SKILLS}}/g, skillsTable)
         .replace(/{{PLUGIN_SKILLS}}/g, pluginsTable)
@@ -171,24 +183,39 @@ async function getSlimSystemPromptAsync(platform = 'win32', conversationId, sess
         .replace(/{{USER_NAME}}/g, user.username)
         .replace(/{{USER_EMAIL}}/g, 'noreply@everfern.com')
         .replace(/{{OTHER_TOOLS}}/g, '');
+    // Inject Integration Status
+    try {
+        const botManager = integration_service_1.integrationService.getService('bot-integration-manager');
+        if (botManager) {
+            const discord = botManager.getPlatform('discord');
+            const telegram = botManager.getPlatform('telegram');
+            const statusContext = `
+## INTEGRATION STATUS
+- **Discord**: ${discord ? 'CONNECTED' : 'NOT CONFIGURED'}
+- **Telegram**: ${telegram ? 'CONNECTED' : 'NOT CONFIGURED'}
+
+If a service is NOT CONFIGURED, inform the user they can set it up in the Integration Settings if they wish to use it.
+`;
+            finalPrompt += "\n" + statusContext;
+        }
+    }
+    catch (err) {
+        console.error('[SystemPrompt] Failed to inject integration status:', err);
+    }
     // Add project-specific context if projectId or conversationId matches a project
-    const targetProjectId = projectId || conversationId;
-    if (targetProjectId) {
-        const project = await projects_1.projectsStore.get(targetProjectId);
-        if (project) {
-            console.log(`[SystemPrompt] 📁 Injecting context for project: ${project.name}`);
-            const projectContext = `
+    if (activeProject) {
+        console.log(`[SystemPrompt] 📁 Injecting context for project: ${activeProject.name}`);
+        const projectContext = `
 ## PROJECT CONTEXT
 You are currently working in the context of a specific project.
-- **Project Name**: ${project.name}
-- **Project Path**: ${project.path}
-${project.instructions ? `- **Project Instructions**: ${project.instructions}` : ''}
+- **Project Name**: ${activeProject.name}
+- **Project Path**: ${activeProject.path}
+${activeProject.instructions ? `- **Project Instructions**: ${activeProject.instructions}` : ''}
 
 When the user asks you to perform tasks, assume they are related to this project unless specified otherwise.
 Always prioritize the project path for file operations.
 `;
-            finalPrompt += "\n" + projectContext;
-        }
+        finalPrompt += "\n" + projectContext;
     }
     return finalPrompt;
 }
@@ -275,6 +302,7 @@ function getSlimSystemPrompt(platform = 'win32', conversationId, sessionCreatedP
         .replace(/{{ARTIFACT_PATH}}/g, artifactPath)
         .replace(/{{SITE_PATH}}/g, sitePath)
         .replace(/{{UPLOADS_PATH}}/g, uploadsPath)
+        .replace(/{{PROJECT_PATH}}/g, execPath)
         .replace(/{{SESSION_FILES}}/g, sessionRegistry)
         .replace(/{{SKILLS}}/g, skillsTable)
         .replace(/{{PLUGIN_SKILLS}}/g, pluginsTable)

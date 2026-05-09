@@ -43,64 +43,80 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 /**
- * Lists all artifacts, optionally filtering by chatId.
- * Scans ~/.everfern/artifacts/
+ * Lists all artifacts, optionally filtering by chatId and/or projectPath.
+ * Scans ~/.everfern/artifacts/ and projectPath/.everfern/artifacts/ if provided.
  */
-function listArtifacts(chatId) {
-    const artifactsDir = path.join(os.homedir(), '.everfern', 'artifacts');
-    if (!fs.existsSync(artifactsDir))
-        return [];
+function listArtifacts(chatId, projectPath) {
+    const globalArtifactsDir = path.join(os.homedir(), '.everfern', 'artifacts');
     const results = [];
-    // Scans all subdirectories (each represents a chatId) unless a specific one is provided
-    let dirsToScan = [];
-    try {
-        dirsToScan = chatId ? [chatId] : fs.readdirSync(artifactsDir).filter(f => fs.statSync(path.join(artifactsDir, f)).isDirectory());
-    }
-    catch (e) {
-        return [];
-    }
-    for (const dir of dirsToScan) {
-        const dirPath = path.join(artifactsDir, dir);
-        if (!fs.existsSync(dirPath))
-            continue;
-        let files = [];
+    // 1. Scan global artifacts
+    if (fs.existsSync(globalArtifactsDir)) {
+        let dirsToScan = [];
         try {
-            files = fs.readdirSync(dirPath).filter(f => fs.statSync(path.join(dirPath, f)).isFile());
+            dirsToScan = chatId ? [chatId] : fs.readdirSync(globalArtifactsDir).filter(f => fs.statSync(path.join(globalArtifactsDir, f)).isDirectory());
         }
         catch (e) {
-            continue;
+            // Continue to project scan
         }
-        for (const file of files) {
-            if (file.startsWith('.'))
-                continue; // ignore hidden files
-            const filePath = path.join(dirPath, file);
-            try {
-                const stats = fs.statSync(filePath);
-                // Read snippet securely
-                const content = fs.readFileSync(filePath, 'utf-8');
-                const snippet = content.slice(0, 500).trim();
-                results.push({
-                    id: file,
-                    chatId: dir,
-                    name: file,
-                    lastEdited: stats.mtimeMs,
-                    snippet,
-                    size: stats.size
-                });
-            }
-            catch (e) {
-                console.error(`Failed to read artifact ${filePath}:`, e);
-            }
+        for (const dir of dirsToScan) {
+            const dirPath = path.join(globalArtifactsDir, dir);
+            scanDir(dirPath, dir, results);
+        }
+    }
+    // 2. Scan project artifacts if projectPath is provided
+    if (projectPath) {
+        const projectArtifactsDir = path.join(projectPath, '.everfern', 'artifacts');
+        if (fs.existsSync(projectArtifactsDir)) {
+            scanDir(projectArtifactsDir, 'project', results);
         }
     }
     // Sort by newest first
     return results.sort((a, b) => b.lastEdited - a.lastEdited);
 }
+function scanDir(dirPath, chatId, results) {
+    if (!fs.existsSync(dirPath))
+        return;
+    let files = [];
+    try {
+        files = fs.readdirSync(dirPath).filter(f => fs.statSync(path.join(dirPath, f)).isFile());
+    }
+    catch (e) {
+        return;
+    }
+    for (const file of files) {
+        if (file.startsWith('.') || !file.endsWith('.html'))
+            continue; // ignore hidden files and non-html
+        const filePath = path.join(dirPath, file);
+        try {
+            const stats = fs.statSync(filePath);
+            // Read snippet securely
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const snippet = content.slice(0, 500).trim();
+            results.push({
+                id: file,
+                chatId: chatId,
+                name: file,
+                lastEdited: stats.mtimeMs,
+                snippet,
+                size: stats.size
+            });
+        }
+        catch (e) {
+            console.error(`Failed to read artifact ${filePath}:`, e);
+        }
+    }
+}
 /**
  * Reads the actual content of an artifact.
  */
-function readArtifact(chatId, filename) {
-    const filepath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+function readArtifact(chatId, filename, projectPath) {
+    let filepath;
+    if (projectPath && chatId === 'project') {
+        filepath = path.join(projectPath, '.everfern', 'artifacts', filename);
+    }
+    else {
+        filepath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+    }
     if (fs.existsSync(filepath)) {
         try {
             return fs.readFileSync(filepath, 'utf-8');
@@ -114,9 +130,15 @@ function readArtifact(chatId, filename) {
 /**
  * Writes (creates or overwrites) an artifact file.
  */
-function writeArtifact(chatId, filename, content) {
+function writeArtifact(chatId, filename, content, projectPath) {
     try {
-        const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+        let dir;
+        if (projectPath) {
+            dir = path.join(projectPath, '.everfern', 'artifacts');
+        }
+        else {
+            dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+        }
         if (!fs.existsSync(dir))
             fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, filename), content, 'utf-8');
@@ -129,9 +151,15 @@ function writeArtifact(chatId, filename, content) {
 /**
  * Deletes an artifact file.
  */
-function deleteArtifact(chatId, filename) {
+function deleteArtifact(chatId, filename, projectPath) {
     try {
-        const p = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+        let p;
+        if (projectPath && chatId === 'project') {
+            p = path.join(projectPath, '.everfern', 'artifacts', filename);
+        }
+        else {
+            p = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+        }
         if (fs.existsSync(p))
             fs.unlinkSync(p);
         return { success: true };
@@ -144,9 +172,15 @@ function deleteArtifact(chatId, filename) {
  * Writes an artifact file atomically using a temporary file.
  * This prevents corruption if the write operation is interrupted.
  */
-function writeArtifactAtomic(chatId, filename, content) {
+function writeArtifactAtomic(chatId, filename, content, projectPath) {
     try {
-        const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+        let dir;
+        if (projectPath) {
+            dir = path.join(projectPath, '.everfern', 'artifacts');
+        }
+        else {
+            dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+        }
         if (!fs.existsSync(dir))
             fs.mkdirSync(dir, { recursive: true });
         const filePath = path.join(dir, filename);
@@ -160,7 +194,13 @@ function writeArtifactAtomic(chatId, filename, content) {
     catch (e) {
         // Clean up temporary file if it exists
         try {
-            const dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+            let dir;
+            if (projectPath) {
+                dir = path.join(projectPath, '.everfern', 'artifacts');
+            }
+            else {
+                dir = path.join(os.homedir(), '.everfern', 'artifacts', chatId);
+            }
             const filePath = path.join(dir, filename);
             const tempPath = `${filePath}.tmp`;
             if (fs.existsSync(tempPath)) {
@@ -176,9 +216,15 @@ function writeArtifactAtomic(chatId, filename, content) {
 /**
  * Updates the last modified timestamp of an artifact file.
  */
-function updateArtifactTimestamp(chatId, filename) {
+function updateArtifactTimestamp(chatId, filename, projectPath) {
     try {
-        const filePath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+        let filePath;
+        if (projectPath && chatId === 'project') {
+            filePath = path.join(projectPath, '.everfern', 'artifacts', filename);
+        }
+        else {
+            filePath = path.join(os.homedir(), '.everfern', 'artifacts', chatId, filename);
+        }
         if (!fs.existsSync(filePath)) {
             return { success: false, error: 'Artifact file not found' };
         }

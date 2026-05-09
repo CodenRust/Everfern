@@ -22,6 +22,10 @@ function adaptTool(definition, executor, customName) {
     // Enhance descriptions to enforce engineering standards from SYSTEM_PROMPT
     if (name === 'read') {
         description = `[EXPLORE-FIRST] ${description} Mandatory before any edit. For large files, use start_line/end_line to maintain context efficiency.`;
+        if (parameters.properties) {
+            parameters.properties.start_line = { type: 'number', description: 'Start line to read (1-indexed, inclusive)' };
+            parameters.properties.end_line = { type: 'number', description: 'End line to read (1-indexed, inclusive)' };
+        }
     }
     else if (name === 'edit') {
         description = `[SURGICAL-EDIT] ${description} ALWAYS PREFERRED over 'write' for existing files. Identify exact lines to change and provide minimal targeted diffs.`;
@@ -66,6 +70,37 @@ function adaptTool(definition, executor, customName) {
     };
 }
 let loadedCodingTools = null;
+// File read cache: path → { content, mtime }
+const fileReadCache = new Map();
+// Wrap executor with caching for read operations
+function withReadCache(executor) {
+    return async (toolCallId, params) => {
+        const path = params.path;
+        if (!path)
+            return executor(toolCallId, params);
+        try {
+            const fs = require('fs');
+            const stat = fs.statSync(path);
+            const cached = fileReadCache.get(path);
+            if (cached && cached.mtime === stat.mtimeMs) {
+                return { content: [{ type: 'text', text: cached.content }] };
+            }
+            const result = await executor(toolCallId, params);
+            if (result.content && !result.isError) {
+                const content = Array.isArray(result.content)
+                    ? result.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+                    : '';
+                if (content) {
+                    fileReadCache.set(path, { content, mtime: stat.mtimeMs });
+                }
+            }
+            return result;
+        }
+        catch (err) {
+            return executor(toolCallId, params);
+        }
+    };
+}
 async function getPiCodingTools() {
     if (loadedCodingTools)
         return loadedCodingTools;
@@ -74,7 +109,7 @@ async function getPiCodingTools() {
     const loader = new Function('return import("@mariozechner/pi-coding-agent")');
     const m = await loader();
     loadedCodingTools = [
-        adaptTool(m.readToolDefinition, m.readTool.execute),
+        adaptTool(m.readToolDefinition, withReadCache(m.readTool.execute)),
         adaptTool(m.writeToolDefinition, m.writeTool.execute),
         adaptTool(m.editToolDefinition, m.editTool.execute),
         adaptTool(m.findToolDefinition, m.findTool.execute),

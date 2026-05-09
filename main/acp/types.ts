@@ -135,6 +135,8 @@ export interface Conversation {
   messages: ChatMessage[];
   provider: ProviderType;
   model?: string;
+  projectId?: string;
+  projectName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +146,8 @@ export interface ConversationSummary {
   title: string;
   provider: ProviderType;
   model?: string;
+  projectId?: string;
+  projectName?: string;
   messageCount: number;
   createdAt: string;
   updatedAt: string;

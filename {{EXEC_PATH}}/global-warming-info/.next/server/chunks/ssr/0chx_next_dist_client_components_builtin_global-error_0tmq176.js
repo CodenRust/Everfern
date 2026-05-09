@@ -1,0 +1,3 @@
+module.exports=[38636,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(96848);a.n(d("[project]/Downloads/EverFern/everfern-desktop/apps/desktop/node_modules/next/dist/client/components/builtin/global-error.js <module evaluation>"))},91076,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(96848);a.n(d("[project]/Downloads/EverFern/everfern-desktop/apps/desktop/node_modules/next/dist/client/components/builtin/global-error.js"))},48857,a=>{"use strict";a.i(38636);var b=a.i(91076);a.n(b)},97456,a=>{a.n(a.i(48857))}];
+
+//# sourceMappingURL=0chx_next_dist_client_components_builtin_global-error_0tmq176.js.map

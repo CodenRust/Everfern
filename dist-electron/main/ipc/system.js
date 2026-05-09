@@ -227,4 +227,17 @@ function registerSystemHandlers() {
             return { success: false, error: err.message };
         }
     });
+    electron_1.ipcMain.handle('system:open-external', async (_event, url) => {
+        if (url) {
+            try {
+                await electron_1.shell.openExternal(url);
+                return { success: true };
+            }
+            catch (err) {
+                console.error('[IPC] Error in system:open-external:', err);
+                return { success: false, error: err.message };
+            }
+        }
+        return { success: false, error: 'No URL provided' };
+    });
 }

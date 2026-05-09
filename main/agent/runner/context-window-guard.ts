@@ -69,7 +69,7 @@ export class ContextWindowGuard {
             modelContextWindow: maxTokens,
             warningThreshold: customConfig?.warningThreshold ?? 0.75,
             hardBlockThreshold: customConfig?.hardBlockThreshold ?? 0.90,
-            safetyMargin: customConfig?.safetyMargin ?? 0.20
+            safetyMargin: customConfig?.safetyMargin ?? 0.10
         };
     }
 

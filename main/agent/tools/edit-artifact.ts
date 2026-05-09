@@ -13,7 +13,7 @@ import { ArtifactEditor, type EditArtifactArgs } from './artifact-editor';
 import { readArtifact, writeArtifactAtomic, updateArtifactTimestamp } from '../../store/artifacts';
 import * as cheerio from 'cheerio';
 
-export const editArtifactTool: AgentTool = {
+export const editArtifactTool = (runner?: any): AgentTool => ({
   name: 'edit_artifact',
   description:
     'Edit existing HTML artifacts (dashboards, reports, charts, galleries). ' +
@@ -78,7 +78,9 @@ export const editArtifactTool: AgentTool = {
     toolCallId?: string
   ): Promise<ToolResult> {
     try {
-      const sessionId = 'default';
+      const sessionId = runner?.currentConversationId || 'default';
+      const projectPath = runner?.workspaceDir;
+      
       const operations: EditArtifactArgs = {
         reference: args.reference ? String(args.reference) : undefined,
         filename: args.filename ? String(args.filename) : undefined,
@@ -117,7 +119,7 @@ export const editArtifactTool: AgentTool = {
 
       let artifactRef;
       try {
-        artifactRef = resolver.resolve(sessionId, operations.reference, operations.filename);
+        artifactRef = resolver.resolve(sessionId, operations.reference, operations.filename, projectPath);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
@@ -128,7 +130,7 @@ export const editArtifactTool: AgentTool = {
       }
 
       if (!artifactRef) {
-        const available = resolver.listArtifacts(sessionId);
+        const available = resolver.listArtifacts(sessionId, projectPath);
         const availableList = available.length > 0
           ? '\n\nAvailable artifacts:\n' + available.map(a => `- ${a.title || a.filename}`).join('\n')
           : '\n\nNo artifacts found in this session.';
@@ -142,7 +144,13 @@ export const editArtifactTool: AgentTool = {
 
       // Phase 2: Loading and Parsing
       onUpdate?.(`📖 Loading artifact: ${artifactRef.title || artifactRef.filename}...`);
-      const htmlContent = readArtifact(sessionId, artifactRef.filename);
+      
+      // Determine which path to use (project vs global)
+      const isProjectArtifact = artifactRef.chatId === 'project';
+      const effectiveChatId = isProjectArtifact ? 'project' : sessionId;
+      const effectiveProjectPath = isProjectArtifact ? projectPath : undefined;
+      
+      const htmlContent = readArtifact(effectiveChatId, artifactRef.filename, effectiveProjectPath);
 
       if (!htmlContent) {
         return {
@@ -214,7 +222,7 @@ export const editArtifactTool: AgentTool = {
       }
 
       // Write atomically
-      const writeResult = writeArtifactAtomic(sessionId, artifactRef.filename, updatedHTML);
+      const writeResult = writeArtifactAtomic(effectiveChatId, artifactRef.filename, updatedHTML, effectiveProjectPath);
       if (!writeResult.success) {
         return {
           success: false,
@@ -225,7 +233,7 @@ export const editArtifactTool: AgentTool = {
       }
 
       // Update timestamp
-      updateArtifactTimestamp(sessionId, artifactRef.filename);
+      updateArtifactTimestamp(effectiveChatId, artifactRef.filename, effectiveProjectPath);
 
       // Update most recent artifact
       resolver.setMostRecent(sessionId, artifactRef.filename);
@@ -266,4 +274,4 @@ export const editArtifactTool: AgentTool = {
       };
     }
   }
-};
+});

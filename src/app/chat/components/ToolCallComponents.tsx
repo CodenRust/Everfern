@@ -52,110 +52,42 @@ interface SearchResultCardProps {
 
 // ── SearchResultCard Component ───────────────────────────────────────────────
 const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, index }) => {
-    // Validate URL
-    const isValidUrl = (url: string): boolean => {
-        try {
-            new URL(url);
-            return true;
-        } catch {
-            return false;
-        }
-    };
-
     const domain = result.domain || extractDomain(result.url) || 'Unknown';
     const title = result.title || result.url || 'Untitled Result';
-    const hasValidUrl = isValidUrl(result.url);
 
     return (
         <motion.article
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{
-                duration: 0.2,
-                delay: index * 0.05,
-                ease: "easeOut"
-            }}
-            whileHover={{
-                y: -1,
-                transition: { duration: 0.15 }
-            }}
-            role="article"
-            aria-label="Search result"
-            className="group flex flex-col gap-1 px-3 py-2.5 rounded-xl bg-white border border-[#e5e7eb] hover:border-[#c7d2fe] hover:bg-[#f5f3ff] hover:shadow-sm transition-all duration-150 cursor-pointer"
+            transition={{ duration: 0.2, delay: index * 0.03 }}
+            onClick={() => window.open(result.url, '_blank')}
+            className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f8fafc] transition-colors cursor-pointer border-b border-[#f1f5f9] last:border-0"
         >
-            {hasValidUrl ? (
-                <a
-                    href={result.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Visit ${title} at ${domain}`}
-                    className="flex flex-col gap-1 no-underline"
-                    style={{ textDecoration: 'none' }}
-                >
-                    <SearchResultContent result={result} domain={domain} title={title} />
-                </a>
-            ) : (
-                <div className="flex flex-col gap-1">
-                    <SearchResultContent result={result} domain={domain} title={title} />
+            <div className="flex shrink-0 items-center justify-center w-5 h-5">
+                <img
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                    alt=""
+                    width={16}
+                    height={16}
+                    className="rounded-sm"
+                    loading="lazy"
+                    onError={(e) => { (e.target as HTMLImageElement).src = 'https://www.google.com/s2/favicons?domain=example.com&sz=32'; }}
+                />
+            </div>
+            
+            <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-medium text-[#334155] truncate leading-none py-0.5">
+                    {title}
                 </div>
-            )}
+            </div>
+
+            <div className="text-[12px] text-[#94a3b8] font-normal shrink-0">
+                {domain}
+            </div>
         </motion.article>
     );
 };
 
-// ── SearchResultContent Component ────────────────────────────────────────────
-const SearchResultContent: React.FC<{ result: SearchResult; domain: string; title: string }> = ({ result, domain, title }) => {
-    return (
-        <>
-            {/* Domain Header */}
-            <div className="flex items-center gap-1.5">
-                <img
-                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`}
-                    alt=""
-                    width={14}
-                    height={14}
-                    className="rounded-sm shrink-0"
-                    loading="lazy"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                />
-                <span
-                    className="text-[11px] text-[#6b7280] truncate"
-                    style={{ fontFamily: "'Matter', sans-serif", letterSpacing: '0.01em' }}
-                >
-                    {domain}
-                </span>
-            </div>
-
-            {/* Title Link */}
-            <div
-                className="text-[14px] font-semibold text-[#1a56db] group-hover:underline leading-snug truncate mt-1"
-                style={{ fontFamily: "'Matter', sans-serif", letterSpacing: '-0.01em' }}
-            >
-                {title}
-            </div>
-
-            {/* Snippet */}
-            {result.snippet && (
-                <div
-                    className="text-[12px] text-[#4b5563] leading-relaxed line-clamp-2 md:line-clamp-3 mt-1.5"
-                    style={{ fontFamily: "'Matter', sans-serif", lineHeight: '1.5' }}
-                >
-                    {result.snippet}
-                </div>
-            )}
-
-            {/* Metadata Row */}
-            {result.publishedDate && (
-                <div
-                    className="text-[11px] text-[#9ca3af] mt-2"
-                    style={{ fontFamily: "'Matter', sans-serif", letterSpacing: '0.01em' }}
-                >
-                    {result.publishedDate}
-                </div>
-            )}
-        </>
-    );
-};
 
 // ── Tool Call Tag Component ──────────────────────────────────────────────────
 const ToolCallTag = ({ tc, isLast }: { tc: ToolCallDisplay; isLast?: boolean }) => {
@@ -178,15 +110,15 @@ const ToolCallTag = ({ tc, isLast }: { tc: ToolCallDisplay; isLast?: boolean }) 
                 <div style={{
                     width: 20, height: 20, borderRadius: '50%',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: looksLikeTerminal ? 'rgba(99,102,241,0.08)' : running ? 'rgba(0,0,0,0.03)' : errored ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)',
-                    border: looksLikeTerminal ? '1.5px solid rgba(99,102,241,0.2)' : running ? '1.5px solid rgba(0,0,0,0.1)' : errored ? '1.5px solid rgba(239,68,68,0.2)' : '1.5px solid rgba(34,197,94,0.2)',
+                    background: looksLikeTerminal ? 'rgba(0,0,0,0.05)' : running ? 'rgba(0,0,0,0.03)' : errored ? 'rgba(239,68,68,0.06)' : 'rgba(34,197,94,0.06)',
+                    border: looksLikeTerminal ? '1.5px solid rgba(0,0,0,0.15)' : running ? '1.5px solid rgba(0,0,0,0.1)' : errored ? '1.5px solid rgba(239,68,68,0.2)' : '1.5px solid rgba(34,197,94,0.2)',
                 }}>
                     {running ? (
                         <Loader size={8} strokeWidth={2} className="text-zinc-500" />
                     ) : errored ? (
                         <XMarkIcon width={10} height={10} color="#ef4444" strokeWidth={3} />
                     ) : looksLikeTerminal ? (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#201e24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
                         </svg>
                     ) : (
@@ -403,35 +335,34 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                 onClick={() => hasOutput && setExpanded(!expanded)}
                 className={`flex items-center gap-3 relative z-1 ${hasOutput ? 'cursor-pointer' : 'cursor-default'}`}
             >
-                {/* Status Icon */}
+                {/* Status Icon / Globe for Search */}
                 <div className="flex items-center justify-center w-4 h-4 bg-white">
-                    {statusIcon}
+                    {isSearchTool ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                            <path d="M2 12h20" />
+                        </svg>
+                    ) : statusIcon}
                 </div>
 
-                {/* Title */}
+                {/* Title and Results Count */}
                 <div className="flex items-center gap-2 flex-1 overflow-hidden">
-                    <span className="flex items-center text-[#6b7280]">{iconToDisplay}</span>
-                    <div className="flex-1 overflow-hidden">
-                        <span className={`text-[15px] overflow-hidden text-ellipsis whitespace-nowrap font-medium tracking-[-0.01em] block ${isError ? 'text-[#ef4444]' : 'text-[#111111]'}`}
+                    {!isSearchTool && <span className="flex items-center text-[#6b7280]">{iconToDisplay}</span>}
+                    <div className="flex-1 flex items-center justify-between overflow-hidden">
+                        <span className={`text-[15px] overflow-hidden text-ellipsis whitespace-nowrap font-normal tracking-[-0.01em] ${isSearchTool ? 'text-[#888888]' : isError ? 'text-[#ef4444]' : 'text-[#111111]'}`}
                             style={{ fontFamily: "'Matter', sans-serif" }}>
                             {tc.displayName || tc.label || tc.toolName}
                         </span>
-                        {tc.toolName === 'spawn_agent' && tc.args && (
-                            <div className="text-xs text-[#6b7280] font-mono overflow-hidden text-ellipsis whitespace-nowrap mt-0.5 bg-[#f3f4f6] px-1.5 py-1 rounded border border-[#e5e7eb]">
-                                <span className="text-[#6366f1] font-bold">spawn_agent</span>(
-                                <span className="text-[#059669]">task</span>="
-                                <span className="text-[#4b5563]">{(tc.args.task as string)?.substring(0, 50)}{(tc.args.task as string)?.length > 50 ? '...' : ''}</span>", 
-                                <span className="text-[#059669] ml-1">agent_type</span>="
-                                <span className="text-[#4b5563] font-bold">{tc.args.agent_type || 'generic'}</span>")
-                            </div>
-                        )}
-                        {isTerminal && cmdStr && (
-                            <div className="text-xs text-[#6b7280] font-mono overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
-                                $ {cmdStr.length > 60 ? cmdStr.substring(0, 57) + '...' : cmdStr}
-                            </div>
+                        
+                        {isSearchTool && Array.isArray(tc.data?.results) && (
+                            <span className="text-[13px] text-[#888888] font-normal ml-auto shrink-0 pr-1">
+                                {tc.data.results.length} results
+                            </span>
                         )}
                     </div>
                 </div>
+
 
                 {/* Chevron */}
                 {hasOutput && (
@@ -484,12 +415,12 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                             {docs.slice(0, 2).map((d, i) => (
                                                 <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[20px] bg-[#f3f4f6] border border-transparent text-[13px] text-[#374151] font-medium cursor-pointer transition-all duration-150 hover:bg-[#e5e7eb]"
                                                     style={{ fontFamily: "'Matter', sans-serif" }}>
-                                                    <DocumentTextIcon width={14} height={14} color="#3b82f6" strokeWidth={2} />
+                                                    <DocumentTextIcon width={14} height={14} color="#111" strokeWidth={2} />
                                                     {d}
                                                 </div>
                                             ))}
                                             {docs.length > 2 && (
-                                                <div className="text-[13px] text-[#2563eb] font-semibold ml-1 cursor-pointer" style={{ fontFamily: "'Matter', sans-serif" }}>
+                                                <div className="px-[22px] py-2.5 rounded-[10px] border-none bg-[#201e24] text-white text-[13px] font-semibold cursor-pointer" style={{ fontFamily: "'Matter', sans-serif" }}>
                                                     + {docs.length - 2} more
                                                 </div>
                                             )}
@@ -497,11 +428,8 @@ const ToolCallRow = ({ tc, isLast }: { tc: ToolCallDisplay, isLast?: boolean }) 
                                     </div>
                                 )}
                                 {Array.isArray(tc.data?.results) && tc.data.results.length > 0 && (
-                                    <div>
-                                        <div className="text-[13px] text-[#6b7280] font-medium mb-3" style={{ fontFamily: "'Matter', sans-serif" }}>
-                                            {tc.data.results.length} result{tc.data.results.length !== 1 ? 's' : ''}
-                                        </div>
-                                        <div className="flex flex-col gap-3">
+                                    <div className="mt-2">
+                                        <div className="flex flex-col border border-[#e2e8f0] rounded-xl bg-white overflow-hidden max-h-[320px] overflow-y-auto custom-scrollbar shadow-sm">
                                             {(tc.data.results as SearchResult[]).map((result, i) => (
                                                 <SearchResultCard key={i} result={result} index={i} />
                                             ))}
@@ -591,11 +519,12 @@ const WriteDiffCard = ({ tc }: { tc: any }) => {
                         transition={{ type: "spring", duration: 0.4, bounce: 0 }}
                         className="overflow-hidden mt-1"
                     >
-                        <div className="rounded-b-2xl border-x border-b border-gray-200 bg-white shadow-sm">
+                        <div className="relative rounded-b-2xl border-x border-b border-gray-200 bg-white shadow-sm">
+                            <div className="absolute top-0 left-4 w-3.5 h-3.5 bg-[#201e24] rounded-full border-[3px] border-[#F5F4F0] z-20 shadow-sm" />
                             {/* Sub-header / Breadcrumbs */}
                             <div className="flex items-center justify-between px-4 py-2 bg-gray-50/50 border-b border-gray-100">
                                 <div className="flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                                    <div className="w-1.5 h-1.5 rounded-full bg-[#111] animate-pulse" />
                                     <span className="text-[11px] font-mono text-gray-400 truncate max-w-[300px]">
                                         {path || filename}
                                     </span>
@@ -699,7 +628,18 @@ const ComputerUseResultCard = ({ tc }: { tc: ToolCallDisplay }) => {
 };
 
 // ── LiveToolCallCard: Shows a tool call being constructed in real-time ──────
+// ── LiveToolCallCard: Shows a tool call being constructed in real-time ──────
 export const LiveToolCallCard = ({ toolName, partialArguments, isStreaming }: LiveToolCall) => {
+    const [cursorVisible, setCursorVisible] = useState(true);
+
+    useEffect(() => {
+        if (!isStreaming) return;
+        const interval = setInterval(() => {
+            setCursorVisible(v => !v);
+        }, 500);
+        return () => clearInterval(interval);
+    }, [isStreaming]);
+
     const displayName = toolName
         .replace(/_/g, ' ')
         .replace(/\b\w/g, c => c.toUpperCase());
@@ -707,37 +647,81 @@ export const LiveToolCallCard = ({ toolName, partialArguments, isStreaming }: Li
     return (
         <motion.div
             layout
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.2 }}
-            className={`rounded-xl border overflow-hidden mb-2 ${
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className={`rounded-2xl border overflow-hidden mb-4 transition-all duration-300 ${
                 isStreaming
-                    ? 'border-indigo-300 shadow-[0_0_0_2px_rgba(99,102,241,0.15)]'
-                    : 'border-emerald-300 shadow-[0_0_0_2px_rgba(34,197,94,0.1)]'
+                    ? 'border-[#e2e8f0] shadow-lg shadow-indigo-500/5 ring-1 ring-indigo-500/10'
+                    : 'border-emerald-200 shadow-sm bg-emerald-50/30'
             }`}
         >
-            <div className={`flex items-center gap-2 px-3 py-2 ${isStreaming ? 'bg-indigo-50' : 'bg-emerald-50'}`}>
-                {isStreaming ? (
-                    <Loader size={12} strokeWidth={2} className="text-indigo-500 shrink-0" />
-                ) : (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                        <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                )}
-                <span className={`text-xs font-semibold tracking-wide ${isStreaming ? 'text-indigo-700' : 'text-emerald-700'}`}>
-                    {displayName}
-                </span>
-                {isStreaming && (
-                    <span className="ml-auto text-[10px] text-indigo-400 font-medium animate-pulse">
-                        building…
+            {/* Header */}
+            <div className={`flex items-center gap-3 px-4 py-3 ${
+                isStreaming ? 'bg-gradient-to-r from-indigo-50/50 to-white' : 'bg-emerald-50/50'
+            }`}>
+                <div className="relative">
+                    {isStreaming ? (
+                        <>
+                            <div className="absolute inset-0 bg-indigo-400 rounded-full animate-ping opacity-20" />
+                            <div className="relative flex items-center justify-center w-5 h-5 bg-indigo-100 rounded-full">
+                                <Loader size={12} strokeWidth={2.5} className="text-indigo-600" />
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex items-center justify-center w-5 h-5 bg-emerald-100 rounded-full">
+                            <CheckIcon width={12} height={12} className="text-emerald-600" strokeWidth={3} />
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex flex-col gap-0.5">
+                    <span className={`text-[13px] font-bold tracking-tight ${
+                        isStreaming ? 'text-slate-900' : 'text-emerald-900'
+                    }`}>
+                        {displayName}
+                    </span>
+                    {isStreaming && (
+                        <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest animate-pulse">
+                            Constructing Tool Call
+                        </span>
+                    )}
+                </div>
+
+                {!isStreaming && (
+                    <span className="ml-auto text-[11px] text-emerald-600 font-medium bg-emerald-100/50 px-2 py-0.5 rounded-full">
+                        Ready
                     </span>
                 )}
             </div>
+
+            {/* Arguments Container */}
             {partialArguments && (
-                <pre className="m-0 px-3 py-2 text-[11px] font-mono leading-relaxed text-slate-600 bg-white overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
-                    {partialArguments}
-                </pre>
+                <div className="relative group">
+                    <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent opacity-50" />
+                    <pre className="m-0 px-5 py-4 text-[12px] font-mono leading-relaxed text-slate-700 bg-white/80 backdrop-blur-sm overflow-x-auto whitespace-pre-wrap max-h-[300px] custom-scrollbar selection:bg-indigo-100">
+                        <code className="relative">
+                            {partialArguments}
+                            {isStreaming && (
+                                <motion.span
+                                    animate={{ opacity: cursorVisible ? 1 : 0 }}
+                                    className="inline-block w-[7px] h-[15px] bg-indigo-500 ml-0.5 translate-y-[2px]"
+                                />
+                            )}
+                        </code>
+                    </pre>
+                    
+                    {/* Decorative mono label */}
+                    <div className="absolute bottom-2 right-4 px-1.5 py-0.5 rounded border border-slate-100 bg-slate-50/50 text-[9px] font-mono text-slate-400 uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity">
+                        JSON PARAMS
+                    </div>
+                </div>
+            )}
+            
+            {/* Footer shadow effect */}
+            {isStreaming && (
+                <div className="h-1.5 bg-gradient-to-b from-transparent to-indigo-500/5" />
             )}
         </motion.div>
     );

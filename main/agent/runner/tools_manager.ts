@@ -14,9 +14,13 @@ import { presentFilesTool } from '../tools/present-files';
 import { createWorkspaceRequestTool, allowFileDeleteTool } from '../tools/control-plane';
 import { terminalTool, terminalStatusTool } from '../tools/terminal';
 import { searchMcpRegistryTool, connectMcpServerTool, listMcpToolsTool } from '../tools/mcp-registry-tool';
-import { createArtifactTool, createSiteTool } from '../tools/create-artifact';
+import { createArtifactTool } from '../tools/create-artifact';
 import { editArtifactTool } from '../tools/edit-artifact';
 import { visualizeTool } from '../tools/visualize';
+import { pptxGeneratorTool } from '../tools/pptx-generator';
+import { batchWriteTool } from '../tools/batch-write';
+import { sendDiscordMessageTool, sendTelegramMessageTool } from '../tools/messaging';
+import { createScheduledTaskTool, listScheduledTasksTool, deleteScheduledTaskTool } from '../tools/scheduled-tasks';
 import { mcpRegistry } from '../tools/mcp';
 import { createNavisTool } from '../tools/navis/navis';
 import { AIClient } from '../../lib/ai-client';
@@ -83,10 +87,16 @@ export const getBaseTools = (runner: any): AgentTool[] => {
     searchMcpRegistryTool,
     connectMcpServerTool,
     listMcpToolsTool,
-    createArtifactTool,
-    editArtifactTool,
-    createSiteTool,
-    visualizeTool
+    batchWriteTool,
+    createArtifactTool(runner),
+    editArtifactTool(runner),
+    visualizeTool,
+    pptxGeneratorTool,
+    sendDiscordMessageTool,
+    sendTelegramMessageTool,
+    createScheduledTaskTool,
+    listScheduledTasksTool,
+    deleteScheduledTaskTool,
   );
 
   // Add dynamically connected MCP tools

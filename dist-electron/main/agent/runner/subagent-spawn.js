@@ -45,6 +45,7 @@ const crypto = __importStar(require("crypto"));
 const subagent_registry_1 = require("./subagent-registry");
 const swarm_memory_1 = require("./swarm-memory");
 const agent_events_1 = require("../infra/agent-events");
+const prompt_sync_1 = require("../../lib/prompt-sync");
 const session_lifecycle_events_1 = require("../sessions/session-lifecycle-events");
 exports.AGENT_TIMEOUTS = {
     'web-explorer': 300000,
@@ -79,15 +80,36 @@ class SubagentSpawner {
             }
         }
     }
+    getPromptForAgentType(agentType) {
+        const PROMPT_MAP = {
+            'web-explorer': 'web-explorer.md',
+            'coding-specialist': 'coding-specialist.md',
+            'data-analyst': 'data-analyst.md',
+            'computer-use': 'computer-use.md',
+            'generic': 'SYSTEM_PROMPT.md',
+        };
+        const promptFile = PROMPT_MAP[agentType] || 'SYSTEM_PROMPT.md';
+        return (0, prompt_sync_1.loadPrompt)(promptFile);
+    }
     async spawn(options) {
-        const { parentSessionId, task, agentType = 'generic', systemPrompt, context, model, mode = 'run', workspaceDir, projectId, maxDepth = 3, parentHistory = [] } = options;
+        const { parentSessionId, task, agentType = 'generic', systemPrompt: explicitSystemPrompt, context, model, mode = 'run', workspaceDir, projectId, maxDepth = 3, parentHistory = [] } = options;
+        // Auto-load the correct system prompt based on agent type if none was explicitly provided.
+        // This ensures that spawning agent_type="web-explorer" actually gets the web-explorer.md prompt
+        // (which tells it to use navis) instead of the default SYSTEM_PROMPT.md (which doesn't).
+        const systemPrompt = explicitSystemPrompt || this.getPromptForAgentType(agentType) || undefined;
         if (!this.runner) {
             console.warn('[SubagentSpawner] No runner configured. Spawning failed.');
             throw new Error('SubagentSpawner: No runner configured');
         }
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
-        const parentEntry = registry.getBySessionKey(parentSessionId);
-        const currentDepth = (parentEntry?.currentDepth || 0) + 1;
+        // Compute depth using sponsorSessionKey if available.
+        // When a sub-agent spawns another, it passes its own sessionKey as sponsorSessionKey.
+        // The root spawns without sponsorSessionKey (depth = 0), so a root-spawned agent gets depth = 1.
+        // A sub-agent-spawned agent gets depth = parentDepth + 1.
+        const sponsorEntry = options.sponsorSessionKey
+            ? registry.getBySessionKey(options.sponsorSessionKey)
+            : undefined;
+        const currentDepth = (sponsorEntry?.currentDepth || 0) + 1;
         if (currentDepth > this.maxGlobalDepth) {
             throw new Error(`Maximum spawn depth (${this.maxGlobalDepth}) exceeded`);
         }
@@ -126,6 +148,7 @@ class SubagentSpawner {
             task: enrichedTask,
             agentType,
             status: 'pending',
+            depth: currentDepth,
             abort: () => registry.abort(agentId)
         };
         this.runSubagent(spawnedAgent, model, systemPrompt, parentHistory);
@@ -166,6 +189,11 @@ class SubagentSpawner {
                 .map(f => `[PRIOR SWARM KNOWLEDGE]: ${f.content}`)
                 .join('\n');
             const finalTask = existingMemory ? `${existingMemory}\n\n${agent.task}` : agent.task;
+            // Set the agent's session key on the runner so graph nodes (web-explorer, spawn_agent tool)
+            // can pass it as sponsorSessionKey when spawning nested sub-agents for depth tracking.
+            if (this.runner && 'currentAgentSessionKey' in this.runner) {
+                this.runner.currentAgentSessionKey = agent.sessionKey;
+            }
             let finalResponse = '';
             let toolCalls = [];
             let retries = 0;
@@ -175,29 +203,71 @@ class SubagentSpawner {
                     if (this.runner?.runStream) {
                         console.log(`[SubagentSpawner] ⚡ Attempt ${retries + 1}: Using runStream for ${agent.agentId} to enable real-time piping`);
                         const entry = registry.get(agent.agentId);
-                        const stream = this.runner.runStream(finalTask, cappedHistory, model, agent.parentSessionId, systemPrompt, entry?.projectId);
+                        const stream = this.runner.runStream(finalTask, cappedHistory, model, agent.parentSessionId, systemPrompt, entry?.projectId, true);
                         for await (const event of stream) {
                             if (event.type === 'done')
                                 break;
-                            if (event.type === 'chunk')
+                            if (event.type === 'chunk') {
                                 finalResponse += event.content;
+                                parentEvents.emit('subagent-progress', 'reasoning', {
+                                    toolCallId: agent.agentId,
+                                    timestamp: new Date().toISOString(),
+                                    content: event.content,
+                                    metadata: { agentId: agent.agentId, agentType: agent.agentType, attempt: retries + 1 },
+                                    timelineBranch: {
+                                        sessionId: agent.sessionKey,
+                                        parentId: agent.parentSessionId,
+                                        parentSessionKey: agent.parentSessionId,
+                                        agentType: agent.agentType,
+                                        taskDescription: agent.task,
+                                        branchStatus: 'running',
+                                        branchLevel: agent.depth
+                                    }
+                                });
+                            }
                             if (event.type === 'tool_call')
                                 toolCalls.push(event.toolCall);
                             // Pipe progress events to the parent session for the timeline
                             if (event.type === 'thought' || event.type === 'tool_start' || event.type === 'tool_call') {
                                 const progressType = event.type === 'thought' ? 'reasoning' : 'action';
                                 parentEvents.emit('subagent-progress', progressType, {
-                                    toolCallId: agent.agentId, // Use agentId as toolCallId for grouping
+                                    toolCallId: agent.agentId,
                                     timestamp: new Date().toISOString(),
                                     content: event.type === 'thought' ? event.content : `Running tool: ${event.toolName || event.toolCall?.toolName}`,
                                     metadata: { agentId: agent.agentId, agentType: agent.agentType, attempt: retries + 1 },
-                                    // Add timelineBranch for the nested visualization
                                     timelineBranch: {
                                         sessionId: agent.sessionKey,
                                         parentId: agent.parentSessionId,
+                                        parentSessionKey: agent.parentSessionId,
                                         agentType: agent.agentType,
                                         taskDescription: agent.task,
-                                        branchStatus: 'running'
+                                        branchStatus: 'running',
+                                        branchLevel: agent.depth
+                                    }
+                                });
+                            }
+                            // Forward subagent-progress events (e.g. rich navis browser actions)
+                            // These contain detailed actions like clicks, navigation, typing, scrolls
+                            if (event.type === 'subagent-progress') {
+                                const nestedBranchLevel = event.data?.timelineBranch?.branchLevel
+                                    ? event.data.timelineBranch.branchLevel + 1
+                                    : agent.depth;
+                                parentEvents.emit('subagent-progress', event.data?.type || 'action', {
+                                    toolCallId: agent.agentId,
+                                    timestamp: event.timestamp || new Date().toISOString(),
+                                    content: event.data?.content || event.data?.action || event.content || '',
+                                    action: event.data?.action,
+                                    stepNumber: event.data?.stepNumber,
+                                    totalSteps: event.data?.totalSteps,
+                                    metadata: { agentId: agent.agentId, agentType: agent.agentType, attempt: retries + 1 },
+                                    timelineBranch: {
+                                        sessionId: agent.sessionKey,
+                                        parentId: agent.parentSessionId,
+                                        parentSessionKey: agent.parentSessionId,
+                                        agentType: agent.agentType,
+                                        taskDescription: agent.task,
+                                        branchStatus: 'running',
+                                        branchLevel: nestedBranchLevel
                                     }
                                 });
                             }
@@ -222,7 +292,17 @@ class SubagentSpawner {
                         parentEvents.emit('subagent-progress', 'error', {
                             toolCallId: agent.agentId,
                             content: `Connection error (502). Retrying in ${delay / 1000}s... (Attempt ${retries + 1})`,
-                            metadata: { agentId: agent.agentId, retry: true }
+                            type: 'error',
+                            metadata: { agentId: agent.agentId, retry: true },
+                            timelineBranch: {
+                                sessionId: agent.sessionKey,
+                                parentId: agent.parentSessionId,
+                                parentSessionKey: agent.parentSessionId,
+                                agentType: agent.agentType,
+                                taskDescription: agent.task,
+                                branchStatus: 'failed',
+                                branchLevel: agent.depth
+                            }
                         });
                         await new Promise(r => setTimeout(r, delay));
                         finalResponse = '';
@@ -237,9 +317,15 @@ class SubagentSpawner {
             parentEvents.emit('subagent-progress', 'complete', {
                 toolCallId: agent.agentId,
                 timestamp: new Date().toISOString(),
+                type: 'complete',
                 timelineBranch: {
                     sessionId: agent.sessionKey,
-                    branchStatus: 'completed'
+                    parentId: agent.parentSessionId,
+                    parentSessionKey: agent.parentSessionId,
+                    agentType: agent.agentType,
+                    taskDescription: agent.task,
+                    branchStatus: 'completed',
+                    branchLevel: agent.depth
                 }
             });
             // SWARM SYNC: Broadcast findings to the rest of the army
@@ -268,9 +354,15 @@ class SubagentSpawner {
             parentEvents.emit('subagent-progress', 'error', {
                 toolCallId: agent.agentId,
                 content: errMsg,
+                type: 'error',
                 timelineBranch: {
                     sessionId: agent.sessionKey,
-                    branchStatus: 'failed'
+                    parentId: agent.parentSessionId,
+                    parentSessionKey: agent.parentSessionId,
+                    agentType: agent.agentType,
+                    taskDescription: agent.task,
+                    branchStatus: 'failed',
+                    branchLevel: agent.depth
                 }
             });
             (0, session_lifecycle_events_1.sessionFailed)(agent.sessionKey, { error: errMsg });
@@ -284,6 +376,10 @@ class SubagentSpawner {
         finally {
             this.releaseSlot();
             console.log(`[SubagentSpawner] 🏁 Agent ${agent.agentId} released execution slot. Active: ${this.activeAgents}`);
+            // Clear agent session key if this agent set it
+            if (this.runner && 'currentAgentSessionKey' in this.runner && this.runner.currentAgentSessionKey === agent.sessionKey) {
+                this.runner.currentAgentSessionKey = undefined;
+            }
             unsubscribe();
         }
     }

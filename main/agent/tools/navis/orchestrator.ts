@@ -266,7 +266,7 @@ export class NavisOrchestrator {
           if (currentUrl !== lastUrl) {
             // Start capturing next page's elements in background — hidden behind next AI call
             const captureUrl = currentUrl;
-            pendingSnapshot = page.waitForLoadState('domcontentloaded', { timeout: 1500 })
+            pendingSnapshot = page.waitForLoadState('domcontentloaded', { timeout: 1000 })
               .then(() => captureInteractiveElements(page))
               .then(r => { console.log(`[Navis] BG capture ready (${captureUrl})`); return r; })
               .catch(() => { console.log(`[Navis] BG capture failed`); return null; });

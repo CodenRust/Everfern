@@ -36,7 +36,7 @@ const MissionProgressCard: React.FC<MissionProgressCardProps> = ({
         <div style={{ 
             backgroundColor: "#ffffff", 
             border: "1px solid #e8e6d9", 
-            borderRadius: 12, 
+            borderRadius: 10, 
             overflow: "hidden",
             display: "flex",
             flexDirection: "column"
@@ -50,7 +50,7 @@ const MissionProgressCard: React.FC<MissionProgressCardProps> = ({
                     display: "flex", 
                     alignItems: "center", 
                     justifyContent: "space-between", 
-                    padding: "12px 14px", 
+                    padding: "10px 14px", 
                     background: "none", 
                     border: "none", 
                     cursor: "pointer" 
@@ -170,7 +170,7 @@ const StepItem: React.FC<{ step: MissionStep; index: number; isLast: boolean }> 
             {/* Middle: Content */}
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ 
-                    fontSize: 12.5, 
+                    fontSize: 11.5, 
                     fontWeight: 600, 
                     color: "#111827",
                     marginBottom: 2,
@@ -180,7 +180,7 @@ const StepItem: React.FC<{ step: MissionStep; index: number; isLast: boolean }> 
                     {step.name}
                 </div>
                 <div style={{ 
-                    fontSize: 11, 
+                    fontSize: 10.5, 
                     color: "#6b7280",
                     lineHeight: 1.4,
                     overflow: "hidden",

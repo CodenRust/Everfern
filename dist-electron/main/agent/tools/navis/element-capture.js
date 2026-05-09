@@ -7,11 +7,45 @@
  * https://playwright.dev/docs/aria-snapshots
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.captureFastSnapshot = captureFastSnapshot;
 exports.captureInteractiveElements = captureInteractiveElements;
 exports.parseRefs = parseRefs;
 exports.formatElementsForPrompt = formatElementsForPrompt;
+// ── Fast Snapshot (Alternative Method) ─────────────────────────
+async function captureFastSnapshot(page) {
+    try {
+        const snapshot = await page.evaluate(() => {
+            const elements = document.querySelectorAll('button, a, input, select, textarea, [role="button"], [role="link"], [role="textbox"], [role="combobox"]');
+            let ref = 0;
+            let result = '';
+            elements.forEach((el) => {
+                ref++;
+                const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                const name = el.getAttribute('aria-label') ||
+                    el.innerText?.slice(0, 30) ||
+                    el.getAttribute('placeholder') ||
+                    '';
+                el.setAttribute('data-ref', `e${ref}`);
+                result += `- ${role} "${name}" [ref=e${ref}]\n`;
+            });
+            return result;
+        });
+        if (!snapshot || snapshot.length === 0)
+            return null;
+        const refs = parseRefs(snapshot);
+        return { raw: snapshot, refs };
+    }
+    catch {
+        return null;
+    }
+}
 async function captureInteractiveElements(page) {
-    const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 2000 });
+    // Try fast method first
+    const fastResult = await captureFastSnapshot(page);
+    if (fastResult)
+        return fastResult;
+    // Fallback to ariaSnapshot
+    const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 1000 });
     const refs = parseRefs(raw);
     return { raw, refs };
 }

@@ -115,8 +115,9 @@ class ChatHistoryStore {
         await this.init();
         try {
             const rows = await db_1.dbOps.all(`
-        SELECT c.*, COUNT(m.id) as messageCount
+        SELECT c.*, p.name as projectName, COUNT(m.id) as messageCount
         FROM conversations c
+        LEFT JOIN projects p ON c.project_id = p.id
         LEFT JOIN messages m ON c.id = m.conversation_id
         GROUP BY c.id
         ORDER BY c.updated_at DESC
@@ -125,6 +126,9 @@ class ChatHistoryStore {
                 id: row.id,
                 title: row.title,
                 provider: row.provider,
+                model: row.model,
+                projectId: row.project_id,
+                projectName: row.projectName,
                 messageCount: row.messageCount,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
@@ -141,7 +145,11 @@ class ChatHistoryStore {
     async load(id) {
         await this.init();
         try {
-            const convRow = await db_1.dbOps.get('SELECT * FROM conversations WHERE id = ?', [id]);
+            const convRow = await db_1.dbOps.get(`
+        SELECT c.*, p.name as projectName 
+        FROM conversations c 
+        LEFT JOIN projects p ON c.project_id = p.id 
+        WHERE c.id = ?`, [id]);
             if (!convRow)
                 return null;
             const msgRows = await db_1.dbOps.all('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC', [id]);
@@ -159,6 +167,8 @@ class ChatHistoryStore {
                 title: convRow.title,
                 provider: convRow.provider,
                 model: convRow.model,
+                projectId: convRow.project_id,
+                projectName: convRow.projectName,
                 messages,
                 createdAt: convRow.created_at,
                 updatedAt: convRow.updated_at,
@@ -180,17 +190,19 @@ class ChatHistoryStore {
         try {
             // 1. Upsert Conversation — use INSERT OR REPLACE to avoid race conditions
             // when saveConversation is called concurrently from the frontend.
-            await db_1.dbOps.run(`INSERT INTO conversations (id, title, provider, model, created_at, updated_at)
-         VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM conversations WHERE id = ?), ?), ?)
+            await db_1.dbOps.run(`INSERT INTO conversations (id, title, provider, model, project_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM conversations WHERE id = ?), ?), ?)
          ON CONFLICT(id) DO UPDATE SET
            title = excluded.title,
            provider = excluded.provider,
            model = excluded.model,
+           project_id = excluded.project_id,
            updated_at = excluded.updated_at`, [
                 conversation.id,
                 conversation.title,
                 conversation.provider,
                 conversation.model,
+                conversation.projectId || null,
                 conversation.id,
                 conversation.createdAt || new Date().toISOString(),
                 conversation.updatedAt || new Date().toISOString(),

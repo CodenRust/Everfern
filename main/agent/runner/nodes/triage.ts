@@ -1,6 +1,6 @@
 import { START } from '@langchain/langgraph';
 import { GraphStateType, IntentType, IntentClassification, StreamEvent } from '../state';
-import { classifyIntent, classifyIntentFallback } from '../triage';
+import { classifyIntent } from '../triage';
 import { AgentRunner } from '../runner';
 import type { MissionTracker } from '../mission-tracker';
 import { createMissionIntegrator } from '../mission-integrator';
@@ -37,13 +37,8 @@ export const createTriageNode = (runner: AgentRunner, eventQueue?: StreamEvent[]
         classification = await classifyIntent(content, runner.client, state.messages);
       } catch (connErr) {
         const msg = connErr instanceof Error ? connErr.message : String(connErr);
-        const isConnectionError = msg.includes('ECONNREFUSED') || msg.includes('fetch failed') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND');
-        if (isConnectionError) {
-          console.warn('[Triage] AI provider unreachable, using fallback classification:', msg);
-          classification = classifyIntentFallback(content, state.messages);
-        } else {
-          throw connErr;
-        }
+        console.warn('[Triage] AI classification failed:', msg);
+        classification = { intent: 'task', confidence: 0.5, reasoning: `Classification unavailable: ${msg}` };
       }
       runner.telemetry.info(`Intent identified: ${classification.intent.toUpperCase()} (${Math.round(classification.confidence * 100)}% confidence)`);
       if (classification.reasoning) {

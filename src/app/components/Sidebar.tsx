@@ -25,6 +25,7 @@ interface ConversationSummary {
     title: string;
     provider: string;
     updatedAt: string;
+    projectName?: string;
 }
 
 export default function Sidebar({ isOpen, onToggle, activeConversationId, activeTaskIds = [], onSelectConversation, onNewChat, onSettingsClick, onArtifactsClick, onCustomizeClick, onIntegrationClick, onProjectsClick }: SidebarProps) {
@@ -313,6 +314,11 @@ export default function Sidebar({ isOpen, onToggle, activeConversationId, active
                                     maskImage: 'linear-gradient(to right, black calc(100% - 20px), transparent 100%)',
                                     WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 20px), transparent 100%)'
                                 }}>{item.title}</span>
+                                {item.projectName && (
+                                    <div style={{ fontSize: 10, backgroundColor: 'rgba(0,0,0,0.08)', padding: '2px 6px', borderRadius: 6, color: '#666666', marginLeft: 4, whiteSpace: 'nowrap', fontWeight: 600 }}>
+                                        {item.projectName}
+                                    </div>
+                                )}
                                 <div className="del-btn" onClick={(e) => handleDelete(e, item.id)} style={{ padding: 4, borderRadius: 10, color: "#666666", opacity: 0, transition: "opacity 0.15s, color 0.15s", cursor: "pointer", lineHeight: 1, display: "flex" }} onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => e.currentTarget.style.color = "#f87171"}>
                                     <TrashIcon width={14} height={14} />
                                 </div>

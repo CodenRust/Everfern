@@ -2,13 +2,15 @@
 import React, { memo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SyntaxHighlighter } from '../ArtifactsPanel';
+import { Renderer } from '@openuidev/react-lang';
+import { uiLibrary } from '@/lib/openui-library';
 
 // ── Link Confirmation Popup ───────────────────────────────────────────────────
 const LinkPopup = ({ url, label, onClose }: { url: string; label: string; onClose: () => void }) => {
     const openInBrowser = () => {
         const api = (window as any).electronAPI;
-        if (api?.shell?.openExternal) {
-            api.shell.openExternal(url);
+        if (api?.system?.openExternal) {
+            api.system.openExternal(url);
         } else {
             window.open(url, '_blank', 'noopener,noreferrer');
         }
@@ -109,7 +111,7 @@ const LinkPopup = ({ url, label, onClose }: { url: string; label: string; onClos
 };
 
 // ── Inline Link Component ─────────────────────────────────────────────────────
-const InlineLink = ({ href, label }: { href: string; label: string }) => {
+export const InlineLink = ({ href, label }: { href: string; label: string }) => {
     const [showPopup, setShowPopup] = useState(false);
     return (
         <>
@@ -121,7 +123,7 @@ const InlineLink = ({ href, label }: { href: string; label: string }) => {
                     textDecorationColor: 'rgba(37,99,235,0.4)',
                     textUnderlineOffset: 2,
                     cursor: 'pointer',
-                    fontWeight: 500,
+                    fontWeight: 'inherit',
                     transition: 'color 0.1s',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.color = '#1d4ed8'; }}
@@ -135,9 +137,11 @@ const InlineLink = ({ href, label }: { href: string; label: string }) => {
 };
 
 // ── Markdown Renderer ────────────────────────────────────────────────────────
-const MarkdownRenderer = memo(({ content }: { content: string }) => {
-    // Hide raw tool_call tags that the model sometimes leaks into text to prevent fake internal tool UI
-    const cleanedContent = content.replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/gi, '');
+const MarkdownRenderer = memo(({ content, isStreaming: isStreamingProp }: { content: string; isStreaming?: boolean }) => {
+    // Hide raw tool_call tags and computer:/// links that are handled separately to prevent "ghost" lines or empty containers.
+    const cleanedContent = content
+        .replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/gi, '')
+        .replace(/\[[^\]]+\]\(computer:\/\/\/[^)]+\)/g, '');
     const lines = cleanedContent.split('\n');
     const elements: React.ReactNode[] = [];
     let i = 0;
@@ -153,8 +157,8 @@ const MarkdownRenderer = memo(({ content }: { content: string }) => {
             [/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/, (m, k) => <InlineLink key={k} href={m[2]} label={m[1]} />],
             // Bare URLs
             [/https?:\/\/[^\s"'<>)\]]+/, (m, k) => <InlineLink key={k} href={m[0]} label={m[0]} />],
-            [/\*\*(.+?)\*\*/, (m, k) => <strong key={k} style={{ color: '#111111', fontWeight: 600 }}>{m[1]}</strong>],
-            [/\*([^*]+)\*/, (m, k) => <em key={k} style={{ color: '#4a4846', fontStyle: 'italic' }}>{m[1]}</em>],
+            [/\*\*(.+?)\*\*/, (m, k) => <strong key={k} style={{ color: '#111111', fontWeight: 600 }}>{inlineRender(m[1], k)}</strong>],
+            [/\*([^*]+)\*/, (m, k) => <em key={k} style={{ color: '#4a4846', fontStyle: 'italic' }}>{inlineRender(m[1], k)}</em>],
             [/`([^`]+)`/, (m, k) => <code key={k} style={{ backgroundColor: 'rgba(0, 0, 0, 0.05)', borderRadius: 4, padding: '2px 6px', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, color: '#111111' }}>{m[1]}</code>],
         ];
         while (remaining.length > 0) {
@@ -185,21 +189,36 @@ const MarkdownRenderer = memo(({ content }: { content: string }) => {
             const codeLines: string[] = [];
             i++;
             while (i < lines.length && !lines[i].trim().startsWith('```')) { codeLines.push(lines[i]); i++; }
-            elements.push(
-                <div key={`code-${blockStartIndex}`} style={{ margin: '16px 0' }}>
-                    <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(0, 0, 0, 0.08)', backgroundColor: '#fcfbf7' }}>
-                        {lang && (
-                            <div style={{ padding: '6px 14px', backgroundColor: '#f4f3ed', fontSize: 11, color: '#717171', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", letterSpacing: '0.05em', borderBottom: '1px solid rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-                                {lang}
+
+            // OpenUI Lang rendering
+            if (lang === 'openui') {
+                const openuiCode = codeLines.join('\n');
+                elements.push(
+                    <div key={`openui-${blockStartIndex}`} style={{ margin: '16px 0' }}>
+                        <Renderer
+                            response={openuiCode}
+                            library={uiLibrary}
+                            isStreaming={isStreamingProp || false}
+                        />
+                    </div>
+                );
+            } else {
+                elements.push(
+                    <div key={`code-${blockStartIndex}`} style={{ margin: '16px 0' }}>
+                        <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(0, 0, 0, 0.08)', backgroundColor: '#fcfbf7' }}>
+                            {lang && (
+                                <div style={{ padding: '6px 14px', backgroundColor: '#f4f3ed', fontSize: 11, color: '#717171', fontFamily: "'JetBrains Mono', 'Fira Code', monospace", letterSpacing: '0.05em', borderBottom: '1px solid rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                                    {lang}
+                                </div>
+                            )}
+                            <div style={{ padding: '14px 16px', overflowX: 'auto' }}>
+                                <SyntaxHighlighter language={lang || 'text'} code={codeLines.join('\n')} />
                             </div>
-                        )}
-                        <div style={{ padding: '14px 16px', overflowX: 'auto' }}>
-                            <SyntaxHighlighter language={lang || 'text'} code={codeLines.join('\n')} />
                         </div>
                     </div>
-                </div>
-            );
+                );
+            }
             i++; continue;
         }
 
@@ -233,6 +252,8 @@ const MarkdownRenderer = memo(({ content }: { content: string }) => {
             continue;
         }
 
+        const h6 = line.match(/^###### (.+)/);
+        const h5 = line.match(/^##### (.+)/);
         const h4 = line.match(/^#### (.+)/);
         const h3 = line.match(/^### (.+)/);
         const h2 = line.match(/^## (.+)/);
@@ -241,6 +262,8 @@ const MarkdownRenderer = memo(({ content }: { content: string }) => {
         if (h2) { elements.push(<h2 key={`h2-${blockStartIndex}`} style={{ fontSize: 20, fontWeight: 500, color: '#111111', margin: '12px 0 5px', fontFamily: 'var(--font-serif)' }}>{inlineRender(h2[1], i)}</h2>); i++; continue; }
         if (h3) { elements.push(<h3 key={`h3-${blockStartIndex}`} style={{ fontSize: 16, fontWeight: 600, color: '#4a4846', margin: '10px 0 4px' }}>{inlineRender(h3[1], i)}</h3>); i++; continue; }
         if (h4) { elements.push(<h4 key={`h4-${blockStartIndex}`} style={{ fontSize: 14, fontWeight: 700, color: '#717171', margin: '10px 0 4px', letterSpacing: '0.01em' }}>{inlineRender(h4[1], i)}</h4>); i++; continue; }
+        if (h5) { elements.push(<h5 key={`h5-${blockStartIndex}`} style={{ fontSize: 13, fontWeight: 700, color: '#717171', margin: '8px 0 3px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{inlineRender(h5[1], i)}</h5>); i++; continue; }
+        if (h6) { elements.push(<h6 key={`h6-${blockStartIndex}`} style={{ fontSize: 12, fontWeight: 700, color: '#8a8886', margin: '8px 0 3px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{inlineRender(h6[1], i)}</h6>); i++; continue; }
 
         if (line.match(/^[\-\*] /)) {
             const items: string[] = [];
@@ -267,10 +290,10 @@ const MarkdownRenderer = memo(({ content }: { content: string }) => {
 });
 
 // ── Streaming Markdown Component ─────────────────────────────────────────────
-const StreamingMarkdown = ({ content, isLive }: { content: string; isLive?: boolean; isLatest?: boolean }) => {
+const StreamingMarkdown = ({ content, isLive, isLatest }: { content: string; isLive?: boolean; isLatest?: boolean }) => {
     return (
         <div style={{ position: 'relative' }}>
-            <MarkdownRenderer content={content} />
+            <MarkdownRenderer content={content} isStreaming={isLive || isLatest} />
             {isLive && content && (
                 <motion.span
                     animate={{ opacity: [1, 0] }}

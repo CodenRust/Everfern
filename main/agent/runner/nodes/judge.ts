@@ -204,14 +204,14 @@ JSON:
           );
 
           const response = await Promise.race([
-            runner.client.chat({
-              messages: [{ role: 'user', content: judgePrompt }],
-              responseFormat: 'json',
-              temperature: 0.0, // Reduced from 0.1 for faster, more deterministic responses
-              maxTokens: 80,    // Reduced from 120 for faster processing
-            }),
-            timeoutPromise,
-          ]) as any;
+             runner.client.chat({
+               messages: [{ role: 'user', content: judgePrompt }],
+               responseFormat: 'json',
+               temperature: 0.2, // Raised for better agentic reasoning
+               maxTokens: 80,
+             }),
+             timeoutPromise,
+           ]) as any;
 
           let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
           content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();

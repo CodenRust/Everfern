@@ -12,44 +12,84 @@ const MAX_ITERATIONS = 50;
  * These are internal bookkeeping operations with no destructive side effects.
  */
 const SAFE_TOOL_WHITELIST = new Set([
+  // Plan & Task Management
   'update_plan_step',
   'create_plan',
   'todo_write',
+  'execution_plan',
+  
+  // Memory & State
   'memory_save',
   'memory_search',
+  
+  // Filesystem (Read-only)
   'read_file',
   'view_file',
   'list_directory',
-  'execution_plan',
   'read',
   'find',
   'grep',
   'ls',
+  'present_files',
+  
+  // Skills & Resources
+  'skill',
+  'list_skills',
+  'view_skill',
+  'read_resource',
+  'list_resources',
+  'view_resource',
+  
+  // Discovery & Registry
+  'search_mcp_registry',
+  'suggest_connectors',
+  'suggest_plugin_install',
+  'mcp_list_tools',
+  'mcp_get_tool',
+  'list_mcp_tools',
+  
+  // Research & Web (Read-only)
+  'web_search',
+  'exa_search',
+  'firecrawl_crawl',
+  'firecrawl_scrape',
+  'navis_navigate',
+  'navis_read',
+  'navis_search',
+  
+  // Orchestration & Status
+  'spawn_agent',
+  'terminal_status',
+  'terminal_list',
+  'get_screenshot',
+  'take_screenshot',
+  'preview_open',
+  'visualize'
 ]);
 
 /**
  * AI-based tool risk assessment
  * Replaces keyword-based risk detection with semantic analysis
  */
-async function assessToolRisk(toolCalls: any[], client?: AIClient): Promise<boolean> {
-  if (!toolCalls || toolCalls.length === 0) return false;
+async function assessToolRisk(toolCalls: any[], client?: AIClient): Promise<{ isHighRisk: boolean; reasoning: string }> {
+  if (!toolCalls || toolCalls.length === 0) return { isHighRisk: false, reasoning: 'No tool calls' };
 
   // Auto-approval check: if ALL pending tool calls match user-defined auto-approval policies, skip risk assessment
   const allAutoApproved = toolCalls.every(tc => toolApprovalStore.isApproved(tc.name, tc.arguments || {}));
   if (allAutoApproved) {
     console.log('[Validation] 🚀 All tool calls are auto-approved via user policies');
-    return false;
+    return { isHighRisk: false, reasoning: 'Auto-approved' };
   }
 
   // Whitelist check: if ALL pending tool calls are safe internal tools, skip risk assessment
   const allSafe = toolCalls.every(tc => SAFE_TOOL_WHITELIST.has(tc.name));
   if (allSafe) {
-    return false;
+    return { isHighRisk: false, reasoning: 'Safe internal tools' };
   }
 
   if (!client) {
     // Fallback: conservative approach - assume high risk if no AI available
-    return toolCalls.length > 0;
+    return { isHighRisk: toolCalls.length > 0, reasoning: 'Manual review required (no AI validator available)' };
   }
 
   try {
@@ -71,13 +111,16 @@ Consider low risk:
 - File creation in safe locations
 - Non-destructive queries
 - Information retrieval
+- Skill/Plugin loading and viewing
 
 Respond with JSON:
 {
   "isHighRisk": true/false,
   "confidence": 0.0-1.0,
-  "reasoning": "brief explanation"
-}`;
+  "reasoning": "brief explanation of why this is or isn't high risk"
+}
+
+IMPORTANT: If the user is asking to create a website, create an app, or perform a specialized task that involves multiple tool calls, describe it accurately as a multi-step project rather than just "dangerous tool".`;
 
     const response = await client.chat({
       messages: [{ role: 'user', content: prompt }],
@@ -87,15 +130,32 @@ Respond with JSON:
     });
 
     let responseContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    
+    // Safety check for empty response content
+    if (!responseContent || responseContent.trim() === '') {
+       return { isHighRisk: false, reasoning: 'AI returned empty risk assessment - assuming safe' };
+    }
+
     // Remove markdown code blocks if present
     responseContent = responseContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const analysis = JSON.parse(responseContent);
+    
+    let analysis;
+    try {
+        analysis = JSON.parse(responseContent);
+    } catch (parseErr) {
+        console.warn('[Validation] JSON parse failed for risk assessment. Raw content:', responseContent);
+        return { isHighRisk: false, reasoning: 'AI response was not valid JSON - assuming safe' };
+    }
 
-    return analysis.isHighRisk && analysis.confidence > 0.7;
+    const isHighRisk = analysis.isHighRisk && analysis.confidence > 0.7;
+    return { 
+      isHighRisk, 
+      reasoning: isHighRisk ? analysis.reasoning : 'Safe operation'
+    };
   } catch (err) {
     console.warn('[Validation] AI risk assessment failed:', err);
     // Fallback: conservative approach
-    return true;
+    return { isHighRisk: true, reasoning: 'Error during safety validation — assuming high risk' };
   }
 }
 
@@ -237,7 +297,7 @@ export const createValidationNode = (runner: AgentRunner, missionTracker?: Missi
       runner.telemetry.transition('validation');
 
       // Use AI to assess tool risk instead of keyword matching
-      const isHighRisk = await assessToolRisk(state.pendingToolCalls || [], runner.client);
+      const { isHighRisk, reasoning } = await assessToolRisk(state.pendingToolCalls || [], runner.client);
 
       // Evaluate whether task should complete or continue iterating
       const taskShouldComplete = await shouldCompleteTask(state, runner.client);
@@ -246,7 +306,7 @@ export const createValidationNode = (runner: AgentRunner, missionTracker?: Missi
         taskPhase: 'validation' as const,
         validationResult: {
           isHighRisk,
-          reasoning: isHighRisk ? 'Dangerous tool detected' : 'Safe operation'
+          reasoning
         },
         shouldContinueIteration: !taskShouldComplete
       };

@@ -478,8 +478,13 @@ let voiceOverlayManager: VoiceOverlayManager;
 
 import { bridgeServer } from './lib/extension-server';
 
+import { schedulerService } from './integrations/scheduler-service';
+
 app.whenReady().then(async () => {
   console.log('[App] App ready, starting initialization...');
+
+  // Start the scheduler service
+  schedulerService.start();
 
   // Start the extension bridge server (localhost:4001)
   bridgeServer.start();

@@ -271,7 +271,15 @@ function buildSteps(userInput, analysis) {
             steps.push(mk('Compile and summarize findings', undefined, gatherIds.length > 0 ? gatherIds : execDeps, false, 'low'));
             break;
         case 'automate':
-            steps.push(mk(`Execute GUI automation task: ${userInput}`, 'computer_use', execDeps, false, 'high', 'critical'));
+            // If URLs are present, this is likely a web browsing task — use navis, not computer_use
+            if (urls.length > 0) {
+                for (const url of urls.slice(0, 3)) {
+                    steps.push(mk(`Browse and extract: ${url.slice(0, 60)}`, 'navis', execDeps, true, 'medium', 'critical', 1));
+                }
+            }
+            else {
+                steps.push(mk(`Execute GUI automation task: ${userInput}`, 'computer_use', execDeps, false, 'high', 'critical'));
+            }
             break;
         default:
             if (analysis.requiresCommandExecution) {

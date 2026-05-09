@@ -92,9 +92,17 @@ function continueWithSetup(db, resolve, reject) {
       title TEXT,
       provider TEXT,
       model TEXT,
+      project_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Ensure project_id exists in case table was already created
+    -- We use a simple attempt to add it, wrapped in a try/catch in JS if needed, 
+    -- but here we can just add it to the exec block.
+    -- SQLite ALTER TABLE ADD COLUMN is safe if the column doesn't exist in most cases 
+    -- but will throw if it does.
+    -- Better to handle this in JS.
 
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -106,6 +114,24 @@ function continueWithSetup(db, resolve, reject) {
       has_timeline BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+
+    -- Scheduled Tasks table
+    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      description TEXT NOT NULL,
+      cron TEXT NOT NULL,
+      pattern TEXT,
+      prompt TEXT NOT NULL,
+      project_id TEXT,
+      starts_at DATETIME,
+      last_run DATETIME,
+      next_run DATETIME,
+      ends_at DATETIME,
+      enabled BOOLEAN DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- Projects table
@@ -121,8 +147,54 @@ function continueWithSetup(db, resolve, reject) {
     CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);
   `, (execErr) => {
-        if (execErr)
-            return reject(execErr);
+        // Safety: Add missing columns to conversations (migration support)
+        db.all("PRAGMA table_info(conversations)", (err, columns) => {
+            if (!err && columns) {
+                const requiredColumns = [
+                    { name: 'project_id', type: 'TEXT' },
+                    { name: 'provider', type: 'TEXT' },
+                    { name: 'model', type: 'TEXT' }
+                ];
+                for (const col of requiredColumns) {
+                    if (!columns.some(c => c.name === col.name)) {
+                        db.run(`ALTER TABLE conversations ADD COLUMN ${col.name} ${col.type}`);
+                    }
+                }
+            }
+        });
+        // Safety: Add missing columns to messages (migration support)
+        db.all("PRAGMA table_info(messages)", (err, columns) => {
+            if (!err && columns) {
+                const requiredColumns = [
+                    { name: 'thought', type: 'TEXT' },
+                    { name: 'tool_calls', type: 'TEXT' },
+                    { name: 'has_timeline', type: 'BOOLEAN DEFAULT 0' }
+                ];
+                for (const col of requiredColumns) {
+                    if (!columns.some(c => c.name === col.name)) {
+                        db.run(`ALTER TABLE messages ADD COLUMN ${col.name} ${col.type}`);
+                    }
+                }
+            }
+        });
+        // Safety: Add missing columns to scheduled_tasks (migration support)
+        db.all("PRAGMA table_info(scheduled_tasks)", (err, columns) => {
+            if (!err && columns) {
+                const requiredColumns = [
+                    { name: 'name', type: 'TEXT' },
+                    { name: 'pattern', type: 'TEXT' },
+                    { name: 'starts_at', type: 'DATETIME' },
+                    { name: 'last_run', type: 'DATETIME' },
+                    { name: 'next_run', type: 'DATETIME' },
+                    { name: 'ends_at', type: 'DATETIME' }
+                ];
+                for (const col of requiredColumns) {
+                    if (!columns.some(c => c.name === col.name)) {
+                        db.run(`ALTER TABLE scheduled_tasks ADD COLUMN ${col.name} ${col.type}`);
+                    }
+                }
+            }
+        });
         instance = db;
         resolve(db);
     });

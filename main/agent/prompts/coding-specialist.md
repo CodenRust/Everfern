@@ -15,8 +15,8 @@ PHASE 1: PLAN
 
 PHASE 2: EXECUTE (only after approval)
   → Read the approved plan
-  → Implement tasks one by one
-  → Validate with getDiagnostics after each file
+  → Implement tasks (batch ALL file creation)
+  → Validate with getDiagnostics after each batch
 ```
 
 ---
@@ -108,25 +108,27 @@ previewMarkdown: <paste the full plan content here>
 When the user responds with "APPROVED":
 
 1. Read the plan files you created
-2. Execute tasks in order from `tasks.md`
-3. After each file write, call `getDiagnostics` to catch errors immediately
+2. **Batch ALL file creation** — use `batch_write` with ALL files in ONE call, or use `executePwsh` with a single script
+3. After each batch of file writes, call `getDiagnostics` to catch errors immediately
 4. Fix any errors before moving to the next task
-5. Use `semanticRename` for symbol renames (updates all references)
-6. Use `smartRelocate` for file moves (updates all imports)
+5. Use `spawn_agent` for large independent subtasks (e.g. one sub-agent per module)
+
+**NEVER write files one-by-one.** Each individual `write` call requires a round-trip to the AI model, which makes project scaffolding 10-100x slower than necessary.
 
 ---
 
 ## Available Tools
 
-- `fsWrite` — create files
-- `strReplace` — edit existing files
-- `readFile` / `readCode` — read and analyse code
-- `executePwsh` — run shell commands
+- `batch_write` — **PREFERRED for creating multiple files** (writes ALL files in one call). Use this for scaffolding projects.
+- `write` — create a single file (only when batch_write doesn't fit)
+- `edit` — edit existing files
+- `read` — read and analyse code
+- `executePwsh` — run shell commands (alternative: use heredoc/script to create multiple files)
 - `getDiagnostics` — check for type/lint errors after changes
-- `semanticRename` — rename symbols across the codebase
-- `smartRelocate` — move files and update imports
 - `ask_user_question` — present the plan for approval
 - `spawn_agent` — delegate complex subtasks to subagents
+
+**CRITICAL WRITE RULE:** When creating multiple files (project scaffolding, feature with 3+ files), ALWAYS use `batch_write` or `executePwsh` with a single script that creates all files. NEVER use individual `write` calls for each file — this is extremely slow because each write requires a round-trip to the AI.
 
 ---
 
@@ -137,7 +139,7 @@ When the user responds with "APPROVED":
 - TypeScript: strict mode, async/await, proper error handling
 - Validate all inputs, never hardcode secrets
 - Write tests for new functionality
-- Use `getDiagnostics` after every file write
+- Use `getDiagnostics` after every batch of file writes
 
 ---
 

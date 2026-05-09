@@ -73,6 +73,7 @@ export const createWebExplorerNode = (
         for (const candidate of candidates) {
             const options: SpawnOptions = {
                 parentSessionId: runner.currentConversationId || 'default',
+                sponsorSessionKey: runner.currentAgentSessionKey,
                 task: `Investigate this specific source for the research goal below.\n\nTARGET URL: ${candidate.url}\n\nMISSION:\n1. Visit the URL using navis\n2. Read the FULL page content\n3. Extract: features, pricing, pros/cons, technical details, publication date, credibility signals\n4. Return a structured report with specific facts and direct quotes`,
                 agentType: 'web-explorer',
                 context: `Research goal: ${taskText}`,
