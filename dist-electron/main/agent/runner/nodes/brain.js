@@ -114,19 +114,18 @@ Available routing options:
 - "continue_brain"     — Continue handling this yourself with general capabilities (conversation, simple tasks)
 - "route_coding"       — Route to Coding Specialist for software development, code writing, debugging, PROJECT CREATION
 - "route_data_analyst" — Route to Data Analyst for data processing, CSV/Excel analysis, charts
-- "route_computer_use" — Route to Computer Use agent ONLY for DESKTOP GUI automation (clicking desktop UI elements, desktop apps, filling forms in native Windows/macOS/Linux apps). NEVER use for web research, searching the internet, visiting websites, or filling forms on websites.
-- "route_web_explorer" — Route to Web Explorer for ANY web research, searching the internet, finding information online, fetching URLs, looking up facts, news, products, bots, tools, AND for any task involving visiting/logging into/filling forms on websites (those should use navis, not computer_use).
+- "route_computer_use" — Route to Computer Use agent ONLY for DESKTOP GUI automation (clicking desktop UI elements, interacting with native apps like Excel, VS Code, Discord desktop app). NEVER use for web research, searching the internet, visiting websites, or filling forms on websites.
+- "route_web_explorer" — Route to Web Explorer for ANY web research, searching the internet, finding information online, fetching URLs, looking up facts, news, products, bots, tools (including anime bots, discord bots), AND for any task involving visiting/logging into/filling forms on websites (those should use navis, not computer_use).
 - "complete_task"      — Task is complete, no further routing needed
 
-CRITICAL ROUTING RULES FOR PROJECT CREATION:
+CRITICAL ROUTING RULES:
 1. If user asks to "create a project", "build an app", "scaffold a website", "make a React app", "create a Next.js app" → ALWAYS use "route_coding" (Coding Specialist handles project creation)
-2. If user asks to "create a full-stack app", "build a website", "make a dashboard" → ALWAYS use "route_coding"
-3. For project creation tasks, the Coding Specialist has access to project_creator tool and can scaffold full applications
-4. "route_computer_use" is ONLY for tasks that require clicking on desktop GUI elements, interacting with native apps, or automating screen interactions. It is NOT for web browsing or research.
-5. If web_search AND navis tools were already called successfully and returned comprehensive results, THEN consider "complete_task".
-6. Do NOT re-route to web_explorer if both web_search and navis have already completed successfully.
-7. For ANY web research task (searching, finding information online, looking up websites), use "route_web_explorer" NOT "route_computer_use".
-8. CRITICAL: If the user asks to "open [a website/URL]", "go to [a website]", "login to [a website/dashboard]", "visit [a URL]", "navigate to [a URL]" — this is a WEB BROWSING task. ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for visiting websites or filling forms in browsers — those need navis browser automation, not computer_use screen automation.
+2. "route_computer_use" is ONLY for tasks that require clicking on desktop GUI elements, interacting with native apps, or automating screen interactions. It is NOT for web browsing or research.
+3. For ANY web research task (searching, finding information online, looking up websites, finding bots, comparing services), use "route_web_explorer" NOT "route_computer_use".
+4. CRITICAL: If the user asks to "find", "search for", "investigate", "open [a website/URL]", "go to [a website]", "login to [a website/dashboard]", "visit [a URL]", "navigate to [a URL]" — this is a WEB RESEARCH/BROWSING task. ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for visiting websites or filling forms in browsers — those need navis browser automation, not computer_use screen automation.
+5. CRITICAL: For tasks like "find the best anime discord bot", "search for news bots", "look up pricing for X" — these are WEB research tasks. Use "route_web_explorer".
+6. CRITICAL: For web browsing/URL tasks, do NOT try skills, do NOT call create_artifact, do NOT call executePwsh. Those tools will not help you visit a website. Route directly to "route_web_explorer" which has the navis browser automation tool.
+7. CRITICAL: NEVER use terminal_execute with curl for web research, web searches, or fetching web pages. Curl cannot render JavaScript, will get blocked by captchas, and returns incomplete content. For ANY web research task, ALWAYS use "route_web_explorer" which has proper web_search and navis tools.
 
 Respond with JSON only:
 {
@@ -222,9 +221,9 @@ const createBrainNode = (runner, eventQueue, missionTracker, toolDefs, shouldAbo
             throw new Error('Execution aborted by user (stop button clicked)');
         }
         const allTools = toolDefs || runner._buildToolDefinitions();
-        // Filter out web research tools from brain - these should only be available to web_explorer
-        const WEB_RESEARCH_TOOLS = new Set(['web_search', 'remote_web_search', 'navis', 'website_crawl']);
-        const tools = allTools.filter((tool) => !WEB_RESEARCH_TOOLS.has(tool.name));
+        // Filter out specialized tools from brain - these should only be available to their respective agents
+        const BRAIN_EXCLUDED_TOOLS = new Set(['web_search', 'remote_web_search', 'navis', 'website_crawl', 'computer_use']);
+        const tools = allTools.filter((tool) => !BRAIN_EXCLUDED_TOOLS.has(tool.name));
         // Debug logging
         console.log(`[Brain] Current intent: ${state.currentIntent}`);
         console.log(`[Brain] Available tools: ${allTools.map((t) => t.name).join(', ')}`);

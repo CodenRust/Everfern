@@ -224,7 +224,6 @@ class AgentRunner {
                     }
                     const { getSubagentSpawner } = await Promise.resolve().then(() => __importStar(require('./subagent-spawn')));
                     const spawner = getSubagentSpawner();
-                    spawner.setRunner(this); // Provide the full runner to enable runStream piping
                     const spawnedAgent = await spawner.spawn({
                         parentSessionId: this.currentConversationId || 'default',
                         sponsorSessionKey: this.currentAgentSessionKey,
@@ -235,7 +234,9 @@ class AgentRunner {
                         maxDepth,
                         parentHistory: parentHistory,
                         workspaceDir: this.workspaceDir,
-                        projectId: this.projectId
+                        projectId: this.projectId,
+                        runner: this,
+                        toolCallId: toolCallId
                     });
                     const child = await spawner.waitForAgent(spawnedAgent.agentId, timeout);
                     if (child && child.result) {

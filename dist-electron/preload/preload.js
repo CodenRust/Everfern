@@ -267,6 +267,8 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         getDefaultPath: () => electron_1.ipcRenderer.invoke('projects:getDefaultPath'),
         selectFolder: () => electron_1.ipcRenderer.invoke('projects:selectFolder'),
         selectFiles: () => electron_1.ipcRenderer.invoke('projects:selectFiles'),
+        listFiles: (projectPath) => electron_1.ipcRenderer.invoke('projects:listFiles', projectPath),
+        readFile: (projectPath, filePath) => electron_1.ipcRenderer.invoke('projects:readFile', projectPath, filePath),
     },
     // ── Sites ─────────────────────────────────────────────────────────
     sites: {

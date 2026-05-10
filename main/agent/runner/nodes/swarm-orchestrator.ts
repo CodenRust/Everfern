@@ -49,9 +49,6 @@ export const createSwarmOrchestratorNode = (
         const spawner = getSubagentSpawner();
         const spawned: any[] = [];
 
-        // Configure spawner with the current runner to enable event piping
-        spawner.setRunner(runner);
-
         for (const step of parallelSteps) {
             const toolCallId = `swarm_${step.id}_${Date.now().toString(36)}`;
             
@@ -69,8 +66,10 @@ export const createSwarmOrchestratorNode = (
                 agentType: mapToolToAgentType(step.tool),
                 model: runner.client.model,
                 mode: 'run',
-                maxDepth: 1,
-                context: `Overall goal: ${plan.title}\nTask ID: ${step.id}`
+                maxDepth: 20, // Effectively infinite
+                context: `Overall goal: ${plan.title}\nTask ID: ${step.id}`,
+                runner: runner,
+                toolCallId: toolCallId
             };
 
             console.log(`[SwarmOrchestrator] Spawning agent for step ${step.id}: ${step.description}`);
@@ -114,7 +113,7 @@ export const createSwarmOrchestratorNode = (
 
             // Safety: track how many polling iterations we've done
             const pollCount = (state.swarmPollCount || 0) + 1;
-            const MAX_POLL_ITERATIONS = 30; // 30 × 2s = 60s max wait
+            const MAX_POLL_ITERATIONS = 450; // 450 × 2s = 900s = 15 minutes
 
             if (pollCount >= MAX_POLL_ITERATIONS) {
                 console.warn(`[SwarmOrchestrator] ⚠️ Exceeded max poll iterations (${MAX_POLL_ITERATIONS}). Aborting swarm wait and returning to brain.`);

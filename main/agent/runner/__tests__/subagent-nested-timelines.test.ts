@@ -11,7 +11,6 @@ describe('Subagent Nested Timelines — Event Emission', () => {
   beforeEach(() => {
     // Reset spawner and events
     const spawner = getSubagentSpawner();
-    spawner.setRunner(undefined as any);
   });
 
   it('should pipe progress events from runStream to parent events with timelineBranch', async () => {
@@ -31,8 +30,6 @@ describe('Subagent Nested Timelines — Event Emission', () => {
       runStream: vi.fn().mockReturnValue(mockStream())
     };
 
-    spawner.setRunner(mockRunner);
-
     // Capture events emitted to the parent session
     const parentEvents = getAgentEvents(parentSessionId);
     const emittedProgress: any[] = [];
@@ -49,7 +46,8 @@ describe('Subagent Nested Timelines — Event Emission', () => {
     const agent = await spawner.spawn({
       parentSessionId,
       task: 'Research parallel task',
-      agentType: 'web-explorer'
+      agentType: 'web-explorer',
+      runner: mockRunner
     });
 
     // Wait for the async runSubagent to finish
@@ -89,8 +87,6 @@ describe('Subagent Nested Timelines — Event Emission', () => {
       runStream: undefined // Force using standard run
     };
 
-    spawner.setRunner(mockRunner);
-
     const parentEvents = getAgentEvents(parentSessionId);
     const emittedProgress: any[] = [];
     
@@ -102,7 +98,8 @@ describe('Subagent Nested Timelines — Event Emission', () => {
 
     await spawner.spawn({
       parentSessionId,
-      task: 'Failing task'
+      task: 'Failing task',
+      runner: mockRunner
     });
 
     await new Promise(resolve => setTimeout(resolve, 100));

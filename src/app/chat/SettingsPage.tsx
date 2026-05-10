@@ -966,7 +966,20 @@ export default function SettingsPage({
                 <h3 style={{ fontSize: 15, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Danger Zone</h3>
                 <p style={{ fontSize: 13, color: '#8a8886', margin: '0 0 16px', lineHeight: 1.6 }}>Wipe all local data and reset your account. This cannot be undone.</p>
                 <button
-                    onClick={() => { localStorage.clear(); (window as any).electronAPI.system.wipeAccount(); }}
+                    onClick={async () => {
+                        if (!window.confirm('Are you sure you want to reset your account? This will permanently delete all conversations, settings, and local data.')) return;
+                        try {
+                            const result = await (window as any).electronAPI.system.wipeAccount();
+                            if (result?.success) {
+                                localStorage.clear();
+                                window.location.reload();
+                            } else {
+                                alert(`Reset failed: ${result?.error || 'Unknown error'}`);
+                            }
+                        } catch (err: any) {
+                            alert(`Reset failed: ${err?.message || 'Unknown error'}`);
+                        }
+                    }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', backgroundColor: 'rgba(239,68,68,0.08)', color: '#dc2626', borderRadius: 10, fontWeight: 600, fontSize: 13, border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer', transition: 'all 0.2s' }}
                     onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.14)'}
                     onMouseLeave={e => e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.08)'}

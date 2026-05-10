@@ -6,11 +6,12 @@
 
 import type { AgentTool, ToolResult } from '../runner/types';
 import { getSubagentSpawner, type SubagentRunner, type SpawnOptions } from '../runner/subagent-spawn';
+import { getSubagentRegistry } from '../runner/subagent-registry';
 
 export function createSubagentTool(runner: SubagentRunner): AgentTool {
     return {
         name: 'spawn_agent',
-        description: 'Spawn a specialized sub-agent for complex, parallelizable, or long-horizon tasks. The sub-agent runs independently and returns results. Use this for tasks that can be broken into parallel subtasks.',
+        description: 'Spawn a sub-agent for independent tasks. Set wait=true to block until the agent finishes and returns its result. Set wait=false for fire-and-forget parallel exploration (returns immediately, result is lost). For primary web tasks, route through the graph system instead.',
         parameters: {
             type: 'object',
             properties: {
@@ -20,7 +21,11 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
                 },
                 agent_type: {
                     type: 'string',
-                    description: 'The type of sub-agent to spawn: "web-explorer" for web research/browsing/website navigation, "coding-specialist" for code tasks, "data-analyst" for data analysis, "computer-use" for desktop GUI automation (NOT for websites). Default: "web-explorer" if the task involves visiting/looking up websites, otherwise "generic".'
+                    description: 'The type of sub-agent: "web-explorer" for web research/browsing, "coding-specialist" for code, "data-analyst" for data analysis, "computer-use" for desktop GUI. Default: "generic".'
+                },
+                wait: {
+                    type: 'boolean',
+                    description: 'If true, wait for the agent to complete and return its result. Use this when you need the agent\'s output. Default: true.'
                 },
                 agent_id: { 
                     type: 'string', 
@@ -28,7 +33,7 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
                 },
                 max_depth: { 
                     type: 'number', 
-                    description: 'Maximum spawn depth for nested agents (default: 3)'
+                    description: 'Maximum spawn depth for nested agents (default: 4)'
                 }
             },
             required: ['task']
@@ -37,24 +42,46 @@ export function createSubagentTool(runner: SubagentRunner): AgentTool {
         async execute(args: Record<string, unknown>, onUpdate?: (msg: string) => void, emitEvent?: (event: any) => void, toolCallId?: string): Promise<ToolResult> {
             const task = args.task as string;
             const agentType = (args.agent_type as string) || 'generic';
+            const wait = args.wait !== false; // default to true
             const agentId = args.agent_id as string | undefined;
-            const maxDepth = (args.max_depth as number) || 3;
+            const maxDepth = (args.max_depth as number) || 4;
 
             onUpdate?.('Spawning sub-agent...');
 
             try {
                 const spawner = getSubagentSpawner();
-                spawner.setRunner(runner);
 
                 const options: SpawnOptions = {
                     parentSessionId: 'main', // Will be overridden by actual parent
-                    sponsorSessionKey: runner.currentAgentSessionKey,
                     task,
                     agentType: agentType as any,
-                    maxDepth
+                    maxDepth,
+                    toolCallId,
+                    runner: runner
                 };
 
                 const agent = await spawner.spawn(options);
+
+                if (wait && agent.completion) {
+                    onUpdate?.(`Waiting for ${agentType} agent to complete...`);
+                    await agent.completion;
+
+                    // Read the result from the registry
+                    const registry = getSubagentRegistry();
+                    const entry = registry.get(agent.agentId);
+
+                    return {
+                        success: entry?.status === 'completed',
+                        output: entry?.result || `Agent completed with status: ${entry?.status || 'unknown'}`,
+                        data: {
+                            agentId: agent.agentId,
+                            sessionKey: agent.sessionKey,
+                            status: entry?.status,
+                            result: entry?.result,
+                            error: entry?.error
+                        }
+                    };
+                }
 
                 return {
                     success: true,

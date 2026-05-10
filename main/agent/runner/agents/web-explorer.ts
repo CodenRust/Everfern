@@ -24,9 +24,35 @@ export const createWebExplorerNode = (
     const lastMsg = messages[messages.length - 1];
     const isSearchComplete = messages.some((m: any) => (m.role === 'tool' || m.type === 'tool') && m.name === 'web_search');
     const hasSpawnedSubagents = state.subagentSpawned && state.subagentSpawned.length > 0;
+    const hasDirectNav = messages.some((m: any) => (m.role === 'tool' || m.type === 'tool') && m.name === 'navis');
+
+    // DIRECT URL NAVIGATION: If the user provided a specific URL (skip research workflow)
+    const directUrl = !isSearchComplete && !hasSpawnedSubagents && !hasDirectNav
+        ? extractDirectUrl(messages)
+        : null;
+
+    if (directUrl) {
+        eventQueue?.push({ type: 'thought', content: `\n🌐 WEB EXPLORER: Navigating directly to ${directUrl}...` });
+        const result = await integrator.wrapNode('web_explorer', () => runAgentStep(state, {
+            runner,
+            toolDefs: allTools,
+            eventQueue,
+            nodeName: 'web_explorer',
+            systemPromptOverride: (loadPrompt('web-explorer.md') || '') +
+                `\n\nDIRECT URL NAVIGATION. The user wants you to go to: ${directUrl}` +
+                '\nUse navis to navigate to this URL. Do NOT call web_search — the URL is already provided.' +
+                '\nLook for login buttons, forms, or dashboard links and interact with them.' +
+                '\nReport what you see and what actions are available on the page.'
+        }), 'Web Explorer: Direct Navigation');
+        return {
+            ...result,
+            webExplorerComplete: false,
+            returningFromSpecialist: 'web_explorer'
+        };
+    }
 
     // PHASE 1: Initial Search
-    if (!isSearchComplete) {
+    if (!isSearchComplete && !hasDirectNav) {
         eventQueue?.push({ type: 'thought', content: '\n🌐 WEB EXPLORER: Searching for authoritative sources...' });
         const result = await integrator.wrapNode('web_explorer', () => runAgentStep(state, {
             runner,
@@ -36,7 +62,8 @@ export const createWebExplorerNode = (
             systemPromptOverride: (loadPrompt('web-explorer.md') || '') +
                 '\n\nPHASE: SEARCH. Use web_search to find the top 3-5 most relevant and authoritative sources. ' +
                 'Prefer official sites, documentation, established review platforms, and recent content. ' +
-                'Return a structured list of URLs with brief descriptions.'
+                'Return a structured list of URLs with brief descriptions.' +
+                '\n\nCRITICAL: Use web_search — NOT terminal_execute with curl. Curl cannot render JavaScript pages and will get blocked by captchas. web_search is the only allowed search tool.'
         }), 'Web Explorer: Initial Search');
         return {
             ...result,
@@ -71,20 +98,37 @@ export const createWebExplorerNode = (
         const spawned: any[] = [];
 
         for (const candidate of candidates) {
+            const investigatorToolCallId = `investigator_${candidate.url.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30)}_${Date.now().toString(36)}`;
+            
+            // Emit pseudo tool_start for the timeline
+            eventQueue?.push({
+                type: 'tool_start',
+                toolName: 'web_investigator',
+                toolArgs: { url: candidate.url },
+                toolCallId: investigatorToolCallId
+            });
+
             const options: SpawnOptions = {
                 parentSessionId: runner.currentConversationId || 'default',
                 sponsorSessionKey: runner.currentAgentSessionKey,
-                task: `Investigate this specific source for the research goal below.\n\nTARGET URL: ${candidate.url}\n\nMISSION:\n1. Visit the URL using navis\n2. Read the FULL page content\n3. Extract: features, pricing, pros/cons, technical details, publication date, credibility signals\n4. Return a structured report with specific facts and direct quotes`,
+                task: `Investigate this specific source for the research goal below.\n\nTARGET URL: ${candidate.url}\n\nMISSION:\n1. Use navis to navigate to the URL above\n2. Read the FULL page content using extract_content\n3. Extract: features, pricing, pros/cons, technical details, publication date, credibility signals\n4. Return a structured report with specific facts and direct quotes\n\nCRITICAL: You MUST use navis to visit the URL. DO NOT use terminal_execute with curl — curl cannot render JavaScript, will get blocked by captchas, and returns incomplete content. Only navis can properly load modern web pages.`,
                 agentType: 'web-explorer',
                 context: `Research goal: ${taskText}`,
                 model: runner.client.model,
                 mode: 'run',
-                maxDepth: 2
+                maxDepth: 20, // Effectively infinite, reliance on 15m timeout
+                runner: runner,
+                toolCallId: investigatorToolCallId
             };
 
             console.log(`[WebExplorer] Dispatching investigator → ${candidate.url}`);
             const agent = await spawner.spawn(options);
-            spawned.push(agent);
+            spawned.push({ 
+                agentId: agent.agentId, 
+                sessionKey: agent.sessionKey, 
+                url: candidate.url,
+                toolCallId: investigatorToolCallId
+            });
         }
 
         return {
@@ -97,22 +141,37 @@ export const createWebExplorerNode = (
 
     // PHASE 3: Wait and Synthesize
     if (hasSpawnedSubagents) {
-        eventQueue?.push({ type: 'thought', content: '\n📊 WEB EXPLORER: Gathering findings from investigators...' });
-
         const registry = getSubagentRegistry();
         const ids = state.subagentSpawned.map((s: any) => s.agentId || s.id);
         const timeout = AGENT_TIMEOUTS['web-explorer'];
         const startTime = Date.now();
         let completed = false;
 
+        let lastActiveCount = -1;
+
         while (Date.now() - startTime < timeout) {
             const children = registry.getChildren(runner.currentConversationId || 'default');
-            const allDone = ids.every((id: string) => {
+            const statusMap = ids.map((id: string) => {
                 const child = children.find(c => c.agentId === id);
-                return child && (child.status === 'completed' || child.status === 'failed' || child.status === 'aborted');
+                return { id, status: child?.status || 'unknown' };
             });
+
+            const allDone = statusMap.every((s: any) => s.status === 'completed' || s.status === 'failed' || s.status === 'aborted');
             if (allDone) { completed = true; break; }
-            await new Promise(resolve => setTimeout(resolve, 200));
+
+            const activeCount = statusMap.filter((s: any) => s.status === 'running' || s.status === 'pending').length;
+            
+            // Emit update only when progress changes to avoid spamming
+            if (activeCount !== lastActiveCount) {
+                const finishedCount = ids.length - activeCount;
+                eventQueue?.push({ 
+                    type: 'thought', 
+                    content: `\n📊 WEB EXPLORER: Investigating sources... (${finishedCount}/${ids.length} finished, ${activeCount} active)` 
+                });
+                lastActiveCount = activeCount;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
         const children = registry.getChildren(runner.currentConversationId || 'default');
@@ -150,6 +209,21 @@ export const createWebExplorerNode = (
     return { webExplorerComplete: true, returningFromSpecialist: 'web_explorer' };
   };
 };
+
+function extractDirectUrl(messages: any[]): string | null {
+    const userMsg = messages.find((m: any) => m.role === 'user' || m.type === 'human' || m._getType?.() === 'human');
+    if (!userMsg) return null;
+    const content = typeof userMsg.content === 'string' ? userMsg.content : '';
+    if (!content) return null;
+
+    const urlPattern = /(?:https?:\/\/)?(?:[a-zA-Z0-9-]+\.)+(?:com|org|net|io|xyz|dev|app|ai|co|me|tv|edu|gov|info)\b(?:[^\s"'<>)]*)?/gi;
+    const matches = content.match(urlPattern);
+    if (!matches || matches.length === 0) return null;
+
+    const url = matches[0].toLowerCase();
+
+    return url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+}
 
 function extractTopCandidates(searchContent: string, task: string, maxCount: number): Array<{ url: string; score: number }> {
     const candidates: Array<{ url: string; score: number }> = [];

@@ -198,13 +198,29 @@ export function registerSystemHandlers() {
   ipcMain.handle('system:wipe-account', async () => {
     const everfernDir = path.join(os.homedir(), '.everfern');
     try {
+      // Close all open database connections before wiping files
+      try {
+        const { closeDb } = await import('../lib/db');
+        await closeDb();
+        console.log('[IPC] system:wipe-account: main DB closed');
+      } catch (dbErr: any) {
+        console.warn('[IPC] system:wipe-account: main DB close warning:', dbErr.message);
+      }
+
+      try {
+        const { closeChatVectorDb } = await import('../store/chat-vectors');
+        await closeChatVectorDb();
+        console.log('[IPC] system:wipe-account: chat vector DB closed');
+      } catch (vecErr: any) {
+        console.warn('[IPC] system:wipe-account: chat vector DB close warning:', vecErr.message);
+      }
+
       // Wipe .everfern directory
       if (fs.existsSync(everfernDir)) {
         fs.rmSync(everfernDir, { recursive: true, force: true });
       }
       fs.mkdirSync(everfernDir, { recursive: true });
 
-      // Also wipe the SQLite database (now lives inside .everfern/sql/, covered by the wipe above)
       console.log('[IPC] system:wipe-account: .everfern (including sql databases) wiped');
       return { success: true };
     } catch (err: any) {

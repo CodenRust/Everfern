@@ -709,13 +709,17 @@ const SubAgentProgressItem = ({
     isLast: boolean;
 }) => {
     const [screenshotExpanded, setScreenshotExpanded] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(true);
+    const [actionExpanded, setActionExpanded] = useState(false);
     const isLive = event.type === 'step' && !event.content;
 
     // Render based on event type
     if (event.type === 'step') {
+        const stepContent = event.content || '';
+        const hasStepContent = stepContent.trim().length > 0;
+
         return (
             <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
-                {/* Timeline line */}
                 <div style={{
                     width: 20,
                     display: "flex",
@@ -723,57 +727,31 @@ const SubAgentProgressItem = ({
                     alignItems: "center",
                     paddingTop: 0,
                 }}>
-                    {/* Vertical line before dot */}
-                    <div style={{
-                        width: 2,
-                        height: 8,
-                        backgroundColor: "#e8e6d9",
-                    }} />
-
-                    {/* Step indicator dot */}
+                    <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
                     {isLive ? (
                         <div style={{ position: "relative", width: 10, height: 10, flexShrink: 0 }}>
-                            <div style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: "50%",
-                                backgroundColor: "#6366f1",
-                                border: "2px solid #faf9f7",
-                                boxShadow: "0 0 0 1px #e8e6d9",
-                            }} />
+                            <div style={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: "#6366f1", border: "2px solid #faf9f7", boxShadow: "0 0 0 1px #e8e6d9" }} />
                         </div>
                     ) : (
-                        <div style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: "50%",
-                            backgroundColor: "#22c55e",
-                            border: "2px solid #faf9f7",
-                            boxShadow: "0 0 0 1px #e8e6d9",
-                            flexShrink: 0,
-                        }} />
+                        <div style={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: "#22c55e", border: "2px solid #faf9f7", boxShadow: "0 0 0 1px #e8e6d9", flexShrink: 0 }} />
                     )}
-
-                    {/* Vertical line after dot */}
                     {!isLast && (
-                        <div style={{
-                            position: "absolute",
-                            top: 18,
-                            bottom: -20,
-                            width: 2,
-                            backgroundColor: "#e8e6d9",
-                        }} />
+                        <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
                     )}
                 </div>
 
-                {/* Step content */}
                 <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
-                    <div style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "2px 0",
-                    }}>
+                    <div
+                        onClick={() => hasStepContent && setIsExpanded(!isExpanded)}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "2px 0",
+                            cursor: hasStepContent ? "pointer" : "default",
+                            userSelect: "none",
+                        }}
+                    >
                         <span style={{
                             fontSize: 11,
                             fontWeight: 600,
@@ -784,6 +762,20 @@ const SubAgentProgressItem = ({
                         }}>
                             STEP {event.stepNumber}/{event.totalSteps}
                         </span>
+
+                        {!isLive && hasStepContent && (
+                            <span style={{
+                                fontSize: 12,
+                                color: "#4a4846",
+                                fontFamily: "'Figtree', system-ui, sans-serif",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                flex: 1,
+                            }}>
+                                {stepContent.length > 60 ? stepContent.substring(0, 60) + '...' : stepContent}
+                            </span>
+                        )}
 
                         {isLive && (
                             <motion.div
@@ -801,7 +793,46 @@ const SubAgentProgressItem = ({
                                 ))}
                             </motion.div>
                         )}
+
+                        {hasStepContent && !isLive && (
+                            <motion.svg
+                                animate={{ rotate: isExpanded ? 180 : 0 }}
+                                transition={{ duration: 0.18 }}
+                                width={12} height={12} viewBox="0 0 24 24"
+                                fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                                strokeLinecap="round" strokeLinejoin="round"
+                                style={{ flexShrink: 0 }}
+                            >
+                                <polyline points="6 9 12 15 18 9" />
+                            </motion.svg>
+                        )}
                     </div>
+
+                    <AnimatePresence>
+                        {isExpanded && hasStepContent && !isLive && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.18 }}
+                                style={{ overflow: "hidden" }}
+                            >
+                                <div style={{
+                                    marginTop: 6,
+                                    padding: "8px 12px",
+                                    backgroundColor: "#faf9f7",
+                                    borderRadius: 6,
+                                    border: "1px solid #e8e6d9",
+                                    fontSize: 12,
+                                    color: "#6b7280",
+                                    fontFamily: "'Figtree', system-ui, sans-serif",
+                                    lineHeight: 1.5,
+                                }}>
+                                    {stepContent}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         );
@@ -814,10 +845,7 @@ const SubAgentProgressItem = ({
         const cleanContent = event.content ? event.content.replace(/^(?:🤖|🧠|🧭|⚙️|🔍|👨‍💻|📊|🌐|🖥️|💻|✅|⚠️|⚖️|🎬)\s*[^:]+:\s*/, '').trim() : '';
         const displayContent = cleanContent.replace(/^(?:🤖|🧠|🧭|⚙️|🔍|👨‍💻|📊|🌐|🖥️|💻|✅|⚠️|⚖️|🎬)\s*/, '');
         
-        // Skip empty content
         if (!displayContent) return null;
-
-        const [isExpanded, setIsExpanded] = useState(true);
 
         return (
             <div style={{ display: "flex", gap: 0, paddingBottom: 0, position: "relative" }}>
@@ -943,7 +971,6 @@ const SubAgentProgressItem = ({
     }
 
     if (event.type === 'action' && event.action) {
-        // Map action types to icons
         const actionIcons: Record<string, string> = {
             left_click: "🖱️",
             right_click: "🖱️",
@@ -960,10 +987,10 @@ const SubAgentProgressItem = ({
         };
 
         const icon = actionIcons[event.action.type] || "🖱️";
+        const hasParams = event.action.params && Object.keys(event.action.params).length > 0;
 
         return (
             <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
-                {/* Timeline line */}
                 <div style={{
                     width: 20,
                     display: "flex",
@@ -971,70 +998,80 @@ const SubAgentProgressItem = ({
                     alignItems: "center",
                     paddingTop: 0,
                 }}>
-                    {/* Vertical line before dot */}
+                    <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
                     <div style={{
-                        width: 2,
-                        height: 8,
-                        backgroundColor: "#e8e6d9",
+                        width: 10, height: 10, borderRadius: "50%", backgroundColor: "#22c55e",
+                        border: "2px solid #faf9f7", boxShadow: "0 0 0 1px #e8e6d9", flexShrink: 0,
                     }} />
-
-                    {/* Action dot */}
-                    <div style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        backgroundColor: "#22c55e",
-                        border: "2px solid #faf9f7",
-                        boxShadow: "0 0 0 1px #e8e6d9",
-                        flexShrink: 0,
-                    }} />
-
-                    {/* Vertical line after dot */}
                     {!isLast && (
-                        <div style={{
-                            position: "absolute",
-                            top: 18,
-                            bottom: -20,
-                            width: 2,
-                            backgroundColor: "#e8e6d9",
-                        }} />
+                        <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
                     )}
                 </div>
 
-                {/* Action content */}
                 <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
-                    <div style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "2px 0",
-                    }}>
+                    <div
+                        onClick={() => hasParams && setActionExpanded(!actionExpanded)}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "2px 0",
+                            cursor: hasParams ? "pointer" : "default",
+                            userSelect: "none",
+                        }}
+                    >
                         <span style={{ fontSize: 16 }}>{icon}</span>
                         <span style={{
                             fontSize: 12,
                             color: "#4a4846",
                             fontFamily: "'Figtree', system-ui, sans-serif",
                         }}>
-                            Action: {event.action.description}
+                            {event.action.description}
                         </span>
+                        {hasParams && (
+                            <motion.svg
+                                animate={{ rotate: actionExpanded ? 180 : 0 }}
+                                transition={{ duration: 0.18 }}
+                                width={12} height={12} viewBox="0 0 24 24"
+                                fill="none" stroke="#b5b2aa" strokeWidth={2.5}
+                                strokeLinecap="round" strokeLinejoin="round"
+                                style={{ marginLeft: "auto", flexShrink: 0 }}
+                            >
+                                <polyline points="6 9 12 15 18 9" />
+                            </motion.svg>
+                        )}
                     </div>
 
-                    {/* Show action parameters if available */}
-                    {event.action.params && Object.keys(event.action.params).length > 0 && (
-                        <div style={{
-                            marginTop: 4,
-                            fontSize: 11,
-                            color: "#8a8886",
-                            fontFamily: "'JetBrains Mono', monospace",
-                            paddingLeft: 24,
-                        }}>
-                            {Object.entries(event.action.params).map(([key, value]) => (
-                                <div key={key}>
-                                    {key}: {JSON.stringify(value)}
+                    <AnimatePresence>
+                        {actionExpanded && hasParams && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.18 }}
+                                style={{ overflow: "hidden" }}
+                            >
+                                <div style={{
+                                    marginTop: 6,
+                                    padding: "8px 12px",
+                                    backgroundColor: "#faf9f7",
+                                    borderRadius: 6,
+                                    border: "1px solid #e8e6d9",
+                                    fontSize: 11,
+                                    color: "#6b7280",
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    lineHeight: 1.6,
+                                }}>
+                                    {Object.entries(event.action.params).map(([key, value]) => (
+                                        <div key={key}>
+                                            <span style={{ color: "#8a8886" }}>{key}: </span>
+                                            {JSON.stringify(value, null, 1)}
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                    )}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         );
@@ -1151,63 +1188,84 @@ const SubAgentProgressItem = ({
     }
 
     if (event.type === 'complete') {
+        const resultContent = event.content || '';
+        const hasResults = resultContent.trim().length > 0;
+
         return (
             <div style={{ display: "flex", gap: 0, position: "relative", paddingBottom: 0 }}>
-                {/* Timeline line */}
                 <div style={{
-                    width: 20,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    paddingTop: 0,
+                    width: 20, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 0,
                 }}>
-                    {/* Vertical line before dot */}
+                    <div style={{ width: 2, height: 8, backgroundColor: "#e8e6d9" }} />
                     <div style={{
-                        width: 2,
-                        height: 8,
-                        backgroundColor: "#e8e6d9",
+                        width: 10, height: 10, borderRadius: "50%", backgroundColor: "#22c55e",
+                        border: "2px solid #faf9f7", boxShadow: "0 0 0 1px #e8e6d9", flexShrink: 0,
                     }} />
-
-                    {/* Complete dot */}
-                    <div style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        backgroundColor: "#22c55e",
-                        border: "2px solid #faf9f7",
-                        boxShadow: "0 0 0 1px #e8e6d9",
-                        flexShrink: 0,
-                    }} />
-
-                    {/* Vertical line after dot */}
                     {!isLast && (
-                        <div style={{
-                            position: "absolute",
-                            top: 18,
-                            bottom: -20,
-                            width: 2,
-                            backgroundColor: "#e8e6d9",
-                        }} />
+                        <div style={{ position: "absolute", top: 18, bottom: -20, width: 2, backgroundColor: "#e8e6d9" }} />
                     )}
                 </div>
 
-                {/* Complete content */}
                 <div style={{ flex: 1, paddingLeft: 12, paddingBottom: 20 }}>
-                    <div style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "2px 0",
-                    }}>
+                    <div
+                        onClick={() => hasResults && setIsExpanded(!isExpanded)}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "2px 0",
+                            cursor: hasResults ? "pointer" : "default",
+                            userSelect: "none",
+                        }}
+                    >
                         <span style={{
-                            fontSize: 12,
-                            color: "#22c55e",
-                            fontWeight: 600,
+                            fontSize: 12, color: "#22c55e", fontWeight: 600,
                             fontFamily: "'Figtree', system-ui, sans-serif",
                         }}>
                             ✓ Sub-agent completed
                         </span>
+                        {hasResults && (
+                            <motion.svg
+                                animate={{ rotate: isExpanded ? 180 : 0 }}
+                                transition={{ duration: 0.18 }}
+                                width={12} height={12} viewBox="0 0 24 24"
+                                fill="none" stroke="#22c55e" strokeWidth={2.5}
+                                strokeLinecap="round" strokeLinejoin="round"
+                                style={{ flexShrink: 0 }}
+                            >
+                                <polyline points="6 9 12 15 18 9" />
+                            </motion.svg>
+                        )}
                     </div>
+
+                    <AnimatePresence>
+                        {isExpanded && hasResults && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.18 }}
+                                style={{ overflow: "hidden" }}
+                            >
+                                <div style={{
+                                    marginTop: 8,
+                                    padding: "10px 14px",
+                                    backgroundColor: "#f0fdf4",
+                                    borderRadius: 8,
+                                    border: "1px solid #bbf7d0",
+                                    fontSize: 12,
+                                    color: "#166534",
+                                    fontFamily: "'Figtree', system-ui, sans-serif",
+                                    lineHeight: 1.6,
+                                    whiteSpace: "pre-wrap",
+                                    maxHeight: 400,
+                                    overflowY: "auto",
+                                }}>
+                                    {resultContent}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         );

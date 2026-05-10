@@ -34,7 +34,7 @@ describe('Bug Condition: Subagents Receive Empty History Instead of Parent Conte
     ];
 
     // Set up mock runner that captures the history parameter
-    spawner.setRunner({
+    const mockRunner = {
       run: async (task: string, history: any[], model?: string) => {
         capturedHistory = history;
         return {
@@ -42,14 +42,15 @@ describe('Bug Condition: Subagents Receive Empty History Instead of Parent Conte
           toolCalls: []
         };
       }
-    });
+    };
 
     // ACT: Spawn subagent with parent history
     const spawnedAgent = await spawner.spawn({
       parentSessionId: 'test-parent-session',
       task: 'Add email validation',
       model: 'test-model',
-      parentHistory
+      parentHistory,
+      runner: mockRunner
     });
 
     // Wait for subagent to start running
@@ -92,7 +93,7 @@ describe('Bug Condition: Subagents Receive Empty History Instead of Parent Conte
     ];
 
     // Set up mock runner that captures the history parameter
-    spawner.setRunner({
+    const mockRunner = {
       run: async (task: string, history: any[], model?: string) => {
         capturedHistory = history;
         return {
@@ -100,14 +101,15 @@ describe('Bug Condition: Subagents Receive Empty History Instead of Parent Conte
           toolCalls: []
         };
       }
-    });
+    };
 
     // ACT: Spawn subagent
     const spawnedAgent = await spawner.spawn({
       parentSessionId: 'test-parent-session-2',
       task: 'Update the port to 4000',
       model: 'test-model',
-      parentHistory
+      parentHistory,
+      runner: mockRunner
     });
 
     // Wait for subagent to start running
@@ -135,7 +137,7 @@ describe('Bug Condition: Subagents Receive Empty History Instead of Parent Conte
     }
 
     // Set up mock runner that captures the history parameter
-    spawner.setRunner({
+    const mockRunner = {
       run: async (task: string, history: any[], model?: string) => {
         capturedHistory = history;
         return {
@@ -143,14 +145,15 @@ describe('Bug Condition: Subagents Receive Empty History Instead of Parent Conte
           toolCalls: []
         };
       }
-    });
+    };
 
     // ACT: Spawn subagent
     const spawnedAgent = await spawner.spawn({
       parentSessionId: 'test-parent-session-3',
       task: 'Summarize the conversation',
       model: 'test-model',
-      parentHistory
+      parentHistory,
+      runner: mockRunner
     });
 
     // Wait for subagent to start running

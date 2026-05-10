@@ -36,4 +36,51 @@ function registerProjectsHandlers() {
             return [];
         return result.filePaths;
     });
+    electron_1.ipcMain.handle('projects:listFiles', async (_event, projectPath) => {
+        const fs = require('fs');
+        const path = require('path');
+        const results = [];
+        function walk(dir, relativePath = '') {
+            let entries;
+            try {
+                entries = fs.readdirSync(dir);
+            }
+            catch {
+                return;
+            }
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry);
+                const relPath = relativePath ? path.join(relativePath, entry) : entry;
+                try {
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        if (!entry.startsWith('.') && entry !== 'node_modules') {
+                            walk(fullPath, relPath);
+                        }
+                    }
+                    else {
+                        results.push(relPath);
+                    }
+                }
+                catch {
+                    // skip files we can't stat
+                }
+            }
+        }
+        if (projectPath) {
+            walk(projectPath);
+        }
+        return { files: results.sort() };
+    });
+    electron_1.ipcMain.handle('projects:readFile', async (_event, projectPath, filePath) => {
+        const fs = require('fs');
+        const path = require('path');
+        const fullPath = path.join(projectPath, filePath);
+        try {
+            return fs.readFileSync(fullPath, 'utf-8');
+        }
+        catch {
+            return null;
+        }
+    });
 }

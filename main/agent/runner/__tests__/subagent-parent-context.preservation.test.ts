@@ -53,13 +53,13 @@ describe('Preservation Property 2.1 — Error Propagation Unchanged', () => {
     const errorRunner: SubagentRunner = {
       run: vi.fn().mockRejectedValue(testError)
     };
-    spawner.setRunner(errorRunner);
 
     // Spawn subagent
     const agent = await spawner.spawn({
       parentSessionId: 'test-parent',
       task: 'Task that will fail',
-      maxDepth: 2
+      maxDepth: 2,
+      runner: errorRunner
     });
 
     // Wait for completion
@@ -87,12 +87,11 @@ describe('Preservation Property 2.1 — Error Propagation Unchanged', () => {
           const errorRunner: SubagentRunner = {
             run: vi.fn().mockRejectedValue(testError)
           };
-          spawner.setRunner(errorRunner);
-
           const agent = await spawner.spawn({
             parentSessionId: `test-parent-${Date.now()}`,
             task: 'Task that will fail',
-            maxDepth: 2
+            maxDepth: 2,
+            runner: errorRunner
           });
 
           // Wait for completion
@@ -137,7 +136,6 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
     const successRunner: SubagentRunner = {
       run: vi.fn().mockResolvedValue({ response: 'success', toolCalls: [] })
     };
-    spawner.setRunner(successRunner);
 
     // Create depth chain: parent -> child1 -> child2 -> child3
     // Manually set up registry entries to simulate depth
@@ -190,7 +188,8 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
       spawner.spawn({
         parentSessionId: 'agent:child3:session',
         task: 'child4 task (should fail)',
-        maxDepth: 3
+        maxDepth: 3,
+        runner: successRunner
       })
     ).rejects.toThrow('Maximum spawn depth (3) exceeded');
   });
@@ -209,7 +208,6 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
           const successRunner: SubagentRunner = {
             run: vi.fn().mockResolvedValue({ response: 'success', toolCalls: [] })
           };
-          spawner.setRunner(successRunner);
 
           // Build depth chain up to attemptedDepth - 1
           let parentSessionKey = 'root';
@@ -238,7 +236,8 @@ describe('Preservation Property 2.2 — Depth Limit Enforcement Unchanged', () =
             await spawner.spawn({
               parentSessionId: parentSessionKey,
               task: `task at depth ${attemptedDepth}`,
-              maxDepth: 3
+              maxDepth: 3,
+              runner: successRunner
             });
           } catch (err) {
             threw = true;
@@ -281,13 +280,13 @@ describe('Preservation Property 2.3 — Abort Handling Unchanged', () => {
         return { response: 'completed', toolCalls: [] };
       })
     };
-    spawner.setRunner(slowRunner);
 
     // Spawn subagent
     const agent = await spawner.spawn({
       parentSessionId: 'test-parent',
       task: 'Long running task',
-      maxDepth: 2
+      maxDepth: 2,
+      runner: slowRunner
     });
 
     // Abort immediately
@@ -317,12 +316,12 @@ describe('Preservation Property 2.3 — Abort Handling Unchanged', () => {
               return { response: 'completed', toolCalls: [] };
             })
           };
-          spawner.setRunner(slowRunner);
 
           const agent = await spawner.spawn({
             parentSessionId: `test-parent-${Date.now()}`,
             task: taskName,
-            maxDepth: 2
+            maxDepth: 2,
+            runner: slowRunner
           });
 
           // Abort
@@ -367,25 +366,27 @@ describe('Preservation Property 2.4 — Session Isolation Unchanged', () => {
     const successRunner: SubagentRunner = {
       run: vi.fn().mockResolvedValue({ response: 'success', toolCalls: [] })
     };
-    spawner.setRunner(successRunner);
 
     // Spawn multiple parallel subagents
     const agent1 = await spawner.spawn({
       parentSessionId: 'test-parent',
       task: 'Task 1',
-      maxDepth: 2
+      maxDepth: 2,
+      runner: successRunner
     });
 
     const agent2 = await spawner.spawn({
       parentSessionId: 'test-parent',
       task: 'Task 2',
-      maxDepth: 2
+      maxDepth: 2,
+      runner: successRunner
     });
 
     const agent3 = await spawner.spawn({
       parentSessionId: 'test-parent',
       task: 'Task 3',
-      maxDepth: 2
+      maxDepth: 2,
+      runner: successRunner
     });
 
     // Verify each has unique session key
@@ -427,7 +428,6 @@ describe('Preservation Property 2.4 — Session Isolation Unchanged', () => {
           const successRunner: SubagentRunner = {
             run: vi.fn().mockResolvedValue({ response: 'success', toolCalls: [] })
           };
-          spawner.setRunner(successRunner);
 
           const parentSessionId = `test-parent-${Date.now()}`;
           const agents = [];
@@ -437,7 +437,8 @@ describe('Preservation Property 2.4 — Session Isolation Unchanged', () => {
             const agent = await spawner.spawn({
               parentSessionId,
               task: `Task ${i}`,
-              maxDepth: 2
+              maxDepth: 2,
+              runner: successRunner
             });
             agents.push(agent);
           }
@@ -493,13 +494,13 @@ describe('Preservation Property 2.5 — Progress Streaming Unchanged', () => {
     const successRunner: SubagentRunner = {
       run: vi.fn().mockResolvedValue({ response: 'success', toolCalls: [] })
     };
-    spawner.setRunner(successRunner);
 
     // Spawn subagent
     const agent = await spawner.spawn({
       parentSessionId: 'test-parent',
       task: 'Task with progress',
-      maxDepth: 2
+      maxDepth: 2,
+      runner: successRunner
     });
 
     // Wait for completion
@@ -532,12 +533,12 @@ describe('Preservation Property 2.5 — Progress Streaming Unchanged', () => {
               toolCalls: []
             })
           };
-          spawner.setRunner(successRunner);
 
           const agent = await spawner.spawn({
             parentSessionId: `test-parent-${Date.now()}`,
             task: taskName,
-            maxDepth: 2
+            maxDepth: 2,
+            runner: successRunner
           });
 
           // Wait for completion

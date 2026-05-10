@@ -132,6 +132,8 @@ Compile comprehensive answer with:
 - ✅ **If user gave a specific URL** — use `navis` directly, skip search
 - ✅ **ALWAYS** call `web_search` first to get URLs (only for open-ended research)
 - ✅ **ALWAYS** pass search results to `navis` (don't make it search again)
+- ✅ **ALWAYS use `web_search` for finding URLs** — never use `terminal_execute` with curl
+- ✅ **ALWAYS use `navis` for visiting web pages** — never use `terminal_execute` with curl
 - ✅ **VISIT ACTUAL PAGES** — never rely on snippets alone
 - ✅ **DEEP DIVE** — click through to individual product/article pages
 - ✅ **CITE SOURCES** — include [Title](URL) for all claims
@@ -140,7 +142,9 @@ Compile comprehensive answer with:
 - ✅ **COMPLETE WORKFLOW** — finish all 3 phases before returning to brain
 
 ### DON'T:
+- ❌ **NO COMPUTER_USE FOR WEB:** NEVER use `computer_use` or GUI automation (clicking the desktop, opening a browser app manually) for web research, visiting sites, or filling web forms. You have direct access to `navis` browser automation which is 10x faster and more reliable. `computer_use` is for DESKTOP apps only.
 - ❌ **NO NARRATION** — don't say "Let me search..." just call tools
+- ❌ **NO CURL/TERMINAL FOR WEB** — never use `terminal_execute` with curl for web searches or page access. curl cannot render JavaScript, will get blocked by captchas, and misses dynamic content. Use `web_search` for searches and `navis` for page access.
 - ❌ **NO SNIPPET SUMMARIES** — must visit actual pages
 - ❌ **NO PREMATURE ANSWERS** — complete investigation before synthesizing
 - ❌ **NO VAGUE CLAIMS** — back everything with specific sources
@@ -232,6 +236,7 @@ If `navis` fails:
 2. Adjust query to find more accessible sources
 3. Use `website_crawl` for JavaScript-heavy sites
 4. Report limitations clearly if information is unavailable
+5. **NEVER fall back to `terminal_execute` with curl/requests** — it won't work with modern sites
 
 ## Sub-Agent Delegation
 

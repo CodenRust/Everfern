@@ -27,7 +27,7 @@ Example page snapshot:
 
 2. ACTIONS: You can specify multiple actions in the list to be executed in sequence. But always specify only one action name per item. Use maximum {{max_actions}} actions per sequence.
 Common action sequences:
-- Form filling: [{"input_text": {"ref": "e2", "text": "username"}}, {"input_text": {"ref": "e3", "text": "password"}}, {"click_element": {"ref": "e4"}}]
+- Form filling: [{"input_text": {"ref": "e2", "text": "username"}}, {"input_text": {"ref": "e3", "text": "password"}}, {"press_key": {"ref": "e3", "key": "Enter"}}]
 - Navigation and extraction: [{"go_to_url": {"url": "https://example.com"}}, {"extract_content": {"goal": "extract the names"}}]
 - Actions are executed in the given order
 - If the page changes after an action, the sequence is interrupted and you get the new state.
@@ -57,6 +57,7 @@ Common action sequences:
 - If a captcha appears (hCaptcha, Cloudflare Turnstile, "Confirm you are human"), use the solve_captcha action immediately
 - solve_captcha will attempt to click checkboxes, verify buttons, or confirmation links automatically
 - If solve_captcha doesn't work on first try, call it again — sometimes captchas need multiple attempts
+- Google is known for aggressive captchas. If you get a captcha on Google (google.com), switch to DuckDuckGo (duckduckgo.com) or Bing (bing.com) instead
 - If captcha persists after 3 attempts, try an alternative approach (different search engine, different URL, etc.)
 - If the page is not fully loaded, use wait action
 
@@ -74,6 +75,8 @@ Common action sequences:
 
 8. Form filling:
 - If you fill an input field and your action sequence is interrupted, most often something changed e.g. suggestions popped up under the field.
+- After filling the last field (e.g. password), press Enter to submit the form using press_key with key="Enter" and the ref of the last field. Example: [{"input_text": {"ref": "e2", "text": "myusername"}}, {"input_text": {"ref": "e3", "text": "mypassword"}}, {"press_key": {"ref": "e3", "key": "Enter"}}]
+- For search inputs: use SHORT targeted keywords (1-2 words), not full sentences. Short keywords return more relevant results on most sites.
 
 9. Long tasks:
 - Keep track of the status and subresults in the memory.
@@ -112,12 +115,14 @@ For browser interactions:
 - To navigate: navis with task="go_to_url", url="..."
 - To click: navis with task="click_element", ref="eN"
 - To type: navis with task="input_text", ref="eN", text="..."
+- To press a key (e.g. Enter to submit): navis with task="press_key", key="Enter" (optionally ref="eN" to press on a specific element)
 - To extract: navis with task="extract_content", goal="..."
 - To scroll: navis with task="scroll_down" or "scroll_up"
 - To open a new tab: navis with task="open_tab", url="..."
 - To switch tabs: navis with task="switch_tab", index=0 (or target="partial title")
 - To close a tab: navis with task="close_tab"
 - To solve a captcha: navis with task="solve_captcha" (use when any captcha/human verification appears)
+- Searching within a site: use SHORT single keywords, not full sentences. Short queries return more relevant results on search/catalog pages.
 
 Consider both what's visible and what might be beyond the current viewport.
 Be methodical - remember your progress and what you've learned so far.

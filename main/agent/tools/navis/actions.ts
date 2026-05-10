@@ -13,6 +13,7 @@ export type ActionName =
   | 'go_to_url'
   | 'click_element'
   | 'input_text'
+  | 'press_key'
   | 'scroll_down'
   | 'scroll_up'
   | 'wait'
@@ -123,6 +124,9 @@ export async function executeAction(
 
       case 'input_text':
         return await executeInputText(args as { ref: string; text: string }, page, session, logger, step, maxSteps);
+
+      case 'press_key':
+        return await executePressKey(args as { ref?: string; key: string }, page, session, logger, step, maxSteps);
 
       case 'scroll_down':
         return await executeScrollDown(page, logger, step, maxSteps);
@@ -240,6 +244,32 @@ async function executeInputText(
     return { success: true, message: `Entered text: ${name}`, stateChanged: false };
   } catch (err: any) {
     return { success: false, message: `Input failed: ${err.message}`, stateChanged: false };
+  }
+}
+
+async function executePressKey(
+  args: { ref?: string; key: string },
+  page: Page,
+  session: BrowserSession,
+  logger?: NavisLogger,
+  step?: number,
+  maxSteps?: number,
+): Promise<ActionResult> {
+  if (!args.key) return { success: false, message: 'Missing key parameter', stateChanged: false };
+
+  try {
+    if (args.ref) {
+      const { locator } = await findElement(page, args.ref, logger);
+      await locator.press(args.key, { timeout: 3000 });
+      logger?.elementInput(step, maxSteps, `key:${args.key}`, args.ref);
+    } else {
+      await page.keyboard.press(args.key);
+      logger?.elementInput(step, maxSteps, `key:${args.key}`, '(global)');
+    }
+    await session.setOverlayStatus(`Pressed "${args.key}"`);
+    return { success: true, message: `Pressed key: ${args.key}`, stateChanged: true };
+  } catch (err: any) {
+    return { success: false, message: `Key press failed: ${err.message}`, stateChanged: false };
   }
 }
 

@@ -29,6 +29,9 @@ export interface SubagentEntry {
     projectId?: string;
     maxDepth: number;
     currentDepth: number;
+    /** LLM tool call ID from the parent spawn_agent invocation.
+     *  Used as timelineBranch.parentId for nested timeline rendering. */
+    toolCallId?: string;
 }
 
 function getRegistryPath(): string {

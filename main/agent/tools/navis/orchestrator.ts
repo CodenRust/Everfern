@@ -38,6 +38,7 @@ export const NAVIS_DECISION_SCHEMA = {
           { properties: { go_to_url: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false } }, required: ['go_to_url'], additionalProperties: false },
           { properties: { click_element: { type: 'object', properties: { ref: { type: 'string' } }, required: ['ref'], additionalProperties: false } }, required: ['click_element'], additionalProperties: false },
           { properties: { input_text: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } }, required: ['ref', 'text'], additionalProperties: false } }, required: ['input_text'], additionalProperties: false },
+          { properties: { press_key: { type: 'object', properties: { ref: { type: 'string' }, key: { type: 'string' } }, required: ['key'], additionalProperties: false } }, required: ['press_key'], additionalProperties: false },
           { properties: { scroll_down: { type: 'object', additionalProperties: false } }, required: ['scroll_down'], additionalProperties: false },
           { properties: { scroll_up: { type: 'object', additionalProperties: false } }, required: ['scroll_up'], additionalProperties: false },
           { properties: { wait: { type: 'object', properties: { ms: { type: 'number' } }, additionalProperties: false } }, required: ['wait'], additionalProperties: false },
@@ -153,9 +154,10 @@ export class NavisOrchestrator {
     let pendingSnapshot: Promise<AriaSnapshotResult | null> | null = null;
 
     try {
-      while (steps < maxSteps) {
-        steps++;
+      let aiRetries = 0;
+      const maxAiRetries = 3;
 
+      while (steps < maxSteps) {
         const page = this.session.page;
         const t1 = Date.now();
         const url = page.url();
@@ -216,9 +218,17 @@ export class NavisOrchestrator {
         const t5 = Date.now();
         
         if (!decision) {
-          this.logger.error('AI returned no valid decision');
-          break;
+          aiRetries++;
+          if (aiRetries > maxAiRetries) {
+            this.logger.error(`AI failed after ${maxAiRetries} retries`);
+            break;
+          }
+          this.logger.error(`AI returned no valid decision (retry ${aiRetries}/${maxAiRetries})`);
+          lastResult = `AI call failed on step ${steps}, retrying... (attempt ${aiRetries}/${maxAiRetries})`;
+          continue;
         }
+        aiRetries = 0;
+        steps++;
 
         this.logger.aiDecision(steps, maxSteps, decision.current_state?.next_goal);
         await this.session.setOverlayStatus(decision.current_state?.next_goal || 'Working...');
@@ -322,34 +332,7 @@ export class NavisOrchestrator {
       const raw = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
       return this.extractJson(raw);
     } catch (err: any) {
-      const msg = err.message || '';
-      const isRetriable = msg.includes('ECONNREFUSED')
-        || msg.includes('ETIMEDOUT')
-        || msg.includes('timeout')
-        || msg.includes('network')
-        || msg.includes('fetch');
-      if (!isRetriable) {
-        this.logger.error(`AI call failed: ${msg}`);
-        return null;
-      }
-      this.logger.error('Retrying AI call...');
-    }
-
-    try {
-      const retryResponse = await this.aiClient.chat({
-        messages: [
-          { role: 'system', content: 'Return ONLY valid JSON matching the schema. No other text.' },
-          { role: 'user', content: inputContext },
-        ],
-        model: this.model,
-        responseFormat: 'json',
-        jsonSchema: NAVIS_DECISION_SCHEMA,
-        temperature: 0.0,
-      });
-
-      const raw = typeof retryResponse.content === 'string' ? retryResponse.content : JSON.stringify(retryResponse.content);
-      return this.extractJson(raw);
-    } catch {
+      this.logger.error(`AI call failed: ${err.message?.slice(0, 120) || 'unknown error'}`);
       return null;
     }
   }

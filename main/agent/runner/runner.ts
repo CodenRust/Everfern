@@ -231,7 +231,6 @@ export class AgentRunner {
 
           const { getSubagentSpawner } = await import('./subagent-spawn');
           const spawner = getSubagentSpawner();
-          spawner.setRunner(this); // Provide the full runner to enable runStream piping
 
           const spawnedAgent = await spawner.spawn({
             parentSessionId: this.currentConversationId || 'default',
@@ -243,7 +242,9 @@ export class AgentRunner {
             maxDepth,
             parentHistory: parentHistory as Array<{ role: 'user' | 'assistant'; content: string | any[] }>,
             workspaceDir: this.workspaceDir,
-            projectId: this.projectId
+            projectId: this.projectId,
+            runner: this,
+            toolCallId: toolCallId
           });
 
           const child = await spawner.waitForAgent(spawnedAgent.agentId, timeout);

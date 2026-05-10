@@ -54,59 +54,74 @@ export class BrowserSession {
 
     const realUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+    // Step 1: Try connecting to existing Chrome via CDP (remote debugging port 9222)
+    // This uses the user's real Chrome profile (cookies, sessions, extensions)
+    // which helps avoid captchas and re-authentication.
     try {
-      this.browser = await chromium.launch({
-        headless,
-        args: [
-          '--no-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-infobars',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-default-apps',
-          '--no-first-run',
-          '--disable-translate',
-          '--disable-features=ChromeWhatsNewUI',
-          '--disable-background-networking',
-          '--disable-sync',
-          '--metrics-recording-only',
-          '--disable-component-update',
-          '--safebrowsing-disable-auto-update',
-          '--disable-hang-monitor',
-          '--disable-popup-blocking',
-          '--disable-prompt-on-repost',
-          '--disable-domain-reliability',
-          '--disable-features=IsolateOrigins,site-per-process',
-          '--lang=en-US',
-        ],
-        env: {
-          ...process.env,
-        },
-      });
+      const browserCDP = await pwChromium.connectOverCDP('http://127.0.0.1:9222');
+      this.browser = browserCDP;
+      this.context = browserCDP.contexts()[0] || await browserCDP.newContext();
+      this.logger?.browserLaunch('connected to existing Chrome via CDP (port 9222)');
+    } catch {
+      this.logger?.browserLaunch('CDP connection failed, launching fresh browser');
+    }
 
-      this.context = await this.browser.newContext({
-        viewport: { width: 1920, height: 1080 },
-        userAgent: realUA,
-        locale: 'en-US',
-        timezoneId: 'America/New_York',
-        permissions: ['geolocation'],
-        geolocation: { longitude: -73.935242, latitude: 40.730610 },
-        colorScheme: 'light',
-        hasTouch: false,
-        isMobile: false,
-        deviceScaleFactor: 1,
-        javaScriptEnabled: true,
-      });
+    // Fallback: launch fresh browser if CDP connection failed or no browser connected
+    if (!this.browser) {
+      try {
+        this.browser = await chromium.launch({
+          headless,
+          args: [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-infobars',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-default-apps',
+            '--no-first-run',
+            '--disable-translate',
+            '--disable-features=ChromeWhatsNewUI',
+            '--disable-background-networking',
+            '--disable-sync',
+            '--metrics-recording-only',
+            '--disable-component-update',
+            '--safebrowsing-disable-auto-update',
+            '--disable-hang-monitor',
+            '--disable-popup-blocking',
+            '--disable-prompt-on-repost',
+            '--disable-domain-reliability',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--lang=en-US',
+          ],
+          env: {
+            ...process.env,
+          },
+        });
 
-      await this.context.addInitScript(() => {
-        delete (window as any).navigator.webdriver;
-      });
+        this.context = await this.browser.newContext({
+          viewport: { width: 1920, height: 1080 },
+          userAgent: realUA,
+          locale: 'en-US',
+          timezoneId: 'America/New_York',
+          permissions: ['geolocation'],
+          geolocation: { longitude: -73.935242, latitude: 40.730610 },
+          colorScheme: 'light',
+          hasTouch: false,
+          isMobile: false,
+          deviceScaleFactor: 1,
+          javaScriptEnabled: true,
+        });
 
-    } catch (err) {
-      if (this.browser) {
-        await this.browser.close().catch(() => {});
-        this.browser = null;
+        await this.context.addInitScript(() => {
+          delete (window as any).navigator.webdriver;
+        });
+
+      } catch (err) {
+        if (this.browser) {
+          await this.browser.close().catch(() => {});
+          this.browser = null;
+        }
+        throw err;
       }
-      throw err;
     }
 
     await this.openTab(startUrl || 'about:blank');

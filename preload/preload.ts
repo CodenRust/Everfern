@@ -310,6 +310,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDefaultPath: () => ipcRenderer.invoke('projects:getDefaultPath'),
     selectFolder: () => ipcRenderer.invoke('projects:selectFolder'),
     selectFiles: () => ipcRenderer.invoke('projects:selectFiles'),
+    listFiles: (projectPath: string) => ipcRenderer.invoke('projects:listFiles', projectPath),
+    readFile: (projectPath: string, filePath: string) => ipcRenderer.invoke('projects:readFile', projectPath, filePath),
   },
 
   // ── Sites ─────────────────────────────────────────────────────────
@@ -524,6 +526,8 @@ export type ElectronAPI = {
     getDefaultPath: () => Promise<string>;
     selectFolder: () => Promise<string | null>;
     selectFiles: () => Promise<string[]>;
+    listFiles: (projectPath: string) => Promise<{ files: string[] }>;
+    readFile: (projectPath: string, filePath: string) => Promise<string | null>;
   };
   sites: {
     list:   (chatId?: string) => Promise<any[]>;

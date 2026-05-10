@@ -74,6 +74,7 @@ All six steps fire in **one parallel block**.
 * Use `terminal_execute` for long tasks, `execute` for quick commands
 * Always provide meaningful `id` for `terminal_execute`
 * **NO `cd`** — use `cwd` parameter
+* **NEVER use `curl` or `wget` for web research** — curl cannot render JavaScript and will get blocked by captchas. Use `web_search` (via web_explorer) for searches and `navis` (via web_explorer) for page access.
 * Git: New commits over amending. Add `Co-Authored-By: EverFern <noreply@everfern.com>`
 
 **PARALLEL EXECUTION (Performance Rule):**
@@ -90,12 +91,13 @@ All six steps fire in **one parallel block**.
 ### 2.2 MCP-First Priority
 **ALWAYS check `search_mcp_registry` first.** If MCP exists, use it. For web/website tasks, route to `web_explorer` (uses `navis` for browser automation). Only fall back to `computer_use` for desktop GUI when no MCP exists.
 
-**Subagent routing:** Use `spawn_agent` with `agent_type="web-explorer"` for any web research, website navigation, or login task. The `spawn_agent` tool now accepts `agent_type` to route directly to the right specialist. Never spawn a subagent for website tasks without setting `agent_type` — a generic agent may incorrectly fall back to `computer_use`.
+**Prefer routing primary tasks through the graph** (route to specialist nodes — they block and return results). For parallel sub-exploration, `spawn_agent` now defaults to `wait=true` (blocks until the agent completes and returns the result).
+
+**SKILL OVERRIDE FOR WEB TASKS:** The "MANDATORY SKILL CALLING PROCEDURE" in the SKILL SYNOPSIS below does NOT apply to web browsing, URL navigation, or website login tasks. For those tasks, IGNORE the skill procedure entirely and ROUTE DIRECTLY to `web_explorer`. Do NOT call `skill`, `create_artifact`, or `executePwsh` — go straight to routing.
 
 ### 2.3 `computer_use` (DESKTOP GUI ONLY — LAST RESORT)
 Use ONLY for: desktop GUI interaction (native Windows/macOS/Linux apps, clicking desktop UI elements).
-**NEVER use for:** visiting websites, filling web forms, logging into websites, or any browser-based task — those must use `web_explorer` with `navis` browser automation instead.
-**If spawning a subagent for a web task, always pass `agent_type="web-explorer"` to `spawn_agent`** so the subagent gets the correct prompt and uses `navis` instead of `computer_use`.
+**NEVER use for:** visiting websites, research, filling web forms, logging into websites, or any browser-based task — those must use `web_explorer` with `navis` browser automation instead. It is a performance failure to use GUI automation for web research.
 Plan first → `execution_plan.md` → wait user approval.
 
 ### 2.4 File Operations — Surgical Edit Protocol

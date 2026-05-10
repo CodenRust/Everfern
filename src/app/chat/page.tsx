@@ -30,7 +30,7 @@ import {
     AcademicCapIcon,
     MagnifyingGlassIcon,
     ChevronUpIcon,
-    CommandLineIcon,
+
     ArrowPathIcon,
     EyeIcon,
     StopCircleIcon,
@@ -285,7 +285,7 @@ export default function ChatPage() {
                 api.off?.('agent-complete', handleComplete);
             };
         }
-    }, [activeConversationId, history]);
+    }, [activeConversationId]);
 
     const CompletionToast = () => (
         <AnimatePresence>
@@ -1503,6 +1503,9 @@ export default function ChatPage() {
                         setComputerUseStep('Starting...');
                         if (toolCallId) setCurrentComputerUseToolCallId(toolCallId);
                     }
+                    if (toolName === 'create_artifact') {
+                        setShowCodingMode(true);
+                    }
 
                     const narrativeText = streamingContentRef.current.trim();
                     if (narrativeText) {
@@ -2433,26 +2436,6 @@ export default function ChatPage() {
                     )}
                 </AnimatePresence>
             </div>
-
-            {/* Code Mode Toggle Button */}
-            <button type="button"
-                onClick={() => setShowCodingMode(!showCodingMode)}
-                title={showCodingMode ? "Exit Coding Mode" : "Enable Coding Mode (IDE panel for code editing)"}
-                style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    background: showCodingMode ? "#1e1e1e" : "transparent",
-                    border: showCodingMode ? "1px solid #3e3e42" : "1px solid #e8e6d9",
-                    borderRadius: 14,
-                    color: showCodingMode ? "#ffffff" : "#8a8886",
-                    cursor: "pointer", padding: "6px 14px", fontSize: 13, fontWeight: 500,
-                    transition: "0.2s"
-                }}
-                onMouseEnter={e => { if (!showCodingMode) { e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.04)"; e.currentTarget.style.color = "#111111"; } }}
-                onMouseLeave={e => { if (!showCodingMode) { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#8a8886"; } }}
-            >
-                <CommandLineIcon width={15} height={15} />
-                {showCodingMode ? "Coding" : "Code"}
-            </button>
 
             <div style={{ position: 'relative' }}>
                 <button type="button"
@@ -3928,10 +3911,11 @@ export default function ChatPage() {
                         bottom: 0,
                         width: '50%',
                         zIndex: 1000,
-                        backgroundColor: '#1e1e1e',
-                        borderLeft: '1px solid #333',
+                        backgroundColor: '#ffffff',
+                        borderLeft: '1px solid #e8e6d9',
+                        boxShadow: '-4px 0 24px rgba(0,0,0,0.06)',
                     }}>
-                        <IDEMode visible={showCodingMode} onClose={() => setShowCodingMode(false)} />
+                        <IDEMode visible={showCodingMode} onClose={() => setShowCodingMode(false)} projectPath={folderContexts[0]?.path || null} />
                     </div>
                 )}
             </div>

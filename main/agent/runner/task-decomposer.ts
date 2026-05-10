@@ -1,9 +1,9 @@
 /**
- * EverFern Desktop — NEXUS Task Decomposer v3
+ * EverFern Desktop — NEXUS Task Decomposer v4 (Full AI Edition)
  *
  * Intelligently decomposes complex tasks into dependency-aware, parallelizable subtasks.
- * Task type classification is performed by the AI model when a client is available,
- * with a lightweight regex fallback for synchronous / test contexts.
+ * This version relies entirely on AI for classification, structural analysis, and step generation,
+ * removing all regex-based heuristics and keyword signals.
  */
 
 import { DecomposedTask, TaskStep } from './state';
@@ -21,394 +21,179 @@ export interface TaskAnalysis {
     requiresCommandExecution: boolean;
 }
 
-// ── Parallelization Signals (kept — these are structural, not semantic) ────
+// ── AI-powered Task Analysis ────────────────────────────────────────────
 
-const PARALLEL_SIGNALS = [
-    /\b(multiple|several|each|all|every|batch)\b/i,
-    /\b(files?|images?|documents?|records?|items?|entries?)\b.{0,20}\b(analyze|process|convert|read|check)\b/i,
-    /\b(compare|contrast|benchmark|evaluate)\b.{0,30}\b(and|with|against|vs)\b/i,
-    /\b(simultaneously|concurrently|in parallel|at the same time)\b/i,
-];
+async function analyzeTaskWithAI(userInput: string, client: AIClient): Promise<TaskAnalysis> {
+    const prompt = `Analyze the following user request and determine its structural requirements for execution.
 
-const SEQUENTIAL_SIGNALS = [
-    /\b(then|after|next|followed by|step by step|first.*then|once.*done)\b/i,
-    /\b(depends? on|requires?|needs?|must.*before)\b/i,
-    /\b(build|compile|deploy)\b.{0,20}\b(after|once|when)\b/i,
-];
-
-// ── Regex fallback (used when no AI client is available) ──────────────────
-
-const TASK_TYPE_SIGNALS_FALLBACK: Record<string, RegExp> = {
-    coding:   /\b(function|class|method|api|endpoint|component|module|library|algorithm|implement|refactor|write code)\b/i,
-    build:    /\b(create|build|make|scaffold|new project|new app|generate|setup|initialize|bootstrap)\b/i,
-    fix:      /\b(fix|debug|repair|error|bug|broken|failing|crash|not work|issue|exception|traceback)\b/i,
-    analyze:  /\b(analyze|analyse|csv|xlsx|data|dataset|chart|graph|plot|dashboard|insights|statistics|metrics|trends)\b/i,
-    automate: /\b(automate|schedule|cron|batch|pipeline|workflow|recurring|monitor|watch|trigger|open|launch|start|click|type|press|scroll|gui|desktop|screen|mouse|keyboard)\b/i,
-    research: /\b(research|search|find|look up|investigate|what is|how does|explain|compare|review)\b/i,
-    task:     /\b(run|execute|install|configure|move|copy|delete|download|upload|deploy|publish)\b/i,
-};
-
-function classifyTaskTypeSync(text: string): TaskAnalysis['taskType'] {
-    let taskType: TaskAnalysis['taskType'] = 'task';
-    let highestScore = 0;
-    for (const [type, pattern] of Object.entries(TASK_TYPE_SIGNALS_FALLBACK)) {
-        const matches = text.match(new RegExp(pattern.source, 'gi')) || [];
-        if (matches.length > highestScore) {
-            highestScore = matches.length;
-            taskType = type as TaskAnalysis['taskType'];
-        }
-    }
-    return taskType;
-}
-
-// ── AI-based task type classification ────────────────────────────────────
-
-const VALID_TASK_TYPES: TaskAnalysis['taskType'][] = [
-    'coding', 'research', 'build', 'fix', 'analyze', 'automate', 'task', 'conversation'
-];
-
-async function classifyTaskTypeWithAI(userInput: string, client: AIClient): Promise<{ type: TaskAnalysis['taskType'], entities: string[] }> {
-    const prompt = `Analyze the following user request. Classify it into exactly one task type and extract any specific entities (products, companies, topics) that need to be researched or processed independently.
-
-USER REQUEST: "${userInput.slice(0, 500)}"
-
-Task types:
-- "coding"       — writing, editing, or refactoring code
-- "research"     — searching the web, investigating topics, comparing products
-- "build"        — creating new projects from scratch
-- "fix"          — debugging and repairing errors
-- "analyze"      — processing data, charts, CSV analysis
-- "automate"     — GUI automation, screen control
-- "task"         — running commands, file operations
-- "conversation" — casual chat
+USER REQUEST: "${userInput.slice(0, 1000)}"
 
 Respond with JSON only:
 {
-  "taskType": "<type>",
-  "entities": ["entity1", "entity2", ...]
+  "complexity": "simple" | "moderate" | "complex",
+  "taskType": "coding" | "research" | "build" | "fix" | "analyze" | "automate" | "task" | "conversation",
+  "entities": ["list", "of", "key", "subjects"],
+  "canParallelize": boolean,
+  "suggestedApproach": "sequential" | "parallel" | "hybrid",
+  "estimatedSteps": number,
+  "requiresExternalData": boolean (web search, URLs, APIs),
+  "requiresFileOps": boolean (reading/writing files),
+  "requiresCommandExecution": boolean (terminal/shell)
 }`;
 
+    let rawContent = '';
     try {
         const response = await client.chat({
             messages: [{ role: 'user', content: prompt }],
             responseFormat: 'json',
             temperature: 0,
-            maxTokens: 150,
+            maxTokens: 300,
         }) as any;
 
-        let content = typeof response.content === 'string'
-            ? response.content
-            : JSON.stringify(response.content);
-        content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-        const parsed = JSON.parse(content);
-        if (VALID_TASK_TYPES.includes(parsed.taskType)) {
-            return {
-                type: parsed.taskType as TaskAnalysis['taskType'],
-                entities: Array.isArray(parsed.entities) ? parsed.entities : []
-            };
-        }
+        rawContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+        
+        // Extract JSON block using regex to handle preambles/postambles
+        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : rawContent;
+        
+        return JSON.parse(jsonStr);
     } catch (err) {
-        console.warn('[TaskDecomposer] AI classification failed:', err instanceof Error ? err.message : String(err));
+        console.warn(`[TaskDecomposer] AI analysis failed. Raw content: "${rawContent.substring(0, 200)}"`, err);
+        // Minimal fallback if AI fails
+        return {
+            complexity: 'moderate',
+            taskType: 'task',
+            entities: [],
+            canParallelize: false,
+            suggestedApproach: 'sequential',
+            estimatedSteps: 3,
+            requiresExternalData: true,
+            requiresFileOps: true,
+            requiresCommandExecution: true
+        };
     }
-
-    return {
-        type: classifyTaskTypeSync(userInput.toLowerCase()),
-        entities: []
-    };
 }
 
-// ── Tool Dependency Map ───────────────────────────────────────────────────
+// ── AI-powered Step Generation ──────────────────────────────────────────
 
-const TOOL_DEPENDENCY_MAP: Record<string, {
-    dependsOn: string[];
-    complexity: 'low' | 'medium' | 'high';
-    canParallelize: boolean;
-    avgDurationMs: number;
-}> = {
-    web_search:    { dependsOn: [],               complexity: 'low',    canParallelize: true,  avgDurationMs: 2000  },
-    navis:         { dependsOn: ['web_search'],    complexity: 'medium', canParallelize: true,  avgDurationMs: 15000 },
-    view_file:     { dependsOn: [],               complexity: 'low',    canParallelize: true,  avgDurationMs: 500   },
+async function generateStepsWithAI(userInput: string, analysis: TaskAnalysis, availableTools: string[], client: AIClient): Promise<TaskStep[]> {
+    const prompt = `Decompose the following task into a list of dependency-aware execution steps.
 
-    read:          { dependsOn: [],               complexity: 'low',    canParallelize: true,  avgDurationMs: 500   },
-    memory_search: { dependsOn: [],               complexity: 'low',    canParallelize: true,  avgDurationMs: 1000  },
-    write:         { dependsOn: ['view_file'],     complexity: 'medium', canParallelize: false, avgDurationMs: 1000  },
-    edit:          { dependsOn: ['view_file'],     complexity: 'medium', canParallelize: false, avgDurationMs: 1500  },
-    run_command:   { dependsOn: ['write'],         complexity: 'high',   canParallelize: false, avgDurationMs: 5000  },
-    bash:          { dependsOn: ['write'],         complexity: 'high',   canParallelize: false, avgDurationMs: 8000  },
-    skill:         { dependsOn: [],               complexity: 'low',    canParallelize: false, avgDurationMs: 2000  },
-    execution_plan:{ dependsOn: [],               complexity: 'low',    canParallelize: false, avgDurationMs: 500   },
-    todo_write:    { dependsOn: [],               complexity: 'low',    canParallelize: false, avgDurationMs: 200   },
-    present_files: { dependsOn: ['write'],         complexity: 'low',    canParallelize: false, avgDurationMs: 300   },
-};
+USER REQUEST: "${userInput.slice(0, 1000)}"
+TASK TYPE: ${analysis.taskType}
+APPROACH: ${analysis.suggestedApproach}
+AVAILABLE TOOLS: ${availableTools.join(', ')}
 
-// ── Shared structural analysis (no AI needed) ─────────────────────────────
+RULES:
+1. Each step must have a clear 'description' and a 'tool' from the available list.
+2. Use 'dependsOn' array to list IDs of steps that must complete first.
+3. Set 'canParallelize: true' if the step can run simultaneously with others in its level.
+4. For research tasks with multiple entities, create parallel 'web_search' or 'navis' steps.
+5. For coding, include 'view_file', 'write'/'edit', and 'run_command' for verification.
+6. Use 'priority: "critical"' for foundational steps.
 
-function analyzeStructure(userInput: string): Omit<TaskAnalysis, 'taskType' | 'entities'> {
-    const text = userInput.toLowerCase();
+Respond with JSON only (an array of steps):
+[
+  {
+    "id": "step_1",
+    "description": "...",
+    "tool": "...",
+    "dependsOn": [],
+    "canParallelize": true,
+    "estimatedComplexity": "low" | "medium" | "high",
+    "priority": "normal" | "critical",
+    "parallelGroup": number (optional)
+  },
+  ...
+]`;
 
-    let parallelScore = 0;
-    let sequentialScore = 0;
-    for (const p of PARALLEL_SIGNALS)   if (p.test(text)) parallelScore++;
-    for (const p of SEQUENTIAL_SIGNALS) if (p.test(text)) sequentialScore++;
+    let rawContent = '';
+    try {
+        const response = await client.chat({
+            messages: [{ role: 'user', content: prompt }],
+            responseFormat: 'json',
+            temperature: 0,
+            maxTokens: 1500,
+        }) as any;
 
-    const actionVerbs = (text.match(
-        /\b(analyze?|research|find|search|create?|generate|build|make|edit|modify|update|delete|run|execute|download|install|read|fetch|compare|test|verify|check|process|convert)\b/gi
-    ) || []);
-    
-    // Detect entities for swarm weighting
-    const entities = userInput.match(/\b[A-Z][a-z]{2,}\b/g) || [];
-    const uniqueEntities = new Set(entities.filter(e => !['The', 'This', 'That', 'These', 'Those', 'And', 'But', 'Use', 'For', 'Find', 'Official'].includes(e))).size;
-    
-    if (uniqueEntities >= 2) parallelScore += 2;
-
-    const uniqueActions = new Set(actionVerbs.map(v => v.toLowerCase())).size;
-    const effectiveActions = uniqueActions + (uniqueEntities > 1 ? uniqueEntities : 0);
-
-    const wordCount = text.split(/\s+/).length;
-    const complexity: TaskAnalysis['complexity'] =
-        (wordCount > 80 || effectiveActions > 5) ? 'complex' :
-        (wordCount > 25 || effectiveActions > 2) ? 'moderate' : 'simple';
-
-    const canParallelize = (parallelScore > sequentialScore || uniqueEntities >= 2) && effectiveActions >= 2;
-    const suggestedApproach: TaskAnalysis['suggestedApproach'] =
-        canParallelize && effectiveActions > 3 ? 'hybrid' :
-        canParallelize ? 'parallel' : 'sequential';
-
-    const nonDataText = text.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
-    const requiresExternalData      = /\b(search|fetch|download|web|url|http|api|scrape|lookup)\b/i.test(nonDataText);
-    const requiresFileOps           = /\b(file|folder|directory|path|write|read|create|edit|save|csv|xlsx|pdf|docx)\b/i.test(nonDataText);
-    const requiresCommandExecution  = /\b(run|execute|install|pip|npm|python|node|bash|shell|command|compile|build)\b/i.test(nonDataText);
-
-    return {
-        complexity,
-        canParallelize,
-        suggestedApproach,
-        estimatedSteps: Math.max(2, Math.min(effectiveActions + 1, 12)),
-        requiresExternalData,
-        requiresFileOps,
-        requiresCommandExecution,
-    };
+        rawContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+        
+        // Extract JSON array block using regex
+        const jsonMatch = rawContent.match(/\[[\s\S]*\]/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : rawContent;
+        
+        const steps = JSON.parse(jsonStr);
+        if (!Array.isArray(steps)) throw new Error('AI response is not a JSON array');
+        return steps;
+    } catch (err) {
+        console.warn(`[TaskDecomposer] AI step generation failed. Raw content: "${rawContent.substring(0, 200)}"`, err);
+        
+        // Smarter fallback based on analysis
+        const fallbackSteps: TaskStep[] = [];
+        if (analysis.requiresExternalData) {
+            fallbackSteps.push({ id: 'step_1', description: 'Search web for relevant information', tool: 'web_search', dependsOn: [], canParallelize: true, estimatedComplexity: 'low', priority: 'critical' });
+        }
+        fallbackSteps.push({ 
+            id: `step_${fallbackSteps.length + 1}`, 
+            description: 'Analyze and execute user request', 
+            tool: analysis.taskType === 'coding' ? 'view_file' : 'internal', 
+            dependsOn: fallbackSteps.map(s => s.id), 
+            canParallelize: false, 
+            estimatedComplexity: 'medium', 
+            priority: 'normal' 
+        });
+        
+        return fallbackSteps;
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
- * Synchronous task analysis using regex signals.
- * Use this in tests or contexts where no AI client is available.
- */
-export function analyzeTask(userInput: string): TaskAnalysis {
-    return {
-        taskType: classifyTaskTypeSync(userInput.toLowerCase()),
-        entities: [],
-        ...analyzeStructure(userInput),
-    };
-}
-
-/**
- * AI-powered task analysis. Uses the model to classify task type and falls
- * back to regex if the model call fails or no client is provided.
- */
-export async function analyzeTaskWithAI(userInput: string, client?: AIClient): Promise<TaskAnalysis> {
-    const { type: taskType, entities } = client
-        ? await classifyTaskTypeWithAI(userInput, client)
-        : { type: classifyTaskTypeSync(userInput.toLowerCase()), entities: [] };
-
-    const structure = analyzeStructure(userInput);
-    
-    // Favor parallel execution if multiple entities are found
-    if (entities.length >= 2) {
-        structure.canParallelize = true;
-        structure.suggestedApproach = entities.length > 3 ? 'hybrid' : 'parallel';
-    }
-
-    return {
-        ...structure,
-        taskType,
-        entities,
-    };
-}
-
-// ── Decomposition ─────────────────────────────────────────────────────────
-
-function buildSteps(userInput: string, analysis: TaskAnalysis): TaskStep[] {
-    const steps: TaskStep[] = [];
-    let stepId = 1;
-
-    const mk = (
-        desc: string,
-        tool: string | undefined,
-        dependsOn: string[],
-        canParallelize: boolean,
-        complexity: TaskStep['estimatedComplexity'],
-        priority: TaskStep['priority'] = 'normal',
-        parallelGroup?: number,
-        agentPrompt?: string
-    ): TaskStep => ({
-        id: `step_${stepId++}`,
-        description: desc,
-        tool: tool || 'internal',
-        dependsOn,
-        canParallelize,
-        estimatedComplexity: complexity,
-        priority,
-        parallelGroup,
-        agentPrompt,
-    });
-
-    const nonDataLines = userInput.split('\n').filter(line => (line.match(/,/g) || []).length < 2).join('\n');
-    const urls      = (nonDataLines.match(/https?:\/\/[^\s"',]+/g) || []);
-    const filePaths = (nonDataLines.match(/[A-Za-z]:\\[\w\\.\-]+|~\/[\w\/.\-]+|\/[\w\/.\-]+\.\w+/g) || []);
-    
-    // Phase 0: Skill reading
-    if (['analyze', 'coding', 'build'].includes(analysis.taskType)) {
-        steps.push(mk('Read relevant skill file(s)', 'skill', [], false, 'low', 'critical'));
-    }
-
-    // Phase 1: Parallel data gathering
-    const gatherIds: string[] = [];
-
-    if (analysis.requiresExternalData) {
-        if (urls.length > 0) {
-            for (const url of urls.slice(0, 3)) {
-                const s = mk(`Browse and extract: ${url.slice(0, 60)}`, 'navis', [], true, 'medium', 'normal', 1);
-                steps.push(s); gatherIds.push(s.id);
-            }
-        } else if (analysis.entities.length > 1) {
-            // SWARM: Research each entity in parallel
-            for (const entity of analysis.entities.slice(0, 5)) {
-                const s = mk(`Research and investigate: ${entity}`, 'web_search', [], true, 'medium', 'normal', 1);
-                steps.push(s); gatherIds.push(s.id);
-            }
-        } else if (analysis.entities.length === 1) {
-            const s = mk(`Search for: ${analysis.entities[0]}`, 'web_search', [], true, 'low', 'normal', 1);
-            steps.push(s); gatherIds.push(s.id);
-        } else {
-            const s = mk('Web search for required information', 'web_search', [], true, 'low', 'normal', 1);
-            steps.push(s); gatherIds.push(s.id);
-        }
-    }
-
-    if (analysis.requiresFileOps && filePaths.length > 0) {
-        for (const fp of filePaths.slice(0, 4)) {
-            const s = mk(`Read: ${fp}`, 'view_file', [], true, 'low', 'normal', 1);
-            steps.push(s); gatherIds.push(s.id);
-        }
-    }
-
-    // Phase 2: Planning / discovery
-    if (analysis.complexity !== 'simple') {
-        steps.push(mk('Create execution plan', 'execution_plan', gatherIds, false, 'low', 'critical'));
-        steps.push(mk('Create and run discovery/validation script', 'run_command', gatherIds, false, 'medium', 'critical'));
-    }
-
-    // Phase 3: Core execution
-    const execDeps = steps.filter(s => s.priority === 'critical').map(s => s.id);
-
-    switch (analysis.taskType) {
-        case 'analyze':
-            steps.push(mk('Write data analysis/visualization HTML artifact', 'write', execDeps, false, 'high'));
-            steps.push(mk('Verify artifact rendering', 'run_command', [`step_${stepId - 1}`], false, 'low'));
-            break;
-
-        case 'build':
-        case 'coding':
-            steps.push(mk('Write primary source file(s)',    'write',       execDeps,                                         false, 'high'));
-            steps.push(mk('Write supporting files / config', 'write',       execDeps,                                         false, 'medium'));
-            steps.push(mk('Install dependencies',            'run_command', [`step_${stepId - 2}`],                           false, 'medium'));
-            steps.push(mk('Build / run entry point',         'run_command', [`step_${stepId - 2}`, `step_${stepId - 1}`],    false, 'high'));
-            break;
-
-        case 'fix':
-            steps.push(mk('Read failing file(s)', 'view_file',   execDeps,               true,  'low',    'critical', 2));
-            steps.push(mk('Apply fix',             'edit',        [`step_${stepId - 1}`], false, 'medium', 'critical'));
-            steps.push(mk('Verify fix',            'run_command', [`step_${stepId - 1}`], false, 'high',   'critical'));
-            break;
-
-        case 'research':
-            steps.push(mk(
-                'Compile and summarize findings',
-                undefined,
-                gatherIds.length > 0 ? gatherIds : execDeps,
-                false,
-                'low'
-            ));
-            break;
-
-        case 'automate':
-            // If URLs are present, this is likely a web browsing task — use navis, not computer_use
-            if (urls.length > 0) {
-                for (const url of urls.slice(0, 3)) {
-                    steps.push(mk(`Browse and extract: ${url.slice(0, 60)}`, 'navis', execDeps, true, 'medium', 'critical', 1));
-                }
-            } else {
-                steps.push(mk(`Execute GUI automation task: ${userInput}`, 'computer_use', execDeps, false, 'high', 'critical'));
-            }
-            break;
-
-        default:
-            if (analysis.requiresCommandExecution) {
-                steps.push(mk('Execute required command(s)', 'run_command', execDeps, false, 'high'));
-            }
-            if (analysis.requiresFileOps) {
-                steps.push(mk('Write / update file(s)', 'write', execDeps, false, 'medium'));
-            }
-    }
-
-    // Final: Present deliverables
-    const lastExecIds = steps
-        .filter(s => s.tool === 'run_command' || s.tool === 'write')
-        .map(s => s.id);
-
-    if (lastExecIds.length > 0) {
-        steps.push(mk('Present deliverables to user', 'present_files', lastExecIds.slice(-2), false, 'low', 'critical'));
-    }
-
-    return steps.filter(s => s.description.trim().length > 0);
-}
-
-function assembleDecomposedTask(userInput: string, analysis: TaskAnalysis): DecomposedTask {
-    const validSteps = buildSteps(userInput, analysis);
-    const groups = new Set(
-        validSteps.filter(s => s.parallelGroup !== undefined).map(s => s.parallelGroup)
-    );
-    const estimatedDurationMs = validSteps.reduce((acc, s) => {
-        const toolInfo = s.tool ? TOOL_DEPENDENCY_MAP[s.tool] : null;
-        return acc + (toolInfo?.avgDurationMs ?? 2000);
-    }, 0);
-
-    return {
-        id: `task_${Date.now()}`,
-        title: userInput.substring(0, 80) + (userInput.length > 80 ? '...' : ''),
-        steps: validSteps,
-        canParallelize: analysis.canParallelize,
-        estimatedParallelGroups: groups.size,
-        totalSteps: validSteps.length,
-        executionMode: analysis.suggestedApproach,
-        estimatedDurationMs,
-    };
-}
-
-/**
- * Synchronous decomposition (regex-based task type classification).
- * Kept for backward compatibility with callers that cannot go async.
- */
-export function decomposeTask(userInput: string, availableTools: string[]): DecomposedTask {
-    const analysis = analyzeTask(userInput);
-    return assembleDecomposedTask(userInput, analysis);
-}
-
-/**
- * AI-powered decomposition. Uses the model to classify task type before
- * building the execution plan. Falls back to regex if the client is absent.
+ * AI-powered decomposition. Uses the model to classify, analyze, and build
+ * the execution plan. Removes all regex-based heuristics.
  */
 export async function decomposeTaskWithAI(
     userInput: string,
     availableTools: string[],
     client?: AIClient
 ): Promise<DecomposedTask> {
+    if (!client) {
+        throw new Error('TaskDecomposer v4 requires an AI client for decomposition.');
+    }
+
     const analysis = await analyzeTaskWithAI(userInput, client);
-    return assembleDecomposedTask(userInput, analysis);
+    const steps = await generateStepsWithAI(userInput, analysis, availableTools, client);
+
+    const groups = new Set(
+        steps.filter(s => s.parallelGroup !== undefined).map(s => s.parallelGroup)
+    );
+
+    // Calculate duration based on a simple heuristic (could also be AI-estimated)
+    const estimatedDurationMs = steps.length * 5000;
+
+    return {
+        id: `task_${Date.now()}`,
+        title: userInput.substring(0, 80) + (userInput.length > 80 ? '...' : ''),
+        steps,
+        canParallelize: analysis.canParallelize,
+        estimatedParallelGroups: groups.size,
+        totalSteps: steps.length,
+        executionMode: analysis.suggestedApproach,
+        estimatedDurationMs,
+    };
+}
+
+/**
+ * Synchronous fallback (DEPRECATED). 
+ * Now throws error as v4 is fully AI-driven.
+ */
+export function decomposeTask(userInput: string, availableTools: string[]): DecomposedTask {
+    throw new Error('decomposeTask (sync) is deprecated. Use decomposeTaskWithAI.');
+}
+
+export function analyzeTask(userInput: string): TaskAnalysis {
+    throw new Error('analyzeTask (sync) is deprecated. Use analyzeTaskWithAI (async).');
 }
 
 // ── Plan Text Generator ───────────────────────────────────────────────────
@@ -468,16 +253,5 @@ export function generatePlanText(decomposed: DecomposedTask): string {
 }
 
 export function getAGIHints(userInput: string): string {
-    const analysis = analyzeTask(userInput);
-    const hints: string[] = [];
-
-    if (analysis.canParallelize) {
-        hints.push('PARALLEL: This task can be decomposed into parallel subtasks.');
-        hints.push(`Approach: ${analysis.suggestedApproach} (${analysis.estimatedSteps} estimated steps)`);
-    }
-    if (analysis.complexity === 'complex') {
-        hints.push('COMPLEX: Break into independent subtasks that can be delegated to specialized agents.');
-    }
-
-    return hints.join(' ');
+    return "AI-Optimized Execution Plan active.";
 }

@@ -90,6 +90,8 @@ async function executeAction(actionName, args, page, session, logger, step, maxS
                 return await executeClickElement(args, page, session, logger, step, maxSteps);
             case 'input_text':
                 return await executeInputText(args, page, session, logger, step, maxSteps);
+            case 'press_key':
+                return await executePressKey(args, page, session, logger, step, maxSteps);
             case 'scroll_down':
                 return await executeScrollDown(page, logger, step, maxSteps);
             case 'scroll_up':
@@ -177,6 +179,26 @@ async function executeInputText(args, page, session, logger, step, maxSteps) {
     }
     catch (err) {
         return { success: false, message: `Input failed: ${err.message}`, stateChanged: false };
+    }
+}
+async function executePressKey(args, page, session, logger, step, maxSteps) {
+    if (!args.key)
+        return { success: false, message: 'Missing key parameter', stateChanged: false };
+    try {
+        if (args.ref) {
+            const { locator } = await findElement(page, args.ref, logger);
+            await locator.press(args.key, { timeout: 3000 });
+            logger?.elementInput(step, maxSteps, `key:${args.key}`, args.ref);
+        }
+        else {
+            await page.keyboard.press(args.key);
+            logger?.elementInput(step, maxSteps, `key:${args.key}`, '(global)');
+        }
+        await session.setOverlayStatus(`Pressed "${args.key}"`);
+        return { success: true, message: `Pressed key: ${args.key}`, stateChanged: true };
+    }
+    catch (err) {
+        return { success: false, message: `Key press failed: ${err.message}`, stateChanged: false };
     }
 }
 async function executeScrollDown(page, logger, step, maxSteps) {
