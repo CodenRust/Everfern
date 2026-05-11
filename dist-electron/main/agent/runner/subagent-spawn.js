@@ -98,6 +98,12 @@ class SubagentSpawner {
             console.warn('[SubagentSpawner] No runner provided. Spawning failed.');
             throw new Error('SubagentSpawner: No runner provided');
         }
+        // HARD GUARD: Sub-agents cannot spawn other agents.
+        // This catches ALL direct spawner.spawn() calls from graph nodes
+        // (web-explorer, swarm-orchestrator, etc.) that bypass the spawn_agent tool guard.
+        if (runner.currentAgentSessionKey) {
+            throw new Error('Sub-agents cannot spawn other agents. You are a sub-agent yourself. Complete the task using your own available tools.');
+        }
         const registry = (0, subagent_registry_1.getSubagentRegistry)();
         // Compute depth using sponsorSessionKey if available.
         // When a sub-agent spawns another, it passes its own sessionKey as sponsorSessionKey.
@@ -107,6 +113,10 @@ class SubagentSpawner {
             ? registry.getBySessionKey(options.sponsorSessionKey)
             : undefined;
         const currentDepth = (sponsorEntry?.currentDepth || 0) + 1;
+        // ENFORCE maxDepth per-agent: check the parent entry's maxDepth against currentDepth
+        if (sponsorEntry && currentDepth > sponsorEntry.maxDepth) {
+            throw new Error(`Max spawn depth (${sponsorEntry.maxDepth}) reached for this agent. Cannot spawn deeper.`);
+        }
         // INJECT SUB-AGENT AWARENESS PROMPT
         const subagentAwareness = `
 ---
@@ -115,7 +125,8 @@ class SubagentSpawner {
 - **Identity:** You are working as part of an agent army for your parent session: ${parentSessionId}.
 - **Nesting Depth:** Your current nesting level is ${currentDepth}.
 - **Behavior:** Favor DIRECT TOOL EXECUTION over further delegation. You have been spawned because of your specific expertise (${agentType}).
-- **Responsibility:** Accomplish your task efficiently and return results to your parent. Do NOT spawn more sub-agents unless absolutely necessary for parallelization of independent chunks.
+- **Responsibility:** Accomplish your task efficiently and return results to your parent. You MUST NOT spawn any sub-agents. You do NOT have the spawn_agent tool available. Complete the task yourself.
+- **Note:** If your task involves web research, use web_search and navis tools directly. Do NOT try to delegate to a web-explorer agent.
 ---
 \n`;
         if (systemPrompt) {

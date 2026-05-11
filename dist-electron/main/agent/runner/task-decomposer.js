@@ -18,7 +18,7 @@ async function analyzeTaskWithAI(userInput, client) {
 
 USER REQUEST: "${userInput.slice(0, 1000)}"
 
-Respond with JSON only:
+Respond ONLY with a JSON block like this:
 {
   "complexity": "simple" | "moderate" | "complex",
   "taskType": "coding" | "research" | "build" | "fix" | "analyze" | "automate" | "task" | "conversation",
@@ -26,34 +26,51 @@ Respond with JSON only:
   "canParallelize": boolean,
   "suggestedApproach": "sequential" | "parallel" | "hybrid",
   "estimatedSteps": number,
-  "requiresExternalData": boolean (web search, URLs, APIs),
-  "requiresFileOps": boolean (reading/writing files),
-  "requiresCommandExecution": boolean (terminal/shell)
+  "requiresExternalData": boolean,
+  "requiresFileOps": boolean,
+  "requiresCommandExecution": boolean
 }`;
     let rawContent = '';
     try {
         const response = await client.chat({
             messages: [{ role: 'user', content: prompt }],
-            responseFormat: 'json',
             temperature: 0,
-            maxTokens: 300,
+            maxTokens: 500,
         });
-        rawContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
-        // Extract JSON block using regex to handle preambles/postambles
-        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-        const jsonStr = jsonMatch ? jsonMatch[0] : rawContent;
-        return JSON.parse(jsonStr);
+        rawContent = (typeof response.content === 'string' ? response.content : JSON.stringify(response.content || '')).trim();
+        if (!rawContent || rawContent === '""' || rawContent === 'null') {
+            throw new Error('AI returned empty content');
+        }
+        // Extremely robust JSON extraction: find the first '{' and last '}'
+        const firstBrace = rawContent.indexOf('{');
+        const lastBrace = rawContent.lastIndexOf('}');
+        if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+            throw new Error('No JSON object found in response');
+        }
+        const jsonStr = rawContent.substring(firstBrace, lastBrace + 1);
+        const parsed = JSON.parse(jsonStr);
+        // Ensure critical fields exist
+        return {
+            complexity: parsed.complexity || 'moderate',
+            taskType: parsed.taskType || 'task',
+            entities: parsed.entities || [],
+            canParallelize: !!parsed.canParallelize,
+            suggestedApproach: parsed.suggestedApproach || 'sequential',
+            estimatedSteps: parsed.estimatedSteps || 3,
+            requiresExternalData: parsed.requiresExternalData !== undefined ? !!parsed.requiresExternalData : true,
+            requiresFileOps: parsed.requiresFileOps !== undefined ? !!parsed.requiresFileOps : true,
+            requiresCommandExecution: parsed.requiresCommandExecution !== undefined ? !!parsed.requiresCommandExecution : true
+        };
     }
     catch (err) {
-        console.warn(`[TaskDecomposer] AI analysis failed. Raw content: "${rawContent.substring(0, 200)}"`, err);
-        // Minimal fallback if AI fails
+        console.warn(`[TaskDecomposer] analyzeTaskWithAI failed. Raw snippet: "${rawContent.substring(0, 200)}". Error: ${err instanceof Error ? err.message : String(err)}`);
         return {
             complexity: 'moderate',
             taskType: 'task',
             entities: [],
             canParallelize: false,
             suggestedApproach: 'sequential',
-            estimatedSteps: 3,
+            estimatedSteps: 2,
             requiresExternalData: true,
             requiresFileOps: true,
             requiresCommandExecution: true
@@ -69,55 +86,60 @@ TASK TYPE: ${analysis.taskType}
 APPROACH: ${analysis.suggestedApproach}
 AVAILABLE TOOLS: ${availableTools.join(', ')}
 
-RULES:
-1. Each step must have a clear 'description' and a 'tool' from the available list.
-2. Use 'dependsOn' array to list IDs of steps that must complete first.
-3. Set 'canParallelize: true' if the step can run simultaneously with others in its level.
-4. For research tasks with multiple entities, create parallel 'web_search' or 'navis' steps.
-5. For coding, include 'view_file', 'write'/'edit', and 'run_command' for verification.
-6. Use 'priority: "critical"' for foundational steps.
-
-Respond with JSON only (an array of steps):
+Respond ONLY with a JSON array of steps:
 [
   {
     "id": "step_1",
     "description": "...",
     "tool": "...",
     "dependsOn": [],
-    "canParallelize": true,
+    "canParallelize": boolean,
     "estimatedComplexity": "low" | "medium" | "high",
-    "priority": "normal" | "critical",
-    "parallelGroup": number (optional)
-  },
-  ...
+    "priority": "normal" | "critical"
+  }
 ]`;
     let rawContent = '';
     try {
         const response = await client.chat({
             messages: [{ role: 'user', content: prompt }],
-            responseFormat: 'json',
             temperature: 0,
-            maxTokens: 1500,
+            maxTokens: 2000,
         });
-        rawContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
-        // Extract JSON array block using regex
-        const jsonMatch = rawContent.match(/\[[\s\S]*\]/);
-        const jsonStr = jsonMatch ? jsonMatch[0] : rawContent;
+        rawContent = (typeof response.content === 'string' ? response.content : JSON.stringify(response.content || '')).trim();
+        if (!rawContent || rawContent === '""' || rawContent === 'null') {
+            throw new Error('AI returned empty content');
+        }
+        // Robust JSON array extraction: find first '[' and last ']'
+        const firstBracket = rawContent.indexOf('[');
+        const lastBracket = rawContent.lastIndexOf(']');
+        if (firstBracket === -1 || lastBracket === -1 || lastBracket <= firstBracket) {
+            throw new Error('No JSON array found in response');
+        }
+        const jsonStr = rawContent.substring(firstBracket, lastBracket + 1);
         const steps = JSON.parse(jsonStr);
-        if (!Array.isArray(steps))
-            throw new Error('AI response is not a JSON array');
+        if (!Array.isArray(steps) || steps.length === 0)
+            throw new Error('Invalid or empty steps array');
         return steps;
     }
     catch (err) {
-        console.warn(`[TaskDecomposer] AI step generation failed. Raw content: "${rawContent.substring(0, 200)}"`, err);
-        // Smarter fallback based on analysis
+        console.warn(`[TaskDecomposer] generateStepsWithAI failed. Raw snippet: "${rawContent.substring(0, 200)}". Error: ${err instanceof Error ? err.message : String(err)}`);
         const fallbackSteps = [];
-        if (analysis.requiresExternalData) {
-            fallbackSteps.push({ id: 'step_1', description: 'Search web for relevant information', tool: 'web_search', dependsOn: [], canParallelize: true, estimatedComplexity: 'low', priority: 'critical' });
+        // Sequential fallback plan based on user intent keywords if AI failed
+        const lowerInput = userInput.toLowerCase();
+        if (analysis.requiresExternalData || lowerInput.includes('search') || lowerInput.includes('find') || lowerInput.includes('look up')) {
+            fallbackSteps.push({
+                id: 'step_1',
+                description: 'Search web for relevant information',
+                tool: 'web_search',
+                dependsOn: [],
+                canParallelize: true,
+                estimatedComplexity: 'low',
+                priority: 'critical'
+            });
         }
         fallbackSteps.push({
             id: `step_${fallbackSteps.length + 1}`,
-            description: 'Analyze and execute user request',
+            description: 'Process user request and execute findings',
             tool: analysis.taskType === 'coding' ? 'view_file' : 'internal',
             dependsOn: fallbackSteps.map(s => s.id),
             canParallelize: false,

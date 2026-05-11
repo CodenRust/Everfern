@@ -277,6 +277,10 @@ export function registerAgentHandlers() {
 
     const safeSend = (channel: string, data: any) => {
       flushBuffers();
+      if (data === undefined) {
+        console.warn(`[IPC] Skipping undefined data for channel ${channel}`);
+        return;
+      }
       try {
         const safeData = JSON.parse(JSON.stringify(data, (key, value) => {
           if (value instanceof Error) return { message: value.message, stack: value.stack };

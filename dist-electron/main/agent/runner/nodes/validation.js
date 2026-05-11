@@ -49,7 +49,6 @@ const SAFE_TOOL_WHITELIST = new Set([
     'navis_read',
     'navis_search',
     // Orchestration & Status
-    'spawn_agent',
     'terminal_status',
     'terminal_list',
     'get_screenshot',

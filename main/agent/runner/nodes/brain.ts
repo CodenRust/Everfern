@@ -68,6 +68,13 @@ Respond with JSON only:
     let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
+    // Robust JSON extraction: find first '{' and last '}'
+    const firstBrace = content.indexOf('{');
+    const lastBrace = content.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      content = content.substring(firstBrace, lastBrace + 1);
+    }
+
     let signal;
     try {
       signal = JSON.parse(content);
@@ -106,6 +113,9 @@ async function determineRouting(
     return null;
   }
 
+  // Detect if this brain is running as a sub-agent
+  const isSubAgent = !!runner.currentAgentSessionKey;
+
   try {
     // Extract user request from the last user message
     const lastUserMsg = state.messages?.filter((m: any) => {
@@ -132,9 +142,13 @@ async function determineRouting(
           : '')
       : '';
 
+    const subAgentConstraint = isSubAgent
+      ? `\nSUB-AGENT CONSTRAINT (HARD): You are a SUB-AGENT. You MUST NOT route to "route_web_explorer", "route_coding", "route_data_analyst", or "route_computer_use". You are already a delegated agent — use the tools you have directly. Route to "continue_brain" to keep working with your available tools, or "complete_task" if done.\n`
+      : '';
+
     const prompt = `You are the EverFern Brain - the central orchestrator. Analyze the user request and determine the best routing decision.
 
-${intentConstraint}
+${intentConstraint}${subAgentConstraint}
 USER REQUEST: "${userRequest.slice(0, 400)}"
 YOUR CURRENT RESPONSE: "${responseContent.slice(0, 300)}"
 CONVERSATION CONTEXT: ${JSON.stringify(conversationHistory).slice(0, 200)}
@@ -144,7 +158,7 @@ Available routing options:
 - "route_coding"       — Route to Coding Specialist for software development, code writing, debugging, PROJECT CREATION
 - "route_data_analyst" — Route to Data Analyst for data processing, CSV/Excel analysis, charts
 - "route_computer_use" — Route to Computer Use agent ONLY for DESKTOP GUI automation (clicking desktop UI elements, interacting with native apps like Excel, VS Code, Discord desktop app). NEVER use for web research, searching the internet, visiting websites, or filling forms on websites.
-- "route_web_explorer" — Route to Web Explorer for ANY web research, searching the internet, finding information online, fetching URLs, looking up facts, news, products, bots, tools (including anime bots, discord bots), AND for any task involving visiting/logging into/filling forms on websites (those should use navis, not computer_use).
+- "route_web_explorer" — Route to Web Explorer for complex multi-step web research (multiple page visits, form filling, login workflows). For simple web lookups or single-page research, use your available web_search/navis tools directly.
 - "complete_task"      — Task is complete, no further routing needed
 
 CRITICAL ROUTING RULES:
@@ -153,8 +167,8 @@ CRITICAL ROUTING RULES:
 3. For ANY web research task (searching, finding information online, looking up websites, finding bots, comparing services), use "route_web_explorer" NOT "route_computer_use".
 4. CRITICAL: If the user asks to "find", "search for", "investigate", "open [a website/URL]", "go to [a website]", "login to [a website/dashboard]", "visit [a URL]", "navigate to [a URL]" — this is a WEB RESEARCH/BROWSING task. ALWAYS use "route_web_explorer". NEVER use "route_computer_use" for visiting websites or filling forms in browsers — those need navis browser automation, not computer_use screen automation.
 5. CRITICAL: For tasks like "find the best anime discord bot", "search for news bots", "look up pricing for X" — these are WEB research tasks. Use "route_web_explorer".
-6. CRITICAL: For web browsing/URL tasks, do NOT try skills, do NOT call create_artifact, do NOT call executePwsh. Those tools will not help you visit a website. Route directly to "route_web_explorer" which has the navis browser automation tool.
-7. CRITICAL: NEVER use terminal_execute with curl for web research, web searches, or fetching web pages. Curl cannot render JavaScript, will get blocked by captchas, and returns incomplete content. For ANY web research task, ALWAYS use "route_web_explorer" which has proper web_search and navis tools.
+6. You have web_search and navis available directly — use them for quick lookups or straightforward web research. For complex multi-step research spanning multiple URLs, consider routing to "route_web_explorer" which has dedicated navigation capabilities.
+7. NEVER use terminal_execute with curl for web research. Use web_search or navis which you have available. Route to "route_web_explorer" only for complex research that requires visiting multiple pages or filling forms.
 
 Respond with JSON only:
 {
@@ -183,6 +197,13 @@ Respond with JSON only:
 
     let content = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    // Robust JSON extraction: find first '{' and last '}'
+    const firstBrace = content.indexOf('{');
+    const lastBrace = content.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      content = content.substring(firstBrace, lastBrace + 1);
+    }
 
     let routing;
     try {
@@ -267,15 +288,12 @@ export const createBrainNode = (
     }
 
     const allTools = toolDefs || (runner as any)._buildToolDefinitions();
-
-    // Filter out specialized tools from brain - these should only be available to their respective agents
-    const BRAIN_EXCLUDED_TOOLS = new Set(['web_search', 'remote_web_search', 'navis', 'website_crawl', 'computer_use']);
-    const tools = allTools.filter((tool: any) => !BRAIN_EXCLUDED_TOOLS.has(tool.name));
+    const isSubAgent = !!runner.currentAgentSessionKey;
 
     // Debug logging
     console.log(`[Brain] Current intent: ${state.currentIntent}`);
+    console.log(`[Brain] Is sub-agent: ${isSubAgent}`);
     console.log(`[Brain] Available tools: ${allTools.map((t: any) => t.name).join(', ')}`);
-    console.log(`[Brain] Filtered tools: ${tools.map((t: any) => t.name).join(', ')}`);
 
     // Emit phase change event for execution phase (only on first brain call)
     if (missionTracker && state.iterations === 0) {
@@ -333,7 +351,7 @@ export const createBrainNode = (
       'brain',
       () => runAgentStep(state, {
         runner,
-        toolDefs: tools,
+        toolDefs: allTools,
         eventQueue,
         nodeName: 'brain',
         systemPromptOverride: systemPrompt
@@ -370,8 +388,56 @@ export const createBrainNode = (
       };
     }
 
+    // Circuit breaker: if brain produced no meaningful output on repeat iterations,
+    // signal task complete to prevent infinite loops (e.g. after spawn_agent returns
+    // and the brain hallucinates filtered tools with empty response).
+    const hasNoOutput = !responseContent || responseContent.trim().length === 0;
+    if (hasNoOutput && state.iterations > 1) {
+      runner.telemetry.warn(`[Brain] No output on iteration ${state.iterations} — forcing task_complete to prevent loop`);
+      return {
+        ...result,
+        completionSignal: { reason: 'task_complete' as const, explanation: 'Brain produced no output after multiple iterations.' },
+        routingDecision: null,
+        brainToolsInFlight: false,
+        returningFromSpecialist: null
+      };
+    }
+
+    // Auto-route based on intent when brain produces empty output.
+    // This handles the case where the brain just asked a clarifying question,
+    // the user answered, and on the next iteration the brain hallucinates tools
+    // (e.g. web_search) that are filtered out → empty output → routing/completion signals fail.
+    // Instead of falling through to determineRouting (which gets blank content and returns null),
+    // use the triage intent to route directly to the right specialist.
+    if (hasNoOutput && state.currentIntent) {
+      const intentRoutingMap: Record<string, RoutingDecision> = {
+        'research': 'route_web_explorer',
+        'coding': 'route_coding',
+        'build': 'route_coding',
+        'fix': 'route_coding',
+        'analyze': 'route_data_analyst',
+        'automate': 'route_computer_use',
+      };
+      const autoDecision = intentRoutingMap[state.currentIntent];
+      if (autoDecision) {
+        runner.telemetry.info(`[Brain] Auto-routing to ${autoDecision} for intent ${state.currentIntent} (brain produced no output)`);
+        eventQueue?.push({
+          type: 'thought',
+          content: `\n🧠 Brain: Auto-routing to ${autoDecision} for "${state.currentIntent}" intent`
+        });
+        return {
+          ...result,
+          routingDecision: { decision: autoDecision, explanation: `Auto-routing for intent ${state.currentIntent} after brain produced no output` },
+          completionSignal: null,
+          taskPhase: 'specialized_agent' as const,
+          brainToolsInFlight: false,
+          returningFromSpecialist: null
+        };
+      }
+    }
+
     // Determine routing decision
-    const routingDecision = await determineRouting(runner, state, responseContent, eventQueue);
+    let routingDecision = await determineRouting(runner, state, responseContent, eventQueue);
 
     if (routingDecision) {
 
@@ -381,6 +447,29 @@ export const createBrainNode = (
         type: 'thought',
         content: `🧠 Brain Router: ${routingDecision.decision} — ${routingDecision.explanation}`
       });
+    }
+
+    // Fallback: if routing LLM failed (Mistral Small JSON parse issue, etc.),
+    // use intent-based routing as a hard fallback so the task can make progress
+    // instead of falling through to a failed completion signal + judge loop.
+    if (!routingDecision && state.currentIntent) {
+      const fallbackRoutingMap: Record<string, RoutingDecision> = {
+        'research': 'route_web_explorer',
+        'coding': 'route_coding',
+        'build': 'route_coding',
+        'fix': 'route_coding',
+        'analyze': 'route_data_analyst',
+        'automate': 'route_computer_use',
+      };
+      const fallbackDecision = fallbackRoutingMap[state.currentIntent];
+      if (fallbackDecision) {
+        runner.telemetry.warn(`[Brain] Routing LLM failed, falling back to intent-based routing: ${fallbackDecision} for intent ${state.currentIntent}`);
+        eventQueue?.push({
+          type: 'thought',
+          content: `\n🧠 Brain: Routing fallback — using intent "${state.currentIntent}" to route to ${fallbackDecision}`
+        });
+        routingDecision = { decision: fallbackDecision, explanation: `Fallback routing for intent ${state.currentIntent} (routing LLM failed)` };
+      }
     }
 
     // If routing to a specialized agent, set the routing decision

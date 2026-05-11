@@ -111,12 +111,12 @@ export const createWebExplorerNode = (
             const options: SpawnOptions = {
                 parentSessionId: runner.currentConversationId || 'default',
                 sponsorSessionKey: runner.currentAgentSessionKey,
-                task: `Investigate this specific source for the research goal below.\n\nTARGET URL: ${candidate.url}\n\nMISSION:\n1. Use navis to navigate to the URL above\n2. Read the FULL page content using extract_content\n3. Extract: features, pricing, pros/cons, technical details, publication date, credibility signals\n4. Return a structured report with specific facts and direct quotes\n\nCRITICAL: You MUST use navis to visit the URL. DO NOT use terminal_execute with curl — curl cannot render JavaScript, will get blocked by captchas, and returns incomplete content. Only navis can properly load modern web pages.`,
-                agentType: 'web-explorer',
+                task: `Investigate this specific source for the research goal below.\n\nTARGET URL: ${candidate.url}\n\nMISSION:\n1. Use navis to navigate to the URL above\n2. Read the FULL page content using extract_content\n3. Extract: features, pricing, pros/cons, technical details, publication date, credibility signals\n4. Return a structured report with specific facts and direct quotes\n\nCRITICAL: You MUST use navis to visit the URL. DO NOT use terminal_execute with curl — curl cannot render JavaScript, will get blocked by captchas, and returns incomplete content. Only navis can properly load modern web pages.\n\nRESTRICTION: You are a single-task investigator. DO NOT spawn sub-agents or delegate to other agents. Investigate this URL yourself directly.`,
+                agentType: 'generic',
                 context: `Research goal: ${taskText}`,
                 model: runner.client.model,
                 mode: 'run',
-                maxDepth: 20, // Effectively infinite, reliance on 15m timeout
+                maxDepth: 1, // Investigator must not spawn further sub-agents
                 runner: runner,
                 toolCallId: investigatorToolCallId
             };

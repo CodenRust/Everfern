@@ -34,10 +34,17 @@ export const createDecomposerNode = (
       const content = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content)) : '';
       const isPlanApproval = content.includes('[PLAN_APPROVED]');
 
-      // Check if plan already exists and has progress or is approved to prevent re-decomposition glitches
-      if (state.decomposedTask && (isPlanApproval || (state.completedSteps && state.completedSteps.length > 0))) {
-          console.log(`[Decomposer] Skipping decomposition: existing plan found. Approval: ${isPlanApproval}, Completed: ${state.completedSteps?.length || 0}`);
-          return { taskPhase: 'planning' as const };
+      const attempts = state.decompositionAttempts || 0;
+      const alreadyHasPlan = !!state.decomposedTask;
+      const alreadyHasProgress = (state.completedSteps && state.completedSteps.length > 0);
+
+      // Definitively break loops: skip if plan exists with progress OR if we've tried too many times
+      if (isPlanApproval || alreadyHasProgress || (alreadyHasPlan && attempts >= 1) || attempts >= 3) {
+          console.log(`[Decomposer] Skipping decomposition: existing state found. Approval: ${isPlanApproval}, Progress: ${alreadyHasProgress}, Plan: ${alreadyHasPlan}, Attempts: ${attempts}`);
+          return { 
+              taskPhase: 'planning' as const,
+              decompositionAttempts: attempts + 1
+          };
       }
 
       runner.telemetry.transition('decomposer');
@@ -84,6 +91,7 @@ export const createDecomposerNode = (
       const result = {
         decomposedTask: decomposed,
         taskPhase: 'planning' as const,
+        decompositionAttempts: attempts + 1
       };
 
       integrator.completeNode('decomposer', `Decomposed into ${decomposed.totalSteps} steps (Fast Heuristic)`);

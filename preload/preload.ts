@@ -32,8 +32,9 @@ export interface FlatModelEntry {
   providerType: ProviderType;
 }
 
-// Re-export SubAgentProgressEvent for frontend use
+// Re-export event types for frontend use
 export type { SubAgentProgressEvent } from '../src/app/chat/types';
+export type { DebateStreamEvent, DebateDisplayData } from '../src/app/chat/types/debate-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── Window Controls ────────────────────────────────────────────
@@ -232,6 +233,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('acp:tool-call-complete', (_e, data) => cb(data));
     },
 
+    // Debate Stream Events
+    onDebateStream: (cb: (event: any) => void) => {
+      ipcRenderer.on('debate:stream', (_e, event) => cb(event));
+    },
+    removeDebateStreamListener: () => {
+      ipcRenderer.removeAllListeners('debate:stream');
+    },
+
     removeStreamListeners: () => {
       ipcRenderer.removeAllListeners('acp:stream-chunk');
       ipcRenderer.removeAllListeners('acp:thought');
@@ -256,6 +265,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('acp:tool-call-start');
       ipcRenderer.removeAllListeners('acp:tool-call-chunk');
       ipcRenderer.removeAllListeners('acp:tool-call-complete');
+      ipcRenderer.removeAllListeners('debate:stream');
     },
   },
 

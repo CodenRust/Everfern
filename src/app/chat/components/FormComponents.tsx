@@ -255,7 +255,6 @@ const HitlApprovalForm = ({
             maxHeight: '400px',
             overflowY: 'auto',
             boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-            border: '1px solid #ffeaa7',
             display: 'flex',
             flexDirection: 'column'
         }}>
@@ -576,6 +575,8 @@ const UserQuestionForm = ({
             borderRadius: 12,
             padding: 20,
             margin: '16px 0',
+            maxHeight: 520,
+            overflowY: 'auto',
         }}>
             {/* Hidden file input */}
             <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={handleFileChange} />

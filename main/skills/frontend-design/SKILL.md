@@ -280,12 +280,12 @@ new Chart(ctx, {
 When generating data reports, dashboards, or any visualization from datasets:
 
 1. **Use Python to process and analyze the data** — pandas, numpy, matplotlib, etc.
-2. **Spawn a sub-agent (`spawn_agent`) to write the HTML** — The sub-agent receives the computed data and writes the HTML/CSS/JS code directly.
+2. **Write the HTML directly** — Use `create_artifact` or `batch_write` to create the HTML/CSS/JS file with the computed data.
 3. **DO NOT use Python string formatting for HTML** — This leads to KeyError bugs and poor rendering. Use the sub-agent's specialized writing capabilities.
 
 NEVER generate reports as Python scripts that output HTML strings. Always split into:
 - `.py` file: processes data, computes statistics, generates data arrays.
-- `spawn_agent`: receives data, writes the `.html` file with Tailwind + Chart.js.
+- Write the `.html` file directly with Tailwind + Chart.js using `create_artifact`.
 
 ### Report Generation Pattern
 

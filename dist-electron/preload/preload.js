@@ -196,6 +196,13 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         onToolCallComplete: (cb) => {
             electron_1.ipcRenderer.on('acp:tool-call-complete', (_e, data) => cb(data));
         },
+        // Debate Stream Events
+        onDebateStream: (cb) => {
+            electron_1.ipcRenderer.on('debate:stream', (_e, event) => cb(event));
+        },
+        removeDebateStreamListener: () => {
+            electron_1.ipcRenderer.removeAllListeners('debate:stream');
+        },
         removeStreamListeners: () => {
             electron_1.ipcRenderer.removeAllListeners('acp:stream-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:thought');
@@ -220,6 +227,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
             electron_1.ipcRenderer.removeAllListeners('acp:tool-call-start');
             electron_1.ipcRenderer.removeAllListeners('acp:tool-call-chunk');
             electron_1.ipcRenderer.removeAllListeners('acp:tool-call-complete');
+            electron_1.ipcRenderer.removeAllListeners('debate:stream');
         },
     },
     // ── Scheduled Tasks ─────────────────────────────────────────────

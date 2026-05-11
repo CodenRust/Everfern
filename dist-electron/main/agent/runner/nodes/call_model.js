@@ -325,7 +325,9 @@ You do not need to use complex execution plans or tools for this interaction.`;
                     : Array.isArray(response.content)
                         ? response.content.map((c) => 'text' in c ? c.text : '').join('\n')
                         : '';
-                const parserResult = (0, text_to_tool_1.parseTextToToolCalls)(textContent, runner.tools);
+                const allowedInToolDefs = new Set(toolDefs.map((t) => t.name));
+                const filteredTools = (runner.tools || []).filter((t) => allowedInToolDefs.has(t.name));
+                const parserResult = (0, text_to_tool_1.parseTextToToolCalls)(textContent, filteredTools);
                 if (parserResult.toolCalls.length > 0) {
                     response.toolCalls = parserResult.toolCalls;
                     response.content = parserResult.scrubbedContent;
@@ -403,9 +405,17 @@ You do not need to use complex execution plans or tools for this interaction.`;
             if (response.finishReason !== 'tool_calls' && scrubbed && !streamedText) {
                 eventQueue?.push({ type: 'chunk', content: scrubbed });
             }
+            // Validate tool calls against allowed toolDefs — strip hallucinated tools
+            const validatedToolCalls = (response.toolCalls ?? []).filter((tc) => toolDefs.some((td) => td.name === tc.name));
+            if (validatedToolCalls.length !== (response.toolCalls?.length ?? 0)) {
+                console.warn(`[CallModel] Filtered ${(response.toolCalls?.length ?? 0) - validatedToolCalls.length} hallucinated tool call(s)`);
+            }
+            if (validatedToolCalls.length === 0) {
+                response.finishReason = 'stop';
+            }
             const result = {
                 messages: [assistantMsg],
-                pendingToolCalls: response.toolCalls ?? [],
+                pendingToolCalls: validatedToolCalls,
                 iterations,
                 finalResponse: response.finishReason !== 'tool_calls' ? scrubbed : '',
             };

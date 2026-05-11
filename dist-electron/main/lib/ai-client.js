@@ -181,6 +181,21 @@ class AIClient {
             vlm: this.config.vlm
         };
     }
+    _supportsVision() {
+        if (this.config.vlm)
+            return false;
+        const modelName = this.config.model?.toLowerCase() || '';
+        const visionKeywords = ['vision', 'image', 'vl-', 'vl:'];
+        if (visionKeywords.some(kw => modelName.includes(kw)))
+            return true;
+        if (this.config.provider === 'anthropic')
+            return true;
+        if (this.config.provider === 'gemini')
+            return true;
+        if (this.config.provider === 'openai' && modelName.startsWith('gpt-4'))
+            return true;
+        return false;
+    }
     async chat(request) {
         // Use OpenAI SDK for NVIDIA NIM, DeepSeek, and OpenRouter
         if (this.config.provider === 'nvidia' || this.config.provider === 'deepseek' || this.config.provider === 'openrouter') {
@@ -219,8 +234,19 @@ class AIClient {
     }
     // ── OpenAI SDK Methods (for NVIDIA NIM and Ollama Cloud) ────────
     _mapMessagesForOpenAI(messages) {
+        const supportsVision = this._supportsVision();
         let processedMessages = messages.flatMap(m => {
             let content = m.content;
+            // Strip images if model doesn't support vision
+            // Skip for NVIDIA tool messages — they're deferred via _images tag
+            if (!supportsVision && Array.isArray(content)) {
+                const isNvidiaTool = this.config.provider === 'nvidia' && m.role === 'tool';
+                if (!isNvidiaTool) {
+                    content = content.filter(c => c.type !== 'image_url');
+                    if (content.length === 0)
+                        content = '[Image omitted — model does not support vision]';
+                }
+            }
             // Nvidia NIM/OpenAI strict validation:
             if (this.config.provider === 'nvidia') {
                 // Flatten assistant/system messages as before to prevent format errors
@@ -299,15 +325,17 @@ class AIClient {
                     // Rule: Bridge Tool -> User gap or Handle pending images
                     // If we are exiting a tool block and have pending images, inject them
                     if (last.role === 'tool' && m.role !== 'tool' && pendingImages.length > 0) {
-                        finalMessages.push({ role: 'assistant', content: 'Action completed.' });
-                        last = {
-                            role: 'user',
-                            content: [
-                                { type: 'text', text: 'Screenshot(s) provided from the system:' },
-                                ...pendingImages
-                            ]
-                        };
-                        finalMessages.push(last);
+                        if (this._supportsVision()) {
+                            finalMessages.push({ role: 'assistant', content: 'Action completed.' });
+                            last = {
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: 'Screenshot(s) provided from the system:' },
+                                    ...pendingImages
+                                ]
+                            };
+                            finalMessages.push(last);
+                        }
                         pendingImages = [];
                         // Continue to evaluate the current 'm' against this new 'last'
                     }
@@ -379,6 +407,10 @@ class AIClient {
                 finalMessages.push(m);
             }
             // Final check for pending images at the end of conversation
+            if (pendingImages.length > 0 && !this._supportsVision()) {
+                // Model doesn't support vision — strip images
+                pendingImages = [];
+            }
             if (pendingImages.length > 0) {
                 finalMessages.push({ role: 'assistant', content: 'Action completed.' });
                 finalMessages.push({
@@ -1546,6 +1578,7 @@ class AIClient {
         return sanitized;
     }
     _mapOllamaMessages(messages) {
+        const supportsVision = this._supportsVision();
         const sanitized = this._sanitizeForLocalProvider(messages);
         return sanitized.map((m) => {
             let content = '';
@@ -1559,8 +1592,10 @@ class AIClient {
                         content += part.text;
                     }
                     else if (part.type === 'image_url') {
-                        const b64 = part.image_url.url.split(',')[1] || part.image_url.url;
-                        images.push(b64);
+                        if (supportsVision) {
+                            const b64 = part.image_url.url.split(',')[1] || part.image_url.url;
+                            images.push(b64);
+                        }
                     }
                 }
             }

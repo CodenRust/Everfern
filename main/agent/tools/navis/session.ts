@@ -62,8 +62,10 @@ export class BrowserSession {
       this.browser = browserCDP;
       this.context = browserCDP.contexts()[0] || await browserCDP.newContext();
       this.logger?.browserLaunch('connected to existing Chrome via CDP (port 9222)');
-    } catch {
-      this.logger?.browserLaunch('CDP connection failed, launching fresh browser');
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger?.browserLaunch(`CDP connection failed: ${errMsg}, launching fresh browser`);
+      console.warn(`[Navis] CDP connection failed: ${errMsg}`);
     }
 
     // Fallback: launch fresh browser if CDP connection failed or no browser connected

@@ -85,23 +85,24 @@ async function findElement(page: Page, ref: string, logger?: NavisLogger): Promi
 }
 
 // ── Element Validation ─────────────────────────────────────────
-async function validateElement(locator: any, action: string, logger?: NavisLogger): Promise<boolean> {
+// Returns null if element is valid (visible + enabled), or a string explaining why it's not.
+async function validateElement(locator: any, action: string, logger?: NavisLogger): Promise<string | null> {
   try {
     const isVisible = await locator.isVisible({ timeout: 1000 }).catch(() => false);
     if (!isVisible) {
       console.warn(`[Navis] Element not visible for ${action}`);
-      return false;
+      return 'not visible (hidden, offscreen, or covered by another element)';
     }
 
     const isEnabled = await locator.isEnabled({ timeout: 1000 }).catch(() => true);
     if (!isEnabled) {
       console.warn(`[Navis] Element disabled for ${action}`);
-      return false;
+      return 'disabled (readonly or grayed out)';
     }
 
-    return true;
+    return null; // valid — element is visible and enabled
   } catch {
-    return true; // If validation fails, still try the action
+    return null; // If validation fails, still try the action
   }
 }
 
@@ -184,8 +185,13 @@ async function executeClickElement(
   try {
     const { locator, name } = await findElement(page, args.ref, logger);
     
-    if (!await validateElement(locator, 'click', logger)) {
-      return { success: false, message: `Element ${args.ref} not clickable`, stateChanged: false };
+    const validation = await validateElement(locator, 'click', logger);
+    if (validation !== null) {
+      return {
+        success: false,
+        message: `Element ${args.ref} ("${truncate(String(name), 40)}") ${validation}. Try scrolling to it, waiting for the page to load, or choosing a different element.`,
+        stateChanged: false,
+      };
     }
 
     const box = await locator.boundingBox().catch(() => null);
@@ -228,8 +234,13 @@ async function executeInputText(
   try {
     const { locator, name } = await findElement(page, args.ref, logger);
 
-    if (!await validateElement(locator, 'input', logger)) {
-      return { success: false, message: `Cannot input to ${args.ref}`, stateChanged: false };
+    const validation = await validateElement(locator, 'input', logger);
+    if (validation !== null) {
+      return {
+        success: false,
+        message: `Element ${args.ref} ("${truncate(String(name), 40)}") ${validation}. Try scrolling to it, waiting for the page to load, or choosing a different input.`,
+        stateChanged: false,
+      };
     }
 
     const box = await locator.boundingBox().catch(() => null);

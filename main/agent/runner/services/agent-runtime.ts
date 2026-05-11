@@ -290,7 +290,9 @@ export async function runAgentStep(
 
     // If model didn't provide tool calls but intent requires them, parse or nudge
     if (!response.toolCalls || response.toolCalls.length === 0) {
-      const parserResult = parseTextToToolCalls(textContent, (runner as any).tools);
+      const allowedInToolDefs = new Set(options.toolDefs.map((t: any) => t.name));
+      const filteredTools = ((runner as any).tools || []).filter((t: any) => allowedInToolDefs.has(t.name));
+      const parserResult = parseTextToToolCalls(textContent, filteredTools);
       if (parserResult.toolCalls.length > 0) {
         response.toolCalls = parserResult.toolCalls;
         response.finishReason = 'tool_calls';
@@ -304,11 +306,21 @@ export async function runAgentStep(
       reasoning_content: response.reasoning_content,
     };
 
+    // Validate tool calls against allowed toolDefs — strip hallucinated tools
+    const validatedToolCalls = (response.toolCalls ?? []).filter((tc: any) =>
+      options.toolDefs.some((td: any) => td.name === tc.name)
+    );
+    if (validatedToolCalls.length !== (response.toolCalls?.length ?? 0)) {
+      console.warn(`[AgentRuntime] Filtered ${(response.toolCalls?.length ?? 0) - validatedToolCalls.length} hallucinated tool call(s)`);
+    }
+    if (validatedToolCalls.length === 0) {
+      response.finishReason = 'stop';
+    }
+
+    assistantMsg.content = scrubbed;
+
     // Always send the final response to frontend if it's not a tool call
-    // This ensures the AI's message is displayed even if streaming already happened
     if (response.finishReason !== 'tool_calls' && scrubbed) {
-      // Send the scrubbed content if we haven't streamed anything yet,
-      // or if the scrubbed content is different from what was streamed
       const needsFinalChunk = !streamedText || streamedText.trim() !== scrubbed.trim();
       if (needsFinalChunk) {
         eventQueue?.push({ type: 'chunk', content: scrubbed });
@@ -317,7 +329,7 @@ export async function runAgentStep(
 
     return {
       messages: [assistantMsg as any],
-      pendingToolCalls: response.toolCalls ?? [],
+      pendingToolCalls: validatedToolCalls,
       iterations: iterations + 1,
       finalResponse: response.finishReason !== 'tool_calls' ? scrubbed : '',
     };

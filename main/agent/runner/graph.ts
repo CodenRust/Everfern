@@ -7,7 +7,6 @@ import { createValidationNode } from './nodes/validation';
 import { createBrainNode } from './nodes/brain';
 import { createJudgeNode } from './nodes/judge';
 import { createDecomposerNode } from './nodes/decomposer';
-import { createSwarmOrchestratorNode } from './nodes/swarm-orchestrator';
 import { loadPrompt } from '../../lib/prompt-sync';
 import {
   createComputerUseNode,
@@ -397,15 +396,6 @@ If a specialized agent failed to complete a step, identify the issue and use you
     return node(state);
   };
 
-  const swarmNode = async (state: GraphStateType, config?: any) => {
-    const ctx = getContext(config);
-    if (ctx.shouldAbort?.()) {
-      throw new Error('Execution aborted by user (stop button clicked)');
-    }
-    const node = createSwarmOrchestratorNode(ctx.runner, ctx.eventQueue);
-    return node(state);
-  };
-
   const compiledGraph = new StateGraph(GraphState)
     .addNode('intent_classifier', triageNode)
     .addNode('task_decomposer', decomposerNode)
@@ -419,7 +409,6 @@ If a specialized agent failed to complete a step, identify the issue and use you
     .addNode('action_validation', validatorNode)
     .addNode('hitl_approval', hitlNode)
     .addNode('multi_tool_orchestrator', orchestratorNode)
-    .addNode('swarm', swarmNode)
     .addNode('judge', judgeNode);
 
   // New Brain-Centric Routing Architecture
@@ -427,33 +416,11 @@ If a specialized agent failed to complete a step, identify the issue and use you
     .addEdge(START, 'intent_classifier')
     .addEdge('intent_classifier', 'task_decomposer')
     .addConditionalEdges('task_decomposer', (state) => {
-        const plan = state.decomposedTask;
-        const mode = plan?.executionMode || 'sequential';
-        
-        // Detect if the user just approved the plan
-        const lastUserMsg = state.messages.filter((m: any) => m.role === 'user' || m._getType?.() === 'human').pop();
-        const content = typeof (lastUserMsg as any)?.content === 'string' ? (lastUserMsg as any).content : '';
-        const isPlanApproved = content.includes('[PLAN_APPROVED]');
-
-        console.log(`[Graph] 🔀 task_decomposer complete. Mode: ${mode}, Approved: ${isPlanApproved}`);
-        
-        if (mode === 'parallel' || mode === 'hybrid') {
-            console.log(`[Graph] ➡️ Routing to swarm`);
-            return 'swarm';
-        }
+        console.log(`[Graph] 🔀 task_decomposer complete`);
         console.log(`[Graph] ➡️ Routing to global_planner`);
         return 'global_planner';
     }, {
-        swarm: 'swarm',
         global_planner: 'global_planner'
-    })
-    .addConditionalEdges('swarm', (state) => {
-        const phase = state.taskPhase;
-        console.log(`[Graph] 🔀 swarm node complete. taskPhase: ${phase}`);
-        return phase === 'swarm' ? 'swarm' : 'brain';
-    }, {
-        swarm: 'swarm',
-        brain: 'brain'
     })
     .addEdge('global_planner', 'brain')
 
@@ -701,7 +668,6 @@ If a specialized agent failed to complete a step, identify the issue and use you
                 case 'computer_use_agent': return 'computer_use_agent';
                 case 'web_explorer': return 'web_explorer';
                 case 'deep_research': return 'deep_research';
-                case 'swarm_orchestrator': return 'swarm';
             }
         }
         console.log('[Graph] ➡️ Returning to brain');
@@ -712,7 +678,6 @@ If a specialized agent failed to complete a step, identify the issue and use you
         computer_use_agent: 'computer_use_agent',
         web_explorer: 'web_explorer',
         deep_research: 'deep_research',
-        swarm: 'swarm',
         brain: 'brain',
     })
 

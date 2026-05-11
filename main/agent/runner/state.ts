@@ -4,7 +4,7 @@ import type { ThinkingDuration } from './duration-tracker';
 
 // Type definitions to fix imports
 export type IntentType = 'unknown' | 'coding' | 'research' | 'task' | 'question' | 'conversation' | 'build' | 'fix' | 'analyze' | 'automate';
-export type TaskPhase = 'triage' | 'planning' | 'routing' | 'specialized_agent' | 'validation' | 'hitl' | 'orchestrating' | 'executing' | 'evaluating' | 'swarm' | 'brain';
+export type TaskPhase = 'triage' | 'planning' | 'routing' | 'specialized_agent' | 'validation' | 'hitl' | 'orchestrating' | 'executing' | 'evaluating' | 'brain';
 
 export interface TaskStep {
   id: string;
@@ -148,11 +148,11 @@ export const GraphState = Annotation.Root({
   // Subagent State
   subagentSpawned: Annotation<any>(),
   completedSteps: Annotation<string[]>(),
+  decompositionAttempts: Annotation<number>(),
 
   // Bugfixes: Routing state persistence
   brainToolsInFlight: Annotation<boolean>(),
   returningFromSpecialist: Annotation<string | null>(),
-  swarmPollCount: Annotation<number>(),
 });
 
 export type GraphStateType = typeof GraphState.State;

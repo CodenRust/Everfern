@@ -1,6 +1,6 @@
 ---
 name: data-analysis
-description: "Use this skill for advanced data manipulation, statistical analysis, and visualization. Use Python with pandas, numpy, and matplotlib/seaborn to perform tasks like: deep data cleaning, trend analysis, statistical testing, creating charts/plots, and generating insights from structured data (CSV, JSON, SQL, etc.). If the user wants to understand patterns, see graphs, or perform complex calculations on data, use this skill. IMPORTANT: After analyzing data with this skill, ALWAYS spawn a sub-agent (`spawn_agent`) and use the 'frontend-design' skill to generate interactive HTML dashboards for presenting results visually. NEVER write Python to generate HTML."
+description: "Use this skill for advanced data manipulation, statistical analysis, and visualization. Use Python with pandas, numpy, and matplotlib/seaborn to perform tasks like: deep data cleaning, trend analysis, statistical testing, creating charts/plots, and generating insights from structured data (CSV, JSON, SQL, etc.). If the user wants to understand patterns, see graphs, or perform complex calculations on data, use this skill. IMPORTANT: After analyzing data with this skill, use the 'frontend-design' skill directly to generate interactive HTML dashboards for presenting results visually. NEVER write Python to generate HTML."
 ---
 
 # Data Analysis in EverFern
@@ -20,7 +20,7 @@ description: "Use this skill for advanced data manipulation, statistical analysi
 - Clean and transform data
 - Generate visualizations
 
-**Step 3**: Finally, ALWAYS **spawn a sub-agent (`spawn_agent`)** and use the 'frontend-design' and 'charts' skills to:
+**Step 3**: Finally, ALWAYS use the 'frontend-design' and 'charts' skills to:
 - Generate an interactive HTML dashboard directly
 - Present results using ApexCharts (as defined in the `charts` skill)
 - Create charts that the user can interact with

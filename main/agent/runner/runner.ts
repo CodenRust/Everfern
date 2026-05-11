@@ -184,6 +184,13 @@ export class AgentRunner {
         required: ['task']
       },
       execute: async (args, onUpdate, emitEvent, toolCallId) => {
+        // HARD GUARD: Sub-agents cannot spawn other agents
+        if (this.currentAgentSessionKey) {
+          const errorMsg = 'ERROR: Sub-agents cannot spawn other agents. You are a sub-agent yourself. Complete the task using your own available tools.';
+          onUpdate?.(errorMsg);
+          return { success: false, output: errorMsg };
+        }
+
         const task = args.task as string;
         const agentType = (args.agent_type as string) || 'generic';
         const context = (args.context as string) || '';
@@ -567,9 +574,14 @@ export class AgentRunner {
         const shouldAbort = globalAbortManager.createShouldAbortCallback();
 
     // Build graph asynchronously to avoid blocking the event loop
+    // Sub-agents MUST NOT have spawn_agent — prevents sub-agents from spawning more agents
+    let toolDefs = this._buildToolDefinitions();
+    if (isSubagent) {
+      toolDefs = toolDefs.filter(t => t.name !== 'spawn_agent');
+    }
     const graph = await Promise.resolve().then(() => buildGraph(
       this,
-      this._buildToolDefinitions(),
+      toolDefs,
       this.tools,
     ));
     console.log('[AgentRunner] ✅ Graph built (or retrieved from cache)');
@@ -629,6 +641,7 @@ export class AgentRunner {
               missionTimeline: missionTracker.getTimeline(),
               missionSteps: missionTracker.getSteps(),
               currentStepId: 'step:triage',
+              decompositionAttempts: 0,
             }, threadConfig);
         }
         console.log('[AgentRunner] ✅ Graph invocation completed');
@@ -655,6 +668,13 @@ export class AgentRunner {
           eventQueue.push({
             type: 'chunk',
             content: `\n\n⚠️ **Rate Limit Reached**: ${providerName} is currently limiting requests. \n\nI have attempted to retry multiple times, but the quota has not reset yet. Please wait about 30-60 seconds and then click **Continue** or type "continue" to resume our mission.`
+          });
+          missionTracker.fail(errorMsg);
+        } else if (errorMsg.toLowerCase().includes('image input') || errorMsg.toLowerCase().includes('does not support image') || errorMsg.toLowerCase().includes('clipboard')) {
+          const providerName = this.client.provider ? this.client.provider.charAt(0).toUpperCase() + this.client.provider.slice(1) : 'The AI provider';
+          eventQueue.push({
+            type: 'chunk',
+            content: `\n\n⚠️ **Vision Error**: ${providerName} rejected image input. This model (${this.client.model}) does not support vision. Screenshots cannot be sent to this model. The task will continue without screenshots.\n\nIf you need vision capabilities, please switch to a vision-capable model (e.g. GPT-4o, Claude Sonnet, Gemini) or configure a separate VLM (Vision Language Model) in Settings.`
           });
           missionTracker.fail(errorMsg);
         } else {

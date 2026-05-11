@@ -112,16 +112,16 @@ When you see [Current state starts here], focus on the following:
 - Any action results or errors{results_placeholder}
 
 For browser interactions:
-- To navigate: navis with task="go_to_url", url="..."
-- To click: navis with task="click_element", ref="eN"
-- To type: navis with task="input_text", ref="eN", text="..."
-- To press a key (e.g. Enter to submit): navis with task="press_key", key="Enter" (optionally ref="eN" to press on a specific element)
-- To extract: navis with task="extract_content", goal="..."
-- To scroll: navis with task="scroll_down" or "scroll_up"
-- To open a new tab: navis with task="open_tab", url="..."
-- To switch tabs: navis with task="switch_tab", index=0 (or target="partial title")
-- To close a tab: navis with task="close_tab"
-- To solve a captcha: navis with task="solve_captcha" (use when any captcha/human verification appears)
+- To navigate: go_to_url with url="..."
+- To click: click_element with ref="eN"
+- To type: input_text with ref="eN", text="..."
+- To press a key (e.g. Enter to submit): press_key with key="Enter" (optionally ref="eN" to press on a specific element)
+- To extract: extract_content with goal="..."
+- To scroll: scroll_down or scroll_up
+- To open a new tab: open_tab with url="..."
+- To switch tabs: switch_tab with index=0 (or target="partial title")
+- To close a tab: close_tab
+- To solve a captcha: solve_captcha (use when any captcha/human verification appears)
 - Searching within a site: use SHORT single keywords, not full sentences. Short queries return more relevant results on search/catalog pages.
 
 Consider both what's visible and what might be beyond the current viewport.

@@ -58,6 +58,8 @@ import ArtifactsList from './ArtifactsList';
 import PlanViewerPanel from './PlanViewerPanel';
 import TasksPanel from './TasksPanel';
 import ScheduledTasksPanel from './components/ScheduledTasksPanel';
+import { DebateDisplay } from './components/DebateDisplay';
+import { useDebateStream } from './hooks/useDebateStream';
 import ScheduledTaskModal from './components/ScheduledTaskModal';
 import SitePreview from './SitePreview';
 import SettingsPage from './SettingsPage';
@@ -151,6 +153,7 @@ export default function ChatPage() {
     const [showScheduledTaskModal, setShowScheduledTaskModal] = useState(false);
     const [scheduledTasksRefreshTrigger, setScheduledTasksRefreshTrigger] = useState(0);
 
+    const { debate: debateData, isDebating } = useDebateStream();
     const handleSaveScheduledTask = async (task: { name?: string; description: string; cron: string; prompt: string; startsAt?: string; endsAt?: string }) => {
         try {
             await (window as any).electronAPI.scheduledTasks.save({
@@ -3257,6 +3260,18 @@ export default function ChatPage() {
                                             </motion.div>
                                         ))}
                                     </AnimatePresence>
+
+                                    {/* Debate display — shows when debate data is received from the backend */}
+                                    {debateData && (
+                                        <motion.div
+                                            key={debateData.debateId}
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            style={{ marginBottom: 28, width: '100%' }}
+                                        >
+                                            <DebateDisplay debate={debateData} isExpanded={isDebating} />
+                                        </motion.div>
+                                    )}
 
                                     {/* Live streaming state - hide if last message already has this content (prevent duplicates).
                                         Exception: when HITL or user question is active, always show the streaming bubble

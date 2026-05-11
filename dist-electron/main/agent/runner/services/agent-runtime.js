@@ -250,7 +250,9 @@ async function runAgentStep(state, options) {
         const scrubbed = textContent.replace(/<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>/ig, '').trim();
         // If model didn't provide tool calls but intent requires them, parse or nudge
         if (!response.toolCalls || response.toolCalls.length === 0) {
-            const parserResult = (0, text_to_tool_1.parseTextToToolCalls)(textContent, runner.tools);
+            const allowedInToolDefs = new Set(options.toolDefs.map((t) => t.name));
+            const filteredTools = (runner.tools || []).filter((t) => allowedInToolDefs.has(t.name));
+            const parserResult = (0, text_to_tool_1.parseTextToToolCalls)(textContent, filteredTools);
             if (parserResult.toolCalls.length > 0) {
                 response.toolCalls = parserResult.toolCalls;
                 response.finishReason = 'tool_calls';
@@ -262,11 +264,17 @@ async function runAgentStep(state, options) {
             tool_calls: response.toolCalls,
             reasoning_content: response.reasoning_content,
         };
+        // Validate tool calls against allowed toolDefs — strip hallucinated tools
+        const validatedToolCalls = (response.toolCalls ?? []).filter((tc) => options.toolDefs.some((td) => td.name === tc.name));
+        if (validatedToolCalls.length !== (response.toolCalls?.length ?? 0)) {
+            console.warn(`[AgentRuntime] Filtered ${(response.toolCalls?.length ?? 0) - validatedToolCalls.length} hallucinated tool call(s)`);
+        }
+        if (validatedToolCalls.length === 0) {
+            response.finishReason = 'stop';
+        }
+        assistantMsg.content = scrubbed;
         // Always send the final response to frontend if it's not a tool call
-        // This ensures the AI's message is displayed even if streaming already happened
         if (response.finishReason !== 'tool_calls' && scrubbed) {
-            // Send the scrubbed content if we haven't streamed anything yet,
-            // or if the scrubbed content is different from what was streamed
             const needsFinalChunk = !streamedText || streamedText.trim() !== scrubbed.trim();
             if (needsFinalChunk) {
                 eventQueue?.push({ type: 'chunk', content: scrubbed });
@@ -274,7 +282,7 @@ async function runAgentStep(state, options) {
         }
         return {
             messages: [assistantMsg],
-            pendingToolCalls: response.toolCalls ?? [],
+            pendingToolCalls: validatedToolCalls,
             iterations: iterations + 1,
             finalResponse: response.finishReason !== 'tool_calls' ? scrubbed : '',
         };

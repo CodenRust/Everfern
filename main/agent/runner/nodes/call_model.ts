@@ -337,7 +337,9 @@ You do not need to use complex execution plans or tools for this interaction.`;
           ? response.content.map((c: any) => 'text' in c ? c.text : '').join('\n')
           : '';
 
-      const parserResult = parseTextToToolCalls(textContent, (runner as any).tools);
+      const allowedInToolDefs = new Set(toolDefs.map((t: any) => t.name));
+      const filteredTools = ((runner as any).tools || []).filter((t: any) => allowedInToolDefs.has(t.name));
+      const parserResult = parseTextToToolCalls(textContent, filteredTools);
       if (parserResult.toolCalls.length > 0) {
         response.toolCalls = parserResult.toolCalls;
         response.content = parserResult.scrubbedContent;
@@ -425,9 +427,20 @@ You do not need to use complex execution plans or tools for this interaction.`;
       eventQueue?.push({ type: 'chunk', content: scrubbed });
     }
 
+    // Validate tool calls against allowed toolDefs — strip hallucinated tools
+    const validatedToolCalls = (response.toolCalls ?? []).filter((tc: any) =>
+      toolDefs.some((td: any) => td.name === tc.name)
+    );
+    if (validatedToolCalls.length !== (response.toolCalls?.length ?? 0)) {
+      console.warn(`[CallModel] Filtered ${(response.toolCalls?.length ?? 0) - validatedToolCalls.length} hallucinated tool call(s)`);
+    }
+    if (validatedToolCalls.length === 0) {
+      response.finishReason = 'stop';
+    }
+
     const result = {
       messages: [assistantMsg as any],
-      pendingToolCalls: response.toolCalls ?? [],
+      pendingToolCalls: validatedToolCalls,
       iterations,
       finalResponse: response.finishReason !== 'tool_calls' ? scrubbed : '',
     };
