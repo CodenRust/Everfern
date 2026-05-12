@@ -1,100 +1,35 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.memorySaveTool = void 0;
-const db_1 = require("../../lib/db");
-const embeddings_1 = require("../../lib/embeddings");
-exports.memorySaveTool = {
-    name: 'memory_save',
-    description: 'Save important facts, user preferences, or context into long-term local database memory.',
-    parameters: {
-        type: 'object',
-        properties: {
-            content: { type: 'string', description: 'The core textual content or fact to memorize.' },
-            metadata: { type: 'string', description: 'Optional tags or relationships as a JSON string.' }
-        },
-        required: ['content']
-    },
-    async execute(args, onUpdate, emitEvent, toolCallId) {
-        try {
-            const content = args.content;
-            const metadata = args.metadata;
-            const config = (0, embeddings_1.getSystemEmbeddingConfig)();
-            const { embeddings, dimensions } = (0, embeddings_1.getEmbeddingModel)(config);
-            await (0, db_1.ensureVectorTable)(dimensions);
-            // 1. Generate Embedding
-            const vector = await embeddings.embedQuery(content);
-            const vectorBuffer = Buffer.from(new Float32Array(vector).buffer);
-            // 2. Auto-detect if this is a user preference/choice
-            const isPreference = detectPreference(content);
-            // 3. Merge metadata with preference tag
-            let finalMetadata = metadata ? JSON.parse(metadata) : {};
-            if (isPreference) {
-                finalMetadata.isPreference = true;
-                finalMetadata.preferenceType = classifyPreferenceType(content);
-            }
-            finalMetadata.timestamp = Date.now();
-            const metadataStr = JSON.stringify(finalMetadata);
-            // 4. Insert into memory_chunks
-            const chunkId = `memory-${Date.now()}-${Math.floor(Math.random() * (10 ** 6))}`;
-            await db_1.dbOps.run(`
-        INSERT INTO memory_chunks (id, text_content, metadata)
-        VALUES (?, ?, ?)
-      `, [chunkId, content, metadataStr]);
-            // 5. Insert exact vector array into vec0
-            await db_1.dbOps.run(`
-        INSERT INTO memory_chunks_vec (id, embedding)
-        VALUES (?, ?)
-      `, [chunkId, vectorBuffer]);
-            return {
-                success: true,
-                output: `Successfully saved memory chunk: "${content.substring(0, 50)}..."${isPreference ? ' [Tagged as user preference]' : ''}`
-            };
-        }
-        catch (err) {
-            return { success: false, output: `Failed to save memory: ${err.message}` };
-        }
-    }
-};
-/**
- * Detect if content represents a user preference, choice, or behavioral pattern
- */
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
+const os_1 = __importDefault(require("os"));
+function getMemoryPath() {
+    const dir = path_1.default.join(os_1.default.homedir(), '.everfern');
+    if (!fs_1.default.existsSync(dir))
+        fs_1.default.mkdirSync(dir, { recursive: true });
+    return path_1.default.join(dir, 'memory.md');
+}
 function detectPreference(content) {
     const lower = content.toLowerCase();
-    // Strong preference indicators
     const strongIndicators = [
-        /\bprefer(s|red|ence)?\b/,
-        /\bchoose(s|chose|choice)?\b/,
-        /\bselect(s|ed|ion)?\b/,
-        /\blike(s|d)?\s+(to|using|when)\b/,
-        /\bwant(s|ed)?\s+(to|me to)\b/,
-        /\balways\s+(use|do|want|prefer)/,
-        /\busually\s+(use|do|want|prefer)/,
-        /\btypically\s+(use|do|want|prefer)/,
-        /\bdefault\s+(to|is|should be)/,
-        /\bfavorite\b/,
-        /\bgo-to\b/,
+        /\bprefer(s|red|ence)?\b/, /\bchoose(s|chose|choice)?\b/,
+        /\bselect(s|ed|ion)?\b/, /\blike(s|d)?\s+(to|using|when)\b/,
+        /\bwant(s|ed)?\s+(to|me to)\b/, /\balways\s+(use|do|want|prefer)/,
+        /\busually\s+(use|do|want|prefer)/, /\btypically\s+(use|do|want|prefer)/,
+        /\bdefault\s+(to|is|should be)/, /\bfavorite\b/, /\bgo-to\b/,
     ];
-    // Weak indicators (need multiple or context)
     const weakIndicators = [
-        /\bshould\s+(always|use|do)\b/,
-        /\bdon't\s+(like|want|use)\b/,
-        /\bavoid\b/,
-        /\bnever\s+(use|do|want)\b/,
+        /\bshould\s+(always|use|do)\b/, /\bdon't\s+(like|want|use)\b/,
+        /\bavoid\b/, /\bnever\s+(use|do|want)\b/,
     ];
-    // Check strong indicators
-    if (strongIndicators.some(pattern => pattern.test(lower))) {
+    if (strongIndicators.some(p => p.test(lower)))
         return true;
-    }
-    // Check weak indicators (need at least 2)
-    const weakMatches = weakIndicators.filter(pattern => pattern.test(lower)).length;
-    if (weakMatches >= 2) {
-        return true;
-    }
-    return false;
+    return weakIndicators.filter(p => p.test(lower)).length >= 2;
 }
-/**
- * Classify the type of preference for better UX
- */
 function classifyPreferenceType(content) {
     const lower = content.toLowerCase();
     if (/\b(format|style|layout|design|theme|color)\b/.test(lower))
@@ -109,3 +44,51 @@ function classifyPreferenceType(content) {
         return 'communication';
     return 'general';
 }
+exports.memorySaveTool = {
+    name: 'memory_save',
+    description: 'Save important facts, user preferences, or context into a local markdown memory file.',
+    parameters: {
+        type: 'object',
+        properties: {
+            content: { type: 'string', description: 'The core textual content or fact to memorize.' },
+            tags: { type: 'string', description: 'Optional comma-separated tags for grouping.' }
+        },
+        required: ['content']
+    },
+    async execute(args) {
+        try {
+            const content = (args.content || '').trim();
+            if (!content)
+                return { success: false, output: 'No content provided.' };
+            const tags = args.tags || '';
+            const now = new Date();
+            const dateStr = now.toDateString() + ' ' + now.toLocaleTimeString();
+            const isPreference = detectPreference(content);
+            const prefType = isPreference ? classifyPreferenceType(content) : '';
+            const tagLine = tags ? `**Tags:** ${tags}` : '';
+            const prefLine = isPreference ? `**Preference:** ${prefType}` : '';
+            const entry = [
+                '',
+                `## ${dateStr}`,
+                '',
+                `**Content:** ${content}`,
+                tagLine,
+                prefLine,
+                '---',
+            ].filter(l => l).join('\n') + '\n';
+            const filePath = getMemoryPath();
+            if (!fs_1.default.existsSync(filePath)) {
+                fs_1.default.writeFileSync(filePath, `# EverFern Memory Bank\n\n`);
+            }
+            fs_1.default.appendFileSync(filePath, entry, 'utf-8');
+            const suffix = isPreference ? ` [Tagged as ${prefType} preference]` : '';
+            return {
+                success: true,
+                output: `Saved memory chunk: "${content.substring(0, 50)}..."${suffix}`,
+            };
+        }
+        catch (err) {
+            return { success: false, output: `Failed to save memory: ${err.message}` };
+        }
+    }
+};

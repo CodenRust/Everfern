@@ -37,8 +37,8 @@ export class VanguardAgent {
         maxTokens: 2000,
       });
 
-      const responseText = typeof response.content === 'string' 
-        ? response.content 
+      const responseText = typeof response.content === 'string'
+        ? response.content
         : JSON.stringify(response.content);
 
       return this.parseProposal(responseText, context);
@@ -93,8 +93,8 @@ CONSTRAINTS:
 
   private buildUserPrompt(context: DebateContext): string {
     const toolsList = context.availableTools.join(', ');
-    const constraintsText = context.constraints?.length 
-      ? `Constraints: ${context.constraints.join('; ')}` 
+    const constraintsText = context.constraints?.length
+      ? `Constraints: ${context.constraints.join('; ')}`
       : '';
 
     return `You are designing an execution plan for this task:
@@ -164,7 +164,7 @@ Respond with ONLY the JSON block. No other text.`;
 
   private normalizeStepDependencies(dependencies: any[]): string[] {
     if (!Array.isArray(dependencies)) return [];
-    
+
     return dependencies.map(dep => {
       if (typeof dep === 'number') {
         return `step-${dep - 1}`; // Convert from sequence number to step ID

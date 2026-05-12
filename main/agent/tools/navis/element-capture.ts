@@ -43,14 +43,20 @@ export async function captureFastSnapshot(page: Page): Promise<AriaSnapshotResul
 }
 
 export async function captureInteractiveElements(page: Page): Promise<AriaSnapshotResult> {
-  // Try fast method first
+  // Try fast method first (in-browser DOM query, very fast)
   const fastResult = await captureFastSnapshot(page);
   if (fastResult) return fastResult;
-  
-  // Fallback to ariaSnapshot
-  const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 1000 });
-  const refs = parseRefs(raw);
-  return { raw, refs };
+
+  // Fallback to ariaSnapshot with generous timeout + error handling
+  try {
+    const raw = await page.ariaSnapshot({ mode: 'ai', timeout: 5000 });
+    const refs = parseRefs(raw);
+    return { raw, refs };
+  } catch {
+    console.warn('[Navis] ariaSnapshot fallback failed, returning empty snapshot');
+    const raw = `- ${await page.title().catch(() => 'page')} "no interactive elements found" [ref=e1]`;
+    return { raw, refs: new Map([['e1', { role: 'heading', name: 'no interactive elements found' }]]) };
+  }
 }
 
 export function parseRefs(snapshot: string): Map<string, { role: string; name: string }> {

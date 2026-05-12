@@ -137,6 +137,7 @@ CRITICAL ROUTING RULES:
 5. CRITICAL: For tasks like "find the best anime discord bot", "search for news bots", "look up pricing for X" — these are WEB research tasks. Use "route_web_explorer".
 6. You have web_search and navis available directly — use them for quick lookups or straightforward web research. For complex multi-step research spanning multiple URLs, consider routing to "route_web_explorer" which has dedicated navigation capabilities.
 7. NEVER use terminal_execute with curl for web research. Use web_search or navis which you have available. Route to "route_web_explorer" only for complex research that requires visiting multiple pages or filling forms.
+8. CRITICAL — PICK ONE: Do NOT both route to a specialist AND call spawn_agent/tools for the same task. If you route to "route_web_explorer", let the specialist handle it completely. If you use tools directly, do not also route.
 
 Respond with JSON only:
 {

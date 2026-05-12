@@ -8,6 +8,7 @@ import { createBrainNode } from './nodes/brain';
 import { createJudgeNode } from './nodes/judge';
 import { createDecomposerNode } from './nodes/decomposer';
 import { loadPrompt } from '../../lib/prompt-sync';
+import { createDebateChamberNode } from './nodes/debate-chamber';
 import {
   createComputerUseNode,
   createCodingSpecialistNode,
@@ -22,13 +23,9 @@ import { saveHitlRequest } from '../../store/hitl';
 import { toolApprovalStore } from '../../store/tool-approvals';
 import * as crypto from 'crypto';
 
-// Cache compiled graphs for better performance
-const graphCache = new Map<string, any>();
-
-
 /**
- * ExecutionContext provides access to runtime-specific objects (queue, tracker, etc.)
- * that shouldn't be baked into the cached graph's closures.
+ * ExecutionContext provides runtime-specific objects (queue, tracker, etc.)
+ * passed at graph invocation time.
  */
 export interface ExecutionContext {
   runner: AgentRunner;
@@ -54,25 +51,7 @@ export const buildGraph = (
   toolDefs: any[],
   tools: any[],
 ) => {
-  // Bug 9: Create a hash of tool names, descriptions, and schemas to include in cache key
-  // This prevents reusing a cached graph when tool definitions change
-  const toolDefsStr = JSON.stringify(toolDefs.map(t => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters
-  })).sort((a, b) => a.name.localeCompare(b.name)));
-  const toolDefsHash = crypto.createHash('md5').update(toolDefsStr).digest('hex').substring(0, 8);
-  const cacheKey = `graph_v8_specialized_${toolDefs.length}_${toolDefsHash}`;
-
-  if (graphCache.has(cacheKey)) {
-
-    console.log(`[Graph] 📦 Using CACHED execution graph (key: ${cacheKey})`);
-    console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
-    return graphCache.get(cacheKey);
-  }
-
-  console.log(`[Graph] 🏗️  BUILDING NEW AGENT EXECUTION GRAPH (v4 Specialized)`);
-  console.log(`[Graph] Cache key: ${cacheKey}`);
+  console.log(`[Graph] 🏗️  BUILDING AGENT EXECUTION GRAPH (with debate_chamber)`);
   console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
 
   // Warn if computer_use is missing
@@ -283,6 +262,15 @@ export const buildGraph = (
     return node(state);
   };
 
+  const debateChamberNode = async (state: GraphStateType, config?: any) => {
+    const ctx = getContext(config);
+    if (ctx.shouldAbort?.()) {
+      throw new Error('Execution aborted by user (stop button clicked)');
+    }
+    const node = createDebateChamberNode(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
+    return node(state);
+  };
+
   const brainNode = async (state: GraphStateType, config?: any) => {
     const ctx = getContext(config);
     // Guard: Check abort before node execution
@@ -400,6 +388,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
     .addNode('intent_classifier', triageNode)
     .addNode('task_decomposer', decomposerNode)
     .addNode('global_planner', plannerNode)
+    .addNode('debate_chamber', debateChamberNode)
     .addNode('brain', brainNode)
     .addNode('computer_use_agent', computerUseNode)
     .addNode('coding_specialist', codingNode)
@@ -422,7 +411,21 @@ If a specialized agent failed to complete a step, identify the issue and use you
     }, {
         global_planner: 'global_planner'
     })
-    .addEdge('global_planner', 'brain')
+    .addEdge('global_planner', 'debate_chamber')
+
+    // Debate chamber: runs three-agent debate for complex tasks, routes to brain or END
+    .addConditionalEdges('debate_chamber', (state) => {
+        const dr = state.debateResult;
+        if (dr?.goNogo === 'no-go') {
+            console.log('[Graph] 🔀 Debate chamber voted NO-GO → END');
+            return END;
+        }
+        console.log('[Graph] 🔀 Debate chamber complete → brain');
+        return 'brain';
+    }, {
+        brain: 'brain',
+        [END]: END,
+    })
 
     // Brain is the central router - it decides whether to handle tasks itself or route to specialists
     .addConditionalEdges('brain', (state) => {
@@ -693,6 +696,5 @@ If a specialized agent failed to complete a step, identify the issue and use you
   const finalGraph = compiledGraph.compile({
     checkpointer: lightweightCheckpointer
   });
-  graphCache.set(cacheKey, finalGraph);
   return finalGraph;
 };

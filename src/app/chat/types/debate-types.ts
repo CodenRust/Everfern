@@ -5,7 +5,7 @@
 export interface DebateDisplayData {
   debateId: string;
   timestamp: string;
-  
+
   proposal: {
     id: string;
     taskSummary: string;
@@ -14,7 +14,7 @@ export interface DebateDisplayData {
     stepCount: number;
     assumptions: string[];
   };
-  
+
   review: {
     id: string;
     assessment: 'viable' | 'concerning' | 'problematic';
@@ -28,7 +28,7 @@ export interface DebateDisplayData {
       suggestion?: string;
     }>;
   };
-  
+
   finalPlan: {
     id: string;
     goNogo: 'go' | 'proceed-with-caution' | 'no-go';

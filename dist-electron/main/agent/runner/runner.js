@@ -652,6 +652,12 @@ class AgentRunner {
                     if (event.type === 'thought') {
                         durationTracker.onThoughtStart();
                     }
+                    if (event.type === 'debate_event') {
+                        console.log('[Runner] 📣 Yielding debate_event:', event.debateEvent?.type);
+                    }
+                    if (event.type === 'chunk') {
+                        console.log('[Runner] Yielding chunk event (length:', (event.content || '').length, ')');
+                    }
                     yield event;
                 }
                 else {

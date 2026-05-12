@@ -44,13 +44,12 @@ const brain_1 = require("./nodes/brain");
 const judge_1 = require("./nodes/judge");
 const decomposer_1 = require("./nodes/decomposer");
 const prompt_sync_1 = require("../../lib/prompt-sync");
+const debate_chamber_1 = require("./nodes/debate-chamber");
 const specialized_agents_1 = require("./nodes/specialized_agents");
 const custom_checkpointer_1 = require("./custom-checkpointer");
 const hitl_1 = require("../../store/hitl");
 const tool_approvals_1 = require("../../store/tool-approvals");
 const crypto = __importStar(require("crypto"));
-// Cache compiled graphs for better performance
-const graphCache = new Map();
 /**
  * Helper to extract ExecutionContext from LangGraph config
  */
@@ -62,22 +61,7 @@ const getContext = (config) => {
     return ctx;
 };
 const buildGraph = (runner, toolDefs, tools) => {
-    // Bug 9: Create a hash of tool names, descriptions, and schemas to include in cache key
-    // This prevents reusing a cached graph when tool definitions change
-    const toolDefsStr = JSON.stringify(toolDefs.map(t => ({
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters
-    })).sort((a, b) => a.name.localeCompare(b.name)));
-    const toolDefsHash = crypto.createHash('md5').update(toolDefsStr).digest('hex').substring(0, 8);
-    const cacheKey = `graph_v8_specialized_${toolDefs.length}_${toolDefsHash}`;
-    if (graphCache.has(cacheKey)) {
-        console.log(`[Graph] 📦 Using CACHED execution graph (key: ${cacheKey})`);
-        console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
-        return graphCache.get(cacheKey);
-    }
-    console.log(`[Graph] 🏗️  BUILDING NEW AGENT EXECUTION GRAPH (v4 Specialized)`);
-    console.log(`[Graph] Cache key: ${cacheKey}`);
+    console.log(`[Graph] 🏗️  BUILDING AGENT EXECUTION GRAPH (with debate_chamber)`);
     console.log(`[Graph] Available tools: ${toolDefs.map(t => t.name).join(', ')}`);
     // Warn if computer_use is missing
     if (!toolDefs.find(t => t.name === 'computer_use')) {
@@ -266,6 +250,14 @@ const buildGraph = (runner, toolDefs, tools) => {
         const node = (0, planner_1.createPlannerNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort);
         return node(state);
     };
+    const debateChamberNode = async (state, config) => {
+        const ctx = getContext(config);
+        if (ctx.shouldAbort?.()) {
+            throw new Error('Execution aborted by user (stop button clicked)');
+        }
+        const node = (0, debate_chamber_1.createDebateChamberNode)(ctx.runner, ctx.eventQueue, ctx.missionTracker, ctx.shouldAbort, ctx.sendIPC);
+        return node(state);
+    };
     const brainNode = async (state, config) => {
         const ctx = getContext(config);
         // Guard: Check abort before node execution
@@ -370,6 +362,7 @@ If a specialized agent failed to complete a step, identify the issue and use you
         .addNode('intent_classifier', triageNode)
         .addNode('task_decomposer', decomposerNode)
         .addNode('global_planner', plannerNode)
+        .addNode('debate_chamber', debateChamberNode)
         .addNode('brain', brainNode)
         .addNode('computer_use_agent', computerUseNode)
         .addNode('coding_specialist', codingNode)
@@ -391,7 +384,20 @@ If a specialized agent failed to complete a step, identify the issue and use you
     }, {
         global_planner: 'global_planner'
     })
-        .addEdge('global_planner', 'brain')
+        .addEdge('global_planner', 'debate_chamber')
+        // Debate chamber: runs three-agent debate for complex tasks, routes to brain or END
+        .addConditionalEdges('debate_chamber', (state) => {
+        const dr = state.debateResult;
+        if (dr?.goNogo === 'no-go') {
+            console.log('[Graph] 🔀 Debate chamber voted NO-GO → END');
+            return langgraph_1.END;
+        }
+        console.log('[Graph] 🔀 Debate chamber complete → brain');
+        return 'brain';
+    }, {
+        brain: 'brain',
+        [langgraph_1.END]: langgraph_1.END,
+    })
         // Brain is the central router - it decides whether to handle tasks itself or route to specialists
         .addConditionalEdges('brain', (state) => {
         const hasTools = state.pendingToolCalls && state.pendingToolCalls.length > 0;
@@ -623,7 +629,6 @@ If a specialized agent failed to complete a step, identify the issue and use you
     const finalGraph = compiledGraph.compile({
         checkpointer: custom_checkpointer_1.lightweightCheckpointer
     });
-    graphCache.set(cacheKey, finalGraph);
     return finalGraph;
 };
 exports.buildGraph = buildGraph;

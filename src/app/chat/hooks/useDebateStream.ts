@@ -64,11 +64,12 @@ export function useDebateStream() {
   }, []);
 
   useEffect(() => {
-    // Check if electronAPI is available
-    if (typeof window !== 'undefined' && (window as any).electronAPI?.acp?.onDebateStream) {
+    const hasAPI = typeof window !== 'undefined' && !!(window as any).electronAPI?.acp?.onDebateStream;
+    console.log('[useDebateStream] Hook mounted, electronAPI.acp.onDebateStream available:', hasAPI);
+    if (hasAPI) {
       (window as any).electronAPI.acp.onDebateStream(handleDebateEvent);
-
       return () => {
+        console.log('[useDebateStream] Cleaning up listener');
         (window as any).electronAPI?.acp?.removeDebateStreamListener?.();
       };
     }

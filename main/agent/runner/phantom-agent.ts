@@ -40,8 +40,8 @@ export class PhantomAgent {
         maxTokens: 2500,
       });
 
-      const responseText = typeof response.content === 'string' 
-        ? response.content 
+      const responseText = typeof response.content === 'string'
+        ? response.content
         : JSON.stringify(response.content);
 
       return this.parseReview(responseText, proposal);

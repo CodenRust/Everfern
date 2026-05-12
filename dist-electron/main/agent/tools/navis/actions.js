@@ -63,22 +63,23 @@ async function findElement(page, ref, logger) {
     throw new Error(`Element with ref=${ref} not found after trying ${strategies.length} strategies`);
 }
 // ── Element Validation ─────────────────────────────────────────
+// Returns null if element is valid (visible + enabled), or a string explaining why it's not.
 async function validateElement(locator, action, logger) {
     try {
         const isVisible = await locator.isVisible({ timeout: 1000 }).catch(() => false);
         if (!isVisible) {
             console.warn(`[Navis] Element not visible for ${action}`);
-            return false;
+            return 'not visible (hidden, offscreen, or covered by another element)';
         }
         const isEnabled = await locator.isEnabled({ timeout: 1000 }).catch(() => true);
         if (!isEnabled) {
             console.warn(`[Navis] Element disabled for ${action}`);
-            return false;
+            return 'disabled (readonly or grayed out)';
         }
-        return true;
+        return null; // valid — element is visible and enabled
     }
     catch {
-        return true; // If validation fails, still try the action
+        return null; // If validation fails, still try the action
     }
 }
 async function executeAction(actionName, args, page, session, logger, step, maxSteps) {
@@ -86,6 +87,8 @@ async function executeAction(actionName, args, page, session, logger, step, maxS
         switch (actionName) {
             case 'go_to_url':
                 return await executeGoToUrl(args, page, logger, step, maxSteps);
+            case 'go_back':
+                return await executeGoBack(page, logger, step, maxSteps);
             case 'click_element':
                 return await executeClickElement(args, page, session, logger, step, maxSteps);
             case 'input_text':
@@ -125,21 +128,36 @@ async function executeGoToUrl(args, page, logger, step, maxSteps) {
     await page.goto(args.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     return { success: true, message: `Navigated to ${args.url}`, stateChanged: true };
 }
+async function executeGoBack(page, logger, step, maxSteps) {
+    try {
+        logger?.pageNavigate(step, maxSteps, 'go_back');
+        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 });
+        return { success: true, message: 'Navigated back to previous page', stateChanged: true };
+    }
+    catch (err) {
+        return { success: false, message: `Go back failed: ${err.message}`, stateChanged: false };
+    }
+}
 async function executeClickElement(args, page, session, logger, step, maxSteps) {
     if (!args.ref)
         return { success: false, message: 'Missing ref parameter', stateChanged: false };
     try {
         const { locator, name } = await findElement(page, args.ref, logger);
-        if (!await validateElement(locator, 'click', logger)) {
-            return { success: false, message: `Element ${args.ref} not clickable`, stateChanged: false };
+        const validation = await validateElement(locator, 'click', logger);
+        if (validation !== null) {
+            return {
+                success: false,
+                message: `Element ${args.ref} ("${truncate(String(name), 40)}") ${validation}. Try scrolling to it, waiting for the page to load, or choosing a different element.`,
+                stateChanged: false,
+            };
         }
         const box = await locator.boundingBox().catch(() => null);
         if (box) {
             await session.highlightElement(box);
-            // Try Playwright click first
+            // Try Playwright click first — NO trial: true (that would skip the actual click!)
             const clicked = await locator.click({
-                timeout: 2000, // Reduced from 5000ms
-                trial: true
+                timeout: 3000,
+                force: false,
             }).then(() => true).catch(() => false);
             // Fallback: use mouse.click with coordinates
             if (!clicked && box) {
@@ -164,8 +182,13 @@ async function executeInputText(args, page, session, logger, step, maxSteps) {
         return { success: false, message: 'Missing text parameter', stateChanged: false };
     try {
         const { locator, name } = await findElement(page, args.ref, logger);
-        if (!await validateElement(locator, 'input', logger)) {
-            return { success: false, message: `Cannot input to ${args.ref}`, stateChanged: false };
+        const validation = await validateElement(locator, 'input', logger);
+        if (validation !== null) {
+            return {
+                success: false,
+                message: `Element ${args.ref} ("${truncate(String(name), 40)}") ${validation}. Try scrolling to it, waiting for the page to load, or choosing a different input.`,
+                stateChanged: false,
+            };
         }
         const box = await locator.boundingBox().catch(() => null);
         if (box)

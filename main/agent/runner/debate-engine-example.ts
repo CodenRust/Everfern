@@ -1,10 +1,10 @@
 /**
  * EverFern Desktop — Debate Engine Example Integration
- * 
+ *
  * This file shows a concrete example of how to integrate the Peer Agent Debate Engine
  * into the AgentRunner class. This is NOT part of the core engine — it's a reference
  * implementation showing how to wire it up.
- * 
+ *
  * To use this, copy the relevant methods into your AgentRunner class.
  */
 
@@ -86,8 +86,8 @@ Respond with JSON: {"complexity":"simple"|"moderate"|"complex","confidence":0.0-
         maxTokens: 100,
       });
 
-      const responseText = typeof response.content === 'string' 
-        ? response.content 
+      const responseText = typeof response.content === 'string'
+        ? response.content
         : JSON.stringify(response.content);
 
       const match = responseText.match(/\{[\s\S]*\}/);
@@ -109,7 +109,7 @@ Respond with JSON: {"complexity":"simple"|"moderate"|"complex","confidence":0.0-
   /**
    * Main method: Run debate if task is complex enough.
    * Call this before normal execution flow.
-   * 
+   *
    * Example usage:
    * ```
    * const debatePlan = await agentRunner.maybeActivateDebate(
@@ -117,7 +117,7 @@ Respond with JSON: {"complexity":"simple"|"moderate"|"complex","confidence":0.0-
    *   conversationHistory,
    *   complexity
    * );
-   * 
+   *
    * if (debatePlan) {
    *   // Use debate-approved plan
    *   await executeDebatePlan(debatePlan);

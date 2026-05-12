@@ -153,6 +153,9 @@ export const GraphState = Annotation.Root({
   // Bugfixes: Routing state persistence
   brainToolsInFlight: Annotation<boolean>(),
   returningFromSpecialist: Annotation<string | null>(),
+
+  // Debate system: stores the result of the three-agent debate chamber
+  debateResult: Annotation<any>(),
 });
 
 export type GraphStateType = typeof GraphState.State;

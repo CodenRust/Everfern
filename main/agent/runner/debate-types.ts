@@ -84,16 +84,16 @@ export interface FinalExecutionPlan {
   originTaskSummary: string;
   vanguardProposalId: string;
   phantomReviewId: string;
-  
+
   // Core plan
   steps: AuditedStep[];
   approvedApproach: string;
-  
+
   // Risk management
   addressedConcerns: Concern[]; // Concerns that were mitigated
   remainingRisks: Concern[]; // Risks that couldn't be mitigated
   overallRiskAssessment: 'low' | 'medium' | 'high' | 'critical';
-  
+
   // Execution guidance
   goNogo: 'go' | 'no-go' | 'proceed-with-caution';
   explanation: string; // Why this go/no-go decision
@@ -133,6 +133,12 @@ export interface DebateMessage {
 
 // ── Debate Engine Configuration ──────────────────────────────────────────
 
+export type DebatePhase = 'vanguard' | 'phantom' | 'arbiter';
+
+export interface DebateEventEmitterCallback {
+  (phase: DebatePhase, proposal?: ExecutionProposal, review?: CriticalReview, finalPlan?: FinalExecutionPlan): void | Promise<void>;
+}
+
 export interface DebateEngineConfig {
   enableDebate: boolean;
   complexityThreshold: 'moderate' | 'complex'; // Minimum complexity to trigger debate
@@ -142,4 +148,5 @@ export interface DebateEngineConfig {
   arbiterTimeoutMs?: number; // Max time for Arbiter (default: 15000)
   maxRetries?: number; // If debate fails, retry (default: 1)
   verbose?: boolean; // Log debate transcript
+  onPhaseComplete?: DebateEventEmitterCallback; // Called after each phase completes
 }

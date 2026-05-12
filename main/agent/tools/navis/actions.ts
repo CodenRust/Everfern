@@ -11,6 +11,7 @@ import { NavisLogger } from './logger';
 
 export type ActionName =
   | 'go_to_url'
+  | 'go_back'
   | 'click_element'
   | 'input_text'
   | 'press_key'
@@ -120,6 +121,9 @@ export async function executeAction(
       case 'go_to_url':
         return await executeGoToUrl(args as { url: string }, page, logger, step, maxSteps);
 
+      case 'go_back':
+        return await executeGoBack(page, logger, step, maxSteps);
+
       case 'click_element':
         return await executeClickElement(args as { ref: string }, page, session, logger, step, maxSteps);
 
@@ -172,6 +176,16 @@ async function executeGoToUrl(args: { url: string }, page: Page, logger?: NavisL
   return { success: true, message: `Navigated to ${args.url}`, stateChanged: true };
 }
 
+async function executeGoBack(page: Page, logger?: NavisLogger, step?: number, maxSteps?: number): Promise<ActionResult> {
+  try {
+    logger?.pageNavigate(step, maxSteps, 'go_back');
+    await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 });
+    return { success: true, message: 'Navigated back to previous page', stateChanged: true };
+  } catch (err: any) {
+    return { success: false, message: `Go back failed: ${err.message}`, stateChanged: false };
+  }
+}
+
 async function executeClickElement(
   args: { ref: string },
   page: Page,
@@ -198,12 +212,12 @@ async function executeClickElement(
     if (box) {
       await session.highlightElement(box);
       
-      // Try Playwright click first
+      // Try Playwright click first — NO trial: true (that would skip the actual click!)
       const clicked = await locator.click({ 
-        timeout: 2000,  // Reduced from 5000ms
-        trial: true
+        timeout: 3000,
+        force: false,
       }).then(() => true).catch(() => false);
-      
+
       // Fallback: use mouse.click with coordinates
       if (!clicked && box) {
         await page.mouse.click(box.x + box.width/2, box.y + box.height/2);

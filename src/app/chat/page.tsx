@@ -59,7 +59,11 @@ import PlanViewerPanel from './PlanViewerPanel';
 import TasksPanel from './TasksPanel';
 import ScheduledTasksPanel from './components/ScheduledTasksPanel';
 import { DebateDisplay } from './components/DebateDisplay';
+import { LiveDebateChamber } from './components/LiveDebateChamber';
+import { InlineDebateProgress } from './components/InlineDebateProgress';
+import { DebateArena } from './components/DebateArena';
 import { useDebateStream } from './hooks/useDebateStream';
+import { useDebateChamberUI } from './hooks/useDebateChamberUI';
 import ScheduledTaskModal from './components/ScheduledTaskModal';
 import SitePreview from './SitePreview';
 import SettingsPage from './SettingsPage';
@@ -154,6 +158,8 @@ export default function ChatPage() {
     const [scheduledTasksRefreshTrigger, setScheduledTasksRefreshTrigger] = useState(0);
 
     const { debate: debateData, isDebating } = useDebateStream();
+    const debateUI = useDebateChamberUI();
+    console.log('[ChatPage] Debate state — isDebating:', isDebating, 'debateData:', !!debateData);
     const handleSaveScheduledTask = async (task: { name?: string; description: string; cron: string; prompt: string; startsAt?: string; endsAt?: string }) => {
         try {
             await (window as any).electronAPI.scheduledTasks.save({
@@ -2326,7 +2332,7 @@ export default function ChatPage() {
             <AnimatePresence>
                 {showModelSelector && (
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ duration: 0.15 }}
-                        style={{ position: "absolute", bottom: "calc(100% + 8px)", right: 0, width: 240, backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, padding: 6, zIndex: 200, boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
+                        style={{ position: "absolute", bottom: "calc(100% + 8px)", right: 0, width: 240, backgroundColor: "#ffffff", border: "1px solid #e8e6d9", borderRadius: 12, padding: 6, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
                         <div style={{ padding: "8px 10px 4px", fontSize: 10, fontWeight: 700, color: "#8a8886", textTransform: "uppercase", letterSpacing: "0.05em" }}>Models</div>
                         <div style={{ maxHeight: 300, overflowY: "auto" }}>
                             {availableModels.map(model => {
@@ -3094,6 +3100,17 @@ export default function ChatPage() {
                                         </div>
                                     )}
 
+                                    {/* Inline Debate Progress */}
+                                    {(debateData || isDebating) && (
+                                        <div style={{ maxWidth: 800, margin: "0 auto 24px", padding: "0 32px" }}>
+                                            <InlineDebateProgress
+                                                debate={debateData}
+                                                isDebating={isDebating}
+                                                onViewFullDebate={() => debateUI.openArena(debateData?.debateId || debateUI.debateId || '')}
+                                            />
+                                        </div>
+                                    )}
+
                                     {/* Messages */}
                                     <AnimatePresence mode="popLayout">
                                         {messages.map((msg, idx) => (
@@ -3431,7 +3448,7 @@ export default function ChatPage() {
 
                             {/* ── Non-empty bottom composer ── */}
                             {!isEmpty && (
-                                <div style={{ padding: "0 24px 12px", width: "100%", maxWidth: 848, margin: "0 auto", position: "relative" }}>
+                                <div style={{ padding: "0 24px 12px", width: "100%", maxWidth: 848, margin: "0 auto", position: "relative", zIndex: 50 }}>
                                     <AnimatePresence>
                                         {(isComputerUseActive || showPermissionModal) && (
                                             <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.2 }} style={{ width: "96%", maxWidth: 840, margin: "0 auto", position: "relative", zIndex: 1 }}>
@@ -3906,6 +3923,22 @@ export default function ChatPage() {
                 {settingsModalNode}
                 {integrationSettingsModalNode}
                 <DirectoryModal isOpen={showDirectoryModal} onClose={() => setShowDirectoryModal(false)} />
+
+                {/* Floating Live Debate Chamber */}
+                <LiveDebateChamber
+                    debate={debateData}
+                    isDebating={isDebating}
+                    onClose={debateUI.closeLiveDebate}
+                    onViewArena={() => debateUI.openArena(debateData?.debateId || '')}
+                />
+
+                {/* Fullscreen Debate Arena Modal */}
+                <DebateArena
+                    debate={debateData}
+                    isDebating={isDebating}
+                    isOpen={debateUI.showArena}
+                    onClose={debateUI.closeArena}
+                />
 
                 <CustomizeModal
                     isOpen={showCustomizeModal}

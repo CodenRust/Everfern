@@ -1,6 +1,6 @@
 /**
  * EverFern Desktop — Debate Engine Test Suite
- * 
+ *
  * Comprehensive tests for the Peer Agent Debate Engine.
  * Includes unit tests, integration tests, and scenario tests.
  */
@@ -18,7 +18,7 @@ class MockAIClient implements Partial<AIClient> {
   async chat(options: any): Promise<any> {
     // Return mock responses based on system prompt
     const systemPrompt = options.messages?.[0]?.content || '';
-    
+
     if (systemPrompt.includes('Vanguard')) {
       return this.mockVanguardResponse();
     } else if (systemPrompt.includes('Phantom')) {
@@ -26,7 +26,7 @@ class MockAIClient implements Partial<AIClient> {
     } else if (systemPrompt.includes('Arbiter')) {
       return this.mockArbiterResponse();
     }
-    
+
     return { content: '{}' };
   }
 
@@ -522,7 +522,7 @@ describe('Debate Scenarios', () => {
 
     // Should address complexity
     const highConcerns = result.review.concerns.filter(c => c.severity === 'high' || c.severity === 'critical');
-    const mitigated = result.finalPlan.addressedConcerns.filter(c => 
+    const mitigated = result.finalPlan.addressedConcerns.filter(c =>
       c.severity === 'high' || c.severity === 'critical'
     );
 

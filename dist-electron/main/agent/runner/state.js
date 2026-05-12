@@ -81,4 +81,6 @@ exports.GraphState = langgraph_1.Annotation.Root({
     // Bugfixes: Routing state persistence
     brainToolsInFlight: (0, langgraph_1.Annotation)(),
     returningFromSpecialist: (0, langgraph_1.Annotation)(),
+    // Debate system: stores the result of the three-agent debate chamber
+    debateResult: (0, langgraph_1.Annotation)(),
 });

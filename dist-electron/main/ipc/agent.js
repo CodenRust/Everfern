@@ -289,6 +289,10 @@ function registerAgentHandlers() {
         };
         const safeSend = (channel, data) => {
             flushBuffers();
+            if (data === undefined) {
+                console.warn(`[IPC] Skipping undefined data for channel ${channel}`);
+                return;
+            }
             try {
                 const safeData = JSON.parse(JSON.stringify(data, (key, value) => {
                     if (value instanceof Error)
@@ -348,6 +352,11 @@ function registerAgentHandlers() {
                 }
                 else if (streamEvent.type === 'subagent-progress') {
                     safeSend('acp:sub-agent-progress', streamEvent.data);
+                }
+                else if (streamEvent.type === 'debate_event' && streamEvent.debateEvent) {
+                    const de = streamEvent.debateEvent;
+                    console.log('[AgentIPC] Forwarding debate event:', de.type, 'debateId:', de.debateId);
+                    safeSend('debate:stream', de);
                 }
                 else {
                     safeSend(`acp:${streamEvent.type.replace(/_/g, '-')}`, streamEvent);

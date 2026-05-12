@@ -35,6 +35,7 @@ exports.NAVIS_DECISION_SCHEMA = {
                 type: 'object',
                 oneOf: [
                     { properties: { go_to_url: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false } }, required: ['go_to_url'], additionalProperties: false },
+                    { properties: { go_back: { type: 'object', additionalProperties: false } }, required: ['go_back'], additionalProperties: false },
                     { properties: { click_element: { type: 'object', properties: { ref: { type: 'string' } }, required: ['ref'], additionalProperties: false } }, required: ['click_element'], additionalProperties: false },
                     { properties: { input_text: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } }, required: ['ref', 'text'], additionalProperties: false } }, required: ['input_text'], additionalProperties: false },
                     { properties: { press_key: { type: 'object', properties: { ref: { type: 'string' }, key: { type: 'string' } }, required: ['key'], additionalProperties: false } }, required: ['press_key'], additionalProperties: false },
@@ -77,7 +78,7 @@ function loadNavisPrompts() {
 const { systemPrompt: NAVIS_SYSTEM_PROMPT, nextStepPrompt: NEXT_STEP_PROMPT } = loadNavisPrompts();
 const FALLBACK_SYSTEM_PROMPT = `You are Navis, an AI agent designed to automate browser tasks.
 Respond with valid JSON: {"current_state":{"evaluation_previous_goal":"Success|Failed|Unknown","memory":"track progress","next_goal":"immediate action"},"action":[{"action_name":{params}}]}
-Actions: go_to_url, click_element, input_text, scroll_down, scroll_up, wait, extract_content, open_tab, switch_tab, close_tab, done.`;
+Actions: go_to_url, go_back, click_element, input_text, scroll_down, scroll_up, wait, extract_content, open_tab, switch_tab, close_tab, done.`;
 const FALLBACK_NEXT_STEP_PROMPT = `What should I do next?
 Current URL: {url_placeholder}
 Tabs: {tabs_placeholder}

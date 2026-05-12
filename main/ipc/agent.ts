@@ -331,6 +331,10 @@ export function registerAgentHandlers() {
           reflectAndRemember(history, userInput, fullResponse, client);
         } else if (streamEvent.type === 'subagent-progress') {
           safeSend('acp:sub-agent-progress', streamEvent.data);
+        } else if (streamEvent.type === 'debate_event' && (streamEvent as any).debateEvent) {
+          const de = (streamEvent as any).debateEvent;
+          console.log('[AgentIPC] Forwarding debate event:', de.type, 'debateId:', de.debateId);
+          safeSend('debate:stream', de);
         } else {
           safeSend(`acp:${streamEvent.type.replace(/_/g, '-')}`, streamEvent);
         }

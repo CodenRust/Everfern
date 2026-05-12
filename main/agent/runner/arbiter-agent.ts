@@ -49,8 +49,8 @@ export class ArbiterAgent {
         maxTokens: 2500,
       });
 
-      const responseText = typeof response.content === 'string' 
-        ? response.content 
+      const responseText = typeof response.content === 'string'
+        ? response.content
         : JSON.stringify(response.content);
 
       return this.parseFinalization(responseText, proposal, review);
@@ -140,7 +140,7 @@ DECISION PRINCIPLES:
     const concernsFormatted = review.concerns
       .sort((a, b) => {
         const severity = { critical: 0, high: 1, medium: 2, low: 3 };
-        return (severity[a.severity as keyof typeof severity] || 4) - 
+        return (severity[a.severity as keyof typeof severity] || 4) -
                (severity[b.severity as keyof typeof severity] || 4);
       })
       .map(c => `[${c.severity.toUpperCase()}] ${c.title}: ${c.description}${c.suggestion ? ' → ' + c.suggestion : ''}`)

@@ -17,7 +17,9 @@ import type {
   DebateMessage,
   ExecutionProposal,
   CriticalReview,
-  FinalExecutionPlan
+  FinalExecutionPlan,
+  DebatePhase,
+  DebateEventEmitterCallback
 } from './debate-types';
 
 const DEFAULT_CONFIG: DebateEngineConfig = {
@@ -72,6 +74,15 @@ export class PeerAgentDebateEngine {
       this.addTranscriptEntry('vanguard', 'proposal', proposal);
       this.log(`✅ Vanguard proposed ${proposal.steps.length} steps`);
 
+      // Emit vanguard_complete event in real-time
+      if (this.config.onPhaseComplete) {
+        try {
+          await this.config.onPhaseComplete('vanguard', proposal);
+        } catch (err) {
+          this.log(`⚠️  Error emitting vanguard event: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Phase 2: Phantom critiques
       this.log('\n🔍 Phase 2: Phantom reviews plan critically...');
       const review = await this.runWithTimeout(
@@ -85,6 +96,15 @@ export class PeerAgentDebateEngine {
       } critical)`);
       this.log(`   Assessment: ${review.overallAssessment}`);
 
+      // Emit phantom_complete event in real-time
+      if (this.config.onPhaseComplete) {
+        try {
+          await this.config.onPhaseComplete('phantom', proposal, review);
+        } catch (err) {
+          this.log(`⚠️  Error emitting phantom event: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Phase 3: Arbiter arbitrates
       this.log('\n⚖️  Phase 3: Arbiter arbitrates and finalizes...');
       const finalPlan = await this.runWithTimeout(
@@ -97,6 +117,15 @@ export class PeerAgentDebateEngine {
       this.log(`   Risk Level: ${finalPlan.overallRiskAssessment}`);
       this.log(`   Addressed Concerns: ${finalPlan.addressedConcerns.length}`);
       this.log(`   Remaining Risks: ${finalPlan.remainingRisks.length}`);
+
+      // Emit arbiter_complete event in real-time
+      if (this.config.onPhaseComplete) {
+        try {
+          await this.config.onPhaseComplete('arbiter', proposal, review, finalPlan);
+        } catch (err) {
+          this.log(`⚠️  Error emitting arbiter event: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
 
       // Check execution feasibility
       if (finalPlan.goNogo === 'no-go') {

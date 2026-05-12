@@ -5,6 +5,7 @@
  * Events are sent via IPC to the renderer process.
  */
 
+import { BrowserWindow } from 'electron';
 import type { DebateResult, DebateMessage } from './debate-types';
 
 export interface DebateStreamEvent {
@@ -32,13 +33,31 @@ export class DebateEventEmitter {
   }
 
   /**
+   * Broadcast a debate event to ALL renderer windows.
+   * Used by the debate-chamber graph node which doesn't have access to a specific IPC event.
+   */
+  static broadcastDebateEvent(debateEvent: DebateStreamEvent) {
+    console.log('[DebateEventEmitter] Broadcasting debate event:', debateEvent.type);
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      try {
+        if (!win.isDestroyed()) {
+          win.webContents.send('debate:stream', debateEvent);
+        }
+      } catch (err) {
+        console.error('[DebateEventEmitter] Error broadcasting to window:', err);
+      }
+    }
+  }
+
+  /**
    * Format a debate result for sending to frontend.
    */
   static formatDebateResultForFrontend(debateResult: DebateResult) {
     return {
       debateId: debateResult.debateId,
       timestamp: debateResult.timestamp,
-      
+
       // Proposal summary (Vanguard)
       proposal: {
         id: debateResult.proposal.proposalId,
@@ -48,7 +67,7 @@ export class DebateEventEmitter {
         stepCount: debateResult.proposal.steps.length,
         assumptions: debateResult.proposal.assumptionsAndConstraints,
       },
-      
+
       // Review summary (Phantom)
       review: {
         id: debateResult.review.reviewId,
@@ -63,7 +82,7 @@ export class DebateEventEmitter {
           suggestion: c.suggestion,
         })),
       },
-      
+
       // Final plan (Arbiter)
       finalPlan: {
         id: debateResult.finalPlan.planId,

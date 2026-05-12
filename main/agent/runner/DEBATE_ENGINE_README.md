@@ -250,7 +250,7 @@ if (complexity === 'complex' || complexity === 'moderate') {
     history,
     complexity
   );
-  
+
   if (debatePlan) {
     // Use debate-approved plan
     await executeDebatePlan(debatePlan);
@@ -336,7 +336,7 @@ describe('PeerAgentDebateEngine', () => {
   it('should run full debate for complex task', async () => {
     const engine = new PeerAgentDebateEngine(mockClient);
     const result = await engine.debate(mockContext);
-    
+
     expect(result.proposal).toBeDefined();
     expect(result.review).toBeDefined();
     expect(result.finalPlan).toBeDefined();
@@ -397,7 +397,7 @@ describe('PeerAgentDebateEngine', () => {
 class PeerAgentDebateEngine {
   // Main method
   async debate(context: DebateContext): Promise<DebateResult>
-  
+
   // Utilities
   static shouldDebate(complexity: string, threshold: string): boolean
   exportResult(result: DebateResult): string

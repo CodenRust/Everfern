@@ -584,7 +584,7 @@ export class AgentRunner {
       toolDefs,
       this.tools,
     ));
-    console.log('[AgentRunner] ✅ Graph built (or retrieved from cache)');
+    console.log('[AgentRunner] ✅ Graph built');
 
     await new Promise(resolve => setImmediate(resolve));
 
@@ -727,6 +727,13 @@ export class AgentRunner {
         // Track when first thought event occurs
         if (event.type === 'thought') {
           durationTracker.onThoughtStart();
+        }
+
+        if (event.type === 'debate_event') {
+          console.log('[Runner] 📣 Yielding debate_event:', (event as any).debateEvent?.type);
+        }
+        if (event.type === 'chunk') {
+          console.log('[Runner] Yielding chunk event (length:', (event.content || '').length, ')');
         }
 
         yield event;

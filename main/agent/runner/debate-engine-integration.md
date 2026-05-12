@@ -1,6 +1,6 @@
 /**
  * EverFern Desktop — Peer Agent Debate Engine Integration Guide
- * 
+ *
  * This guide explains how to integrate the Peer Agent Debate Engine
  * into the existing agent execution pipeline.
  */
@@ -43,7 +43,7 @@ export class AgentRunner {
   constructor(client: AIClient, config: Partial<AgentRunnerConfig> = {}) {
     // ... existing code ...
     this.tools = getBaseTools(this);
-    
+
     // Initialize debate engine
     this.debateEngine = new PeerAgentDebateEngine(client, {
       enableDebate: true,
@@ -76,10 +76,10 @@ export async function classifyIntent(
   history: any[] = []
 ): Promise<TriageResult> {
   // ... existing classification code ...
-  
+
   // After getting intent, determine complexity
   const complexity = await analyzeComplexity(userInput, client);
-  
+
   return {
     intent,
     confidence,
@@ -92,15 +92,15 @@ async function analyzeComplexity(
   userInput: string,
   client: AIClient
 ): Promise<'simple' | 'moderate' | 'complex'> {
-  const systemPrompt = `You are a task complexity analyzer. 
+  const systemPrompt = `You are a task complexity analyzer.
   Classify the complexity of this task as: simple, moderate, or complex.
-  
+
   simple: Straightforward, single operation
   moderate: Multiple steps, some coordination needed
   complex: Many interdependencies, requires careful planning
-  
+
   Respond with JSON: {"complexity": "simple|moderate|complex"}`;
-  
+
   const response = await client.chat({
     messages: [
       { role: 'system', content: systemPrompt },
@@ -109,7 +109,7 @@ async function analyzeComplexity(
     temperature: 0,
     maxTokens: 100,
   });
-  
+
   try {
     const json = JSON.parse(
       typeof response.content === 'string' ? response.content : '{}'
@@ -136,19 +136,19 @@ public async maybeRunDebate(
   complexity: 'simple' | 'moderate' | 'complex'
 ): Promise<FinalExecutionPlan | null> {
   if (!this.debateEngine) return null;
-  
+
   const shouldDebate = PeerAgentDebateEngine.shouldDebate(
     complexity,
     this.debateEngine.config?.complexityThreshold || 'moderate'
   );
-  
+
   if (!shouldDebate) {
     console.log('[AgentRunner] Skipping debate for simple task');
     return null;
   }
-  
+
   console.log('[AgentRunner] 🎭 Activating Peer Agent Debate Engine');
-  
+
   const context: DebateContext = {
     taskId: crypto.randomUUID(),
     userInput,
@@ -157,20 +157,20 @@ public async maybeRunDebate(
     workspaceContext: this.getWorkspaceContext(),
     constraints: this.getTaskConstraints(),
   };
-  
+
   try {
     const debateResult = await this.debateEngine.debate(context);
-    
+
     // Store debate result for audit trail
     this.storeLast DebateResult(debateResult);
-    
+
     // If plan is not executable, throw error
     if (debateResult.finalPlan.goNogo === 'no-go') {
       throw new Error(
         `Debate concluded plan is not executable: ${debateResult.finalPlan.explanation}`
       );
     }
-    
+
     return debateResult.finalPlan;
   } catch (error) {
     console.error('[AgentRunner] Debate engine failed:', error);
@@ -215,21 +215,21 @@ async function executeTask(userInput: string, history: Array<...>) {
   // 1. Triage the task
   const triageResult = await classifyIntent(userInput, aiClient, history);
   console.log(\`Task complexity: \${triageResult.complexity}\`);
-  
+
   // 2. Possibly run debate for complex tasks
   const debateResult = await agentRunner.maybeRunDebate(
     userInput,
     history,
     triageResult.complexity
   );
-  
+
   if (debateResult) {
     // Use debate-approved plan
     console.log('Using debate-approved execution plan');
     const approvedPlan = debateResult;
     return await executeAuditedPlan(approvedPlan);
   }
-  
+
   // 3. Fall back to normal execution
   console.log('Using standard execution path');
   const taskAnalysis = await analyzeTask(userInput);
@@ -264,15 +264,15 @@ function convertDebatePlanToSteps(
 
 async function executeAuditedPlan(finalPlan: FinalExecutionPlan): Promise<string> {
   const steps = convertDebatePlanToSteps(finalPlan);
-  
+
   console.log(\`Executing \${finalPlan.goNogo} plan with \${steps.length} steps\`);
   console.log('Risk Level: ' + finalPlan.overallRiskAssessment);
-  
+
   if (finalPlan.goNogo === 'proceed-with-caution') {
     console.log('Key things to watch:');
     finalPlan.executionGuidance.forEach(g => console.log('  - ' + g));
   }
-  
+
   for (const step of steps) {
     console.log(\`Executing: \${step.description}\`);
     // Execute each step, applying mitigations
@@ -287,7 +287,7 @@ async function executeAuditedPlan(finalPlan: FinalExecutionPlan): Promise<string
       }
     }
   }
-  
+
   return 'Plan executed successfully';
 }
 ```
@@ -304,7 +304,7 @@ Make it configurable:
 interface AgentRunnerConfig {
   maxIterations: number;
   enableTerminal: boolean;
-  
+
   // NEW: Debate Engine Config
   enableDebateEngine?: boolean;
   debateComplexityThreshold?: 'simple' | 'moderate' | 'complex';
@@ -342,7 +342,7 @@ describe('PeerAgentDebateEngine', () => {
       enableDebate: true,
       complexityThreshold: 'moderate',
     });
-    
+
     const context = {
       taskId: 'test-task',
       userInput: 'Refactor my entire codebase to use TypeScript',
@@ -351,20 +351,20 @@ describe('PeerAgentDebateEngine', () => {
       workspaceContext: 'Current project: MyApp (Next.js)',
       constraints: ['Cannot break existing functionality'],
     };
-    
+
     const result = await engine.debate(context);
-    
+
     expect(result.proposal).toBeDefined();
     expect(result.review).toBeDefined();
     expect(result.finalPlan).toBeDefined();
     expect(result.finalPlan.goNogo).toMatch(/go|proceed-with-caution|no-go/);
   });
-  
+
   it('should detect critical issues and set no-go', async () => {
     // Test scenario where Phantom finds showstoppers
     // and Arbiter correctly sets no-go
   });
-  
+
   it('should timeout gracefully', async () => {
     // Test that timeouts are handled correctly
   });

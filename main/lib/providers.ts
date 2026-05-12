@@ -60,7 +60,10 @@ export const PROVIDER_MODELS: Record<ProviderType, string[]> = {
     'gemma4:31b-cloud',
     'kimi-k2.5:cloud',
     'minimax-m2.7:cloud',
-    'glm-5:cloud'
+    'glm-5:cloud',
+    'deepseek-v3.2:cloud',
+    'deepseek-v4-flash:cloud',
+    'deepseek-v4-pro:cloud',
   ],
   lmstudio: [], // populated dynamically at runtime
   everfern: [

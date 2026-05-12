@@ -113,6 +113,7 @@ When you see [Current state starts here], focus on the following:
 
 For browser interactions:
 - To navigate: go_to_url with url="..."
+- To go back to previous page: go_back
 - To click: click_element with ref="eN"
 - To type: input_text with ref="eN", text="..."
 - To press a key (e.g. Enter to submit): press_key with key="Enter" (optionally ref="eN" to press on a specific element)
